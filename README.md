@@ -97,12 +97,26 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
    have no y-ticks: a scale bar gives the intensity scale, and each trace is
    labelled at its right-hand end. The selected spectrum is drawn heavier.
    A sample holding a single spectrum appears as one row. View controls:
-   * **Group by** — *Element name*, or *Energy range* (spectra whose x-ranges
-     overlap by at least half share a panel).
+   * **Group by** — *Element name*, *Energy range* (spectra whose x-ranges
+     overlap by at least half share a panel), or *Element, per sample* /
+     *Element, per file* (one panel per depth or time series).
    * **Normalise** — *None*, *Max = 1*, *Area = 1*, or *At cursor* (click a panel
      to set an energy; every spectrum in it is scaled to match there).
    * **Offset** — the gap between stacked traces (0 overlays them);
      **Reverse stack** flips the order.
+   * **View** — *Stack* (the default), *Waterfall 3D* (energy, trace and
+     intensity in a rotatable 3-D plot) or *Heatmap* (intensity as colour
+     against energy and trace, with a colour bar). Both also honour
+     **Normalise**, the panel paging and the trace window, and print to PDF.
+   * **Z axis** (waterfall / heatmap) — what the trace axis shows: *Auto*
+     (etch time if the file recorded it, else etch level, else acquisition
+     time, else trace order), or pick one. Traces are ordered by it, surface /
+     earliest first; if it is unavailable for a group the status bar says what
+     was used instead.
+   * **Energy** — *Binding* or *Kinetic* (KE = hν − BE; needs the photon
+     energy, otherwise the spectrum stays on binding energy and the status bar
+     says so). **KE top axis** mirrors the binding-energy axis along the top as
+     kinetic energy.
 4. **How many, and scrolling.**
    * **Panels per page** — Auto, 1, 2, 4, 6, 9, 12 or 16. Scroll the panels with
      the mouse wheel, the scrollbar beside the plot, PageUp/PageDown, Home/End or
@@ -115,7 +129,11 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
    (sample, acquisition and region, copyable) and the **Images** / **Stage map**
    tabs, which only appear when the loaded files have images or stage positions. *Overlay
    positions* on a photo needs a one-time **Calibrate…** step (image centre in
-   mm, mm per pixel, flip/rotation), saved in your home folder.
+   mm, mm per pixel, flip/rotation), saved in your home folder. Select several
+   rows (or a whole sample or file) and Details is tidied: what is the same for
+   all of them (photon energy, lens mode, …) is stated once, and settings that
+   differ are grouped by value — e.g. *Pass energy: 40 · Mo 3d, S 2p, C 1s /
+   160 · Survey*. The metadata PDF does the same per sample.
 6. **Colour themes** — *Light* (the default), *Dark* (the plot sits recessed
    below the chrome, like an instrument screen), *Midnight*, *Solarized Light*,
    *High contrast*, and *System* (the native OS look). Change them from the
@@ -139,11 +157,14 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
    dialog). *Metadata to CSV / PDF* saves per-sample acquisition metadata; with
    several files open, select a row of the file you want first.
 
-## Stacked / waterfall plots
+## Stacked / waterfall / heatmap plots
 
-There is no separate stacking window: tick several spectra — e.g. depth-profile
+There is no separate plotting window: tick several spectra — e.g. depth-profile
 levels, or the same region across samples and files — and they stack on one
 panel. Combine with *Normalise → At cursor* to compare peak-shape changes.
+Switch **View** to *Waterfall 3D* or *Heatmap* to see a whole depth or time
+series at once; use *Group by → Element, per sample* to keep each sample's
+series on its own panel.
 
 ## Depth profiles
 

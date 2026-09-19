@@ -68,6 +68,8 @@ from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
                      UnsupportedFormat)
 import fonts
 import themes
+import viewdata
+import metasummary
 from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
                     ramp)
 from pdf_preview import PdfPreview, HAVE_PDF, open_external
@@ -265,8 +267,21 @@ def group_regions(regions, mode="name"):
     mode "name":  same element/region name (e.g. every 'C 1s').
     mode "range": x-axis spans that overlap by >= 50 % (intersection over
                   union), whatever the name.
+    mode "sample": same element name within one sample (one panel per sample
+                  and element, e.g. one depth profile each).
+    mode "file":  same element name within one file.
     Returns an ordered list of (label, [regions]); order is first appearance.
     """
+    if mode in ("sample", "file"):
+        keyed = {}
+        for r in regions:
+            part = r.sample if mode == "sample" else r.source
+            if mode == "file" and part:
+                part = os.path.splitext(part)[0]
+            keyed.setdefault((normalise_name(r.name), part or ""),
+                             (r.name, part or "", []))[2].append(r)
+        return [(f"{name} · {part}" if part else name, rs)
+                for name, part, rs in keyed.values()]
     if mode == "range":
         groups = []
         for r in regions:
@@ -315,10 +330,25 @@ def norm_factor(r, mode, cursor=None):
     return 1.0
 
 
+def add_ke_axis(ax, hv, muted, label=True):
+    """Mirror a binding-energy axis along the top as kinetic energy
+    (KE = hν − BE)."""
+    def flip(x):
+        return hv - x
+    sec = ax.secondary_xaxis("top", functions=(flip, flip))
+    sec.spines["top"].set_visible(True)
+    sec.spines["top"].set_color(muted)
+    sec.tick_params(labelsize=8)
+    if label:
+        sec.set_xlabel("Kinetic Energy (eV)", fontsize=8, color=muted)
+    return sec
+
+
 def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
                title="", subtitle="", selected=(), multi_file=False,
                first_col=True, bottom_row=True, accent="#0F6B8C",
-               muted="#56636E"):
+               muted="#56636E", scale="Binding", ke_top=False,
+               top_row=False):
     """Draw one panel: a single spectrum plain, several stacked by y offset.
 
     Stacked panels drop the (meaningless) y ticks for a scale bar and label
@@ -331,7 +361,9 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
     spans = [(max(v) - min(v)) for v in normed if v]
     step = offset * (max(spans) if spans else 1.0) if stacked else 0.0
     r0 = regs[0]
-    binding = r0.energy_label.lower().startswith("binding")
+    axes_x = [viewdata.energy_axis(r, scale) for r in regs]
+    a0 = axes_x[0]
+    binding = a0.invert
     show_name = len({normalise_name(r.name) for r in regs}) > 1
     label_every = max(1, math.ceil(n / 12))
     ends = []
@@ -339,17 +371,19 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
         yoff = [y + i * step for y in v]
         col = colours[i] if colours else None
         sel = id(r) in selected
-        ax.plot(r.energy, yoff, color=col,
+        ax.plot(axes_x[i].x, yoff, color=col,
                 lw=1.9 if sel else (0.8 if n > 12 else 1.1),
                 zorder=3 if sel else 2)
         if stacked and i % label_every == 0:
-            xs = r.energy
+            xs = axes_x[i].x
             j = (min if binding else max)(range(len(xs)), key=xs.__getitem__)
             lo, hi = max(0, j - 2), min(len(yoff), j + 3)
             ends.append((sum(yoff[lo:hi]) / (hi - lo),
                          trace_label(r, multi_file, show_name), col))
     if norm == "At cursor" and cursor is not None:
-        ax.axvline(cursor, color=accent, ls="--", lw=0.9)
+        cx = (r0.photon_energy - cursor
+              if a0.label == "Kinetic Energy" else cursor)
+        ax.axvline(cx, color=accent, ls="--", lw=0.9)
     ax.margins(x=0.02, y=0.06)
     ax.relim()
     ax.autoscale_view()
@@ -379,12 +413,113 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
         ax.set_title(subtitle, loc="right", fontsize=8, fontweight="normal",
                      color=muted)
     if bottom_row:
-        ax.set_xlabel(f"{r0.energy_label.capitalize()} ({r0.energy_units})")
+        ax.set_xlabel(f"{a0.label.capitalize()} ({a0.units})")
     if first_col and not stacked:
         ax.set_ylabel(f"{r0.count_label} ({r0.count_units})" if norm == "None"
                       else f"{r0.count_label} (normalised)")
     if binding:
         ax.invert_xaxis()
+    if ke_top and binding and top_row and viewdata.photon_energy(regs):
+        add_ke_axis(ax, viewdata.photon_energy(regs), muted)
+
+
+def _titles(ax, title, subtitle, muted):
+    ax.set_title(title, loc="left")
+    if subtitle:
+        ax.set_title(subtitle, loc="right", fontsize=8, fontweight="normal",
+                     color=muted)
+
+
+def draw_heatmap(fig, ax, regs, zi, norm="None", heat=None, title="",
+                 subtitle="", first_col=True, bottom_row=True, top_row=False,
+                 muted="#56636E", scale="Binding", ke_top=False):
+    """One panel as a heat map: energy across, ``zi`` (etch time / level,
+    acquisition time or trace order, ascending downwards) down, intensity as
+    colour. ``regs`` must already be in z order (see viewdata.z_sorted)."""
+    import numpy as np
+    from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib.ticker import MaxNLocator
+    axes_x = [viewdata.energy_axis(r, scale) for r in regs]
+    a0, r0 = axes_x[0], regs[0]
+    ys = [[y / norm_factor(r, norm) for y in r.counts] for r in regs]
+    grid, rows = viewdata.build_matrix([a.x for a in axes_x], ys)
+    cmap = LinearSegmentedColormap.from_list("heat", heat or ["#FFFFFF",
+                                                              "#000000"])
+    cmap.set_bad((0, 0, 0, 0))                # outside a trace's range
+    mesh = ax.pcolormesh(viewdata.edges(list(grid)),
+                         viewdata.edges(list(zi.values)),
+                         np.ma.masked_invalid(rows), cmap=cmap,
+                         shading="flat", rasterized=True)
+    ax.set_xlim(grid[0], grid[-1])
+    ax.set_ylim(max(viewdata.edges(list(zi.values))),
+                min(viewdata.edges(list(zi.values))))     # first trace on top
+    if a0.invert:
+        ax.invert_xaxis()
+    if zi.mode in ("Trace order", "Etch level"):
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.set_ylabel(zi.label)
+    _titles(ax, title, subtitle, muted)
+    if bottom_row:
+        ax.set_xlabel(f"{a0.label.capitalize()} ({a0.units})")
+    cb = fig.colorbar(mesh, ax=ax, pad=0.02, fraction=0.05, aspect=24)
+    cb.outline.set_visible(False)
+    cb.ax.tick_params(labelsize=7, length=2)
+    cb.set_label("Normalised" if norm != "None"
+                 else f"{r0.count_label} ({r0.count_units})", fontsize=8)
+    if ke_top and a0.invert and top_row and viewdata.photon_energy(regs):
+        add_ke_axis(ax, viewdata.photon_energy(regs), muted)
+    return mesh
+
+
+def draw_waterfall3d(ax, regs, zi, norm="None", colours=None, title="",
+                     subtitle="", pal=None, scale="Binding"):
+    """One panel as a 3-D waterfall: energy (x), trace z (y), intensity
+    (vertical). ``ax`` must be a 3-D axes; ``regs`` in z order."""
+    from matplotlib.collections import PolyCollection
+    from matplotlib.colors import to_rgba
+    pal = pal or themes.PALETTES[themes.DEFAULT]
+    axes_x = [viewdata.energy_axis(r, scale) for r in regs]
+    a0, r0 = axes_x[0], regs[0]
+    ys = [[y / norm_factor(r, norm) for y in r.counts] for r in regs]
+    floor = min(min(v) for v in ys if v)
+    n = len(regs)
+    for i, (a, v, z) in enumerate(zip(axes_x, ys, zi.values)):
+        col = colours[i] if colours else None
+        verts = [(a.x[0], floor)] + list(zip(a.x, v)) + [(a.x[-1], floor)]
+        ax.add_collection3d(
+            PolyCollection([verts], facecolors=[to_rgba(col or "#888", 0.10)],
+                           edgecolors="none"), zs=z, zdir="y")
+        ax.plot(a.x, [z] * len(a.x), v, color=col,
+                lw=0.8 if n > 12 else 1.1)
+    xs = [x for a in axes_x for x in a.x]
+    ax.set_xlim(min(xs), max(xs))
+    zlo, zhi = min(zi.values), max(zi.values)
+    pad = 0.5 if zhi == zlo else 0.0
+    ax.set_ylim(zlo - pad, zhi + pad)
+    ax.set_zlim(floor, max(max(v) for v in ys if v))
+    if a0.invert:
+        ax.invert_xaxis()
+    _titles(ax, title, subtitle, pal["muted"])
+    ax.set_xlabel(f"{a0.label.capitalize()} ({a0.units})", labelpad=2)
+    ax.set_ylabel(zi.label, labelpad=2)
+    ax.text2D(0.0, 0.9, "Normalised" if norm != "None"
+              else f"{r0.count_label} ({r0.count_units})",
+              transform=ax.transAxes, fontsize=8, color=pal["muted"])
+    ax.tick_params(labelsize=7, pad=0)
+    ax.view_init(elev=24, azim=-58)
+    try:                                   # fill the panel (matplotlib >= 3.3)
+        ax.set_box_aspect((1.5, 1.0, 0.75), zoom=1.1)
+    except Exception:
+        pass
+    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
+        try:
+            axis.set_pane_color(to_rgba(pal["plot_bg"], 0.0))
+            axis.label.set_color(pal["plot_fg"])
+            axis._axinfo["grid"]["color"] = to_rgba(pal["plot_grid"])
+            axis._axinfo["axisline"]["color"] = to_rgba(pal["muted"])
+        except Exception:
+            pass
+    ax.tick_params(colors=pal["muted"])
 
 
 class CalibrationPanel(ttk.LabelFrame):
@@ -491,7 +626,10 @@ class Workspace:
     PANEL_CHOICES = ["Auto", "1", "2", "4", "6", "9", "12", "16"]
     TRACE_CHOICES = ["All", "3", "5", "10", "20", "50", "100"]
     NORM_MODES = ["None", "Max = 1", "Area = 1", "At cursor"]
-    GROUP_MODES = {"Element name": "name", "Energy range": "range"}
+    GROUP_MODES = {"Element name": "name", "Energy range": "range",
+                   "Element, per sample": "sample",
+                   "Element, per file": "file"}
+    VIEW_MODES = ["Stack", "Waterfall 3D", "Heatmap"]
 
     def __init__(self, root):
         self.root = root
@@ -529,6 +667,8 @@ class Workspace:
         self._open = {}             # id(node) -> expanded?
         self._render_job = None
         self._axmap = {}
+        self._axhv = {}
+        self._view_notes = []
         self._thumb_imgs = []
         self._view_photo = None
         self._cur_image = None
@@ -633,6 +773,7 @@ class Workspace:
         self._build_side_tabs()
         self._panes = {"tree": self.tree_pane, "info": self.info_pane}
         self._hidden = {}           # pane name -> width when hidden
+        self._restore_widths = {}   # pane name -> width to re-apply once shown
         self.root.bind("<F11>", lambda e: self.toggle_focus())
 
     def _build_toolbar(self):
@@ -741,21 +882,32 @@ class Workspace:
                 self.outer.insert(0, pane, weight=0)
             else:
                 self.outer.add(pane, weight=0)
-            self.root.after_idle(lambda: self._set_width(name, width))
+            self._restore_widths[name] = width
+            self.root.after_idle(self._apply_widths)
         else:                                        # hide
             self._hidden[name] = max(150, pane.winfo_width())
             self.outer.forget(pane)
         self.show_vars[name].set(name not in self._hidden)
 
-    def _set_width(self, name, width):
+    def _apply_widths(self, retry=True):
+        """Put re-shown panes back at their old widths in one pass (tree
+        first, then info) once the paned window has laid the panes out."""
+        if not self._restore_widths:
+            return
         try:
-            if name == "tree":
-                self.outer.sashpos(0, width)
-            else:
-                total = self.outer.winfo_width()
-                self.outer.sashpos(len(self.outer.panes()) - 2, total - width)
+            self.outer.update_idletasks()
+            total = self.outer.winfo_width()
+            n = len(self.outer.panes())
+            if "tree" in self._restore_widths:
+                self.outer.sashpos(0, self._restore_widths["tree"])
+            if "info" in self._restore_widths:
+                self.outer.sashpos(n - 2, total - self._restore_widths["info"])
         except tk.TclError:
             pass
+        if retry:                    # layout may still be settling; apply again
+            self.root.after(60, lambda: self._apply_widths(False))
+        else:
+            self._restore_widths.clear()
 
     def toggle_focus(self):
         """Hide tree + info column so the plot fills the window (and back)."""
@@ -801,6 +953,10 @@ class Workspace:
         self.preview.close_document()
         if self._pdf_dir:
             shutil.rmtree(self._pdf_dir, ignore_errors=True)
+        cfg["view_mode"] = self.view_var.get()
+        cfg["energy_scale"] = self.scale_var.get()
+        cfg["ke_top"] = bool(self.ke_var.get())
+        cfg["z_axis"] = self.z_var.get()
         cfg["group_by"] = self.group_var.get()
         cfg["norm"] = self.norm_var.get()
         cfg["offset"] = float(self.offset_var.get())
@@ -865,13 +1021,14 @@ class Workspace:
         ctl.pack(side="top", fill="x", padx=10, pady=(8, 2))
         ttk.Label(ctl, text="Group by").pack(side="left")
         self.group_var = tk.StringVar(value=cfg.get("group_by", "Element name"))
-        gb = ttk.Combobox(ctl, textvariable=self.group_var, width=12,
+        gb = ttk.Combobox(ctl, textvariable=self.group_var, width=17,
                           state="readonly", values=list(self.GROUP_MODES))
         gb.pack(side="left", padx=(6, 12))
         gb.bind("<<ComboboxSelected>>",
                 lambda e: self._schedule_render(reset_page=True))
-        tip(gb, "Which spectra share a panel: the same element name, or "
-                "overlapping energy ranges.")
+        tip(gb, "Which spectra share a panel: the same element name, "
+                "overlapping energy ranges, or the same element within one "
+                "sample / file (one depth or time series each).")
 
         ttk.Label(ctl, text="Normalise").pack(side="left")
         self.norm_var = tk.StringVar(value=cfg.get("norm", "None"))
@@ -893,6 +1050,55 @@ class Workspace:
         self.offset_lbl.pack(side="left", padx=(0, 10))
         tip(sc, "Vertical gap between stacked spectra. 0 overlays them.")
         self.offset_lbl.config(text=f"{self.offset_var.get():.1f}×")
+        self.offset_sc = sc
+
+        # second view row: how the traces are drawn, and the axes
+        ctl2 = ttk.Frame(parent)
+        ctl2.pack(side="top", fill="x", padx=10, pady=(0, 2))
+        ttk.Label(ctl2, text="View").pack(side="left")
+        view = cfg.get("view_mode", "Stack")
+        self.view_var = tk.StringVar(
+            value=view if view in self.VIEW_MODES else "Stack")
+        vb = ttk.Combobox(ctl2, textvariable=self.view_var, width=12,
+                          state="readonly", values=self.VIEW_MODES)
+        vb.pack(side="left", padx=(6, 12))
+        vb.bind("<<ComboboxSelected>>", lambda e: self._on_view_changed())
+        tip(vb, "Stack: offset traces. Waterfall 3D: energy, trace and "
+                "intensity in a rotatable 3-D plot. Heatmap: intensity as "
+                "colour against energy and trace.")
+
+        ttk.Label(ctl2, text="Energy").pack(side="left")
+        scale = cfg.get("energy_scale", "Binding")
+        self.scale_var = tk.StringVar(
+            value=scale if scale in viewdata.ENERGY_SCALES else "Binding")
+        eb = ttk.Combobox(ctl2, textvariable=self.scale_var, width=8,
+                          state="readonly", values=list(viewdata.ENERGY_SCALES))
+        eb.pack(side="left", padx=(6, 8))
+        eb.bind("<<ComboboxSelected>>", lambda e: self._on_view_changed())
+        tip(eb, "Plot against binding energy or kinetic energy "
+                "(KE = photon energy − BE). Needs the photon energy.")
+        self.ke_var = tk.BooleanVar(value=bool(cfg.get("ke_top", False)))
+        self.ke_cb = ttk.Checkbutton(ctl2, text="KE top axis",
+                                     variable=self.ke_var,
+                                     command=self._on_view_changed)
+        self.ke_cb.pack(side="left", padx=(0, 12))
+        tip(self.ke_cb, "Mirror the binding-energy axis along the top as "
+                        "kinetic energy.")
+
+        ttk.Label(ctl2, text="Z axis").pack(side="left")
+        z = cfg.get("z_axis", "Auto")
+        self.z_var = tk.StringVar(
+            value=z if z in viewdata.Z_MODES else "Auto")
+        self.z_cb = ttk.Combobox(ctl2, textvariable=self.z_var, width=15,
+                                 state="readonly",
+                                 values=list(viewdata.Z_MODES))
+        self.z_cb.pack(side="left", padx=(6, 0))
+        self.z_cb.bind("<<ComboboxSelected>>",
+                       lambda e: self._on_view_changed())
+        tip(self.z_cb, "What the third axis of a waterfall / heatmap shows. "
+                       "Auto uses etch time, then level, then acquisition "
+                       "time, then trace order.")
+        self._sync_view_controls()
 
         # canvas + toolbar + contextual footer (bottom widgets are packed in
         # _layout_bottom so they can be shown and hidden in order)
@@ -970,6 +1176,18 @@ class Workspace:
             ttk.Label(parent, justify="left", padding=20,
                       text="matplotlib is not installed, so spectra cannot be "
                            "plotted.\n\n    pip install matplotlib").pack()
+
+    def _on_view_changed(self):
+        self._sync_view_controls()
+        self._schedule_render(reset_page=True)
+
+    def _sync_view_controls(self):
+        """Enable only the controls that act in the current view."""
+        stack = self.view_var.get() == "Stack"
+        self.offset_sc.state(["!disabled"] if stack else ["disabled"])
+        self.z_cb.state(["disabled"] if stack else ["!disabled", "readonly"])
+        self.ke_cb.state(["disabled"] if self.scale_var.get() == "Kinetic"
+                         else ["!disabled"])
 
     def _on_offset(self, value):
         self.offset_lbl.config(text=f"{float(value):.1f}×")
@@ -1361,9 +1579,21 @@ class Workspace:
                         if id(r) in self.checked and r.decodable and r.counts]
         return out
 
+    def _date_of(self, r):
+        p = self.region_parser.get(id(r))
+        return p.date_for_region(r) if p else r.date
+
     def _groups(self):
         groups = group_regions(self._ticked_regions(),
                                self.GROUP_MODES[self.group_var.get()])
+        if self.view_var.get() != "Stack":
+            # series views read in z order (surface first / earliest first)
+            out = []
+            for k, rs in groups:
+                order, _z = viewdata.z_sorted(rs, self.z_var.get(),
+                                              self._date_of)
+                out.append((k, [rs[i] for i in order]))
+            return out
         if self.reverse.get():
             groups = [(k, rs[::-1]) for k, rs in groups]
         return groups
@@ -1488,7 +1718,8 @@ class Workspace:
                   f"of {n_groups}") if n_groups > npp else "")
         self.hint.config(
             text="Click a panel to set the energy to match at."
-            if self.norm_var.get() == "At cursor" and n_spec else "")
+            if (self.norm_var.get() == "At cursor" and n_spec
+                and self.view_var.get() == "Stack") else "")
         self._set_scrollbar(HAVE_MPL and n_groups > npp)
         if HAVE_MPL:
             self.fig.clear()
@@ -1522,19 +1753,24 @@ class Workspace:
         multi = len(self.docs) > 1
         norm = self.norm_var.get()
         offset = float(self.offset_var.get())
+        view = self.view_var.get()
+        scale = self.scale_var.get()
+        ke_top = bool(self.ke_var.get()) and scale == "Binding"
         selected = {id(r) for r in self.sel_regions}
-        axmap, stacked_axes = {}, []
+        axmap, stacked_axes, axhv = {}, [], {}
+        notes = []
+        if fig is self.fig:
+            self._view_notes = notes
         for i, (key, rs) in enumerate(chunk):
-            ax = fig.add_subplot(rows, cols, i + 1)
             s = min(start, len(rs) - limit) if limit and len(rs) > limit else 0
             vis = rs[s:s + limit] if limit and len(rs) > limit else rs
             colours = self.trace_colours(rs, pal)[s:s + len(vis)]
-            cur = None
-            if norm == "At cursor":
-                cur = self.cursors.get(key)
-                if cur is None:
-                    e = vis[0].energy
-                    cur = self.cursors[key] = (e[0] + e[-1]) / 2.0
+            if scale == "Kinetic" and not all(
+                    viewdata.energy_axis(r, scale).ok for r in vis):
+                notes.append("no photon energy for some spectra: shown "
+                             "as binding energy")
+            if ke_top and viewdata.mixed_photon_energy(vis):
+                notes.append("photon energies differ: KE axis uses the first")
             if len(rs) == 1:
                 title = rs[0].name
                 subtitle = rs[0].sample
@@ -1542,13 +1778,49 @@ class Workspace:
                 title = key
                 subtitle = (f"{len(rs)} spectra" if len(vis) == len(rs)
                             else f"{s + 1}–{s + len(vis)} of {len(rs)}")
+            top_row = i < cols
+            if view != "Stack":
+                # groups arrive z-sorted (_groups), so this order is the
+                # identity and ``vis`` lines up with the z values
+                _order, zi = viewdata.z_sorted(rs, self.z_var.get(),
+                                               self._date_of)
+                zvis = viewdata.ZInfo(zi.values[s:s + len(vis)], zi.label,
+                                      zi.mode)
+                want = self.z_var.get()
+                if want != "Auto" and zi.mode != want:
+                    notes.append(f"'{want}' not usable for {key}: showing "
+                                 f"{zi.mode.lower()}")
+                if view == "Heatmap":
+                    ax = fig.add_subplot(rows, cols, i + 1)
+                    draw_heatmap(fig, ax, vis, zvis, norm, pal["heat"], title,
+                                 subtitle, first_col=(i % cols == 0),
+                                 bottom_row=(i + cols >= len(chunk)),
+                                 top_row=top_row, muted=pal["muted"],
+                                 scale=scale, ke_top=ke_top)
+                else:
+                    ax = fig.add_subplot(rows, cols, i + 1, projection="3d")
+                    draw_waterfall3d(ax, vis, zvis, norm, colours, title,
+                                     subtitle, pal, scale)
+                axmap[ax] = key
+                continue
+            ax = fig.add_subplot(rows, cols, i + 1)
+            cur = None
+            if norm == "At cursor":
+                cur = self.cursors.get(key)
+                if cur is None:
+                    e = vis[0].energy
+                    cur = self.cursors[key] = (e[0] + e[-1]) / 2.0
             draw_stack(ax, vis, offset, norm, cur, colours, title, subtitle,
                        selected, multi, first_col=(i % cols == 0),
                        bottom_row=(i + cols >= len(chunk)),
-                       accent=pal["accent"], muted=pal["muted"])
+                       accent=pal["accent"], muted=pal["muted"],
+                       scale=scale, ke_top=ke_top, top_row=top_row)
             axmap[ax] = key
+            axhv[ax] = viewdata.photon_energy(vis)
             if len(vis) > 1:
                 stacked_axes.append(ax)
+        if fig is self.fig:
+            self._axhv = axhv
         fig.tight_layout()
         # make room for the end-of-trace labels to the right of stacked axes
         gutter = 78 / 72.0 / fig.get_figwidth()
@@ -1559,13 +1831,17 @@ class Workspace:
 
     def _on_plot_click(self, event):
         if (self.norm_var.get() != "At cursor" or event.inaxes is None
-                or event.xdata is None):
+                or event.xdata is None or self.view_var.get() != "Stack"):
             return
         if str(getattr(self.toolbar, "mode", "")):
             return              # zoom / pan tool is active
         key = self._axmap.get(event.inaxes)
         if key is not None:
-            self.cursors[key] = float(event.xdata)
+            x = float(event.xdata)
+            hv = self._axhv.get(event.inaxes)
+            if self.scale_var.get() == "Kinetic" and hv:
+                x = hv - x              # cursors are kept as binding energy
+            self.cursors[key] = x
             self._schedule_render()
 
     # -- PDF output: shared builder, save, and in-app preview --------------
@@ -1722,6 +1998,9 @@ class Workspace:
                      f"{'panel' if n_groups == 1 else 'panels'}")
         else:
             text += "nothing ticked"
+        notes = list(dict.fromkeys(self._view_notes))
+        if notes and n_spec:
+            text += "  ·  " + "; ".join(notes)
         self.status.config(text=text)
 
     # -- side panels ----------------------------------------------------
@@ -1761,8 +2040,7 @@ class Workspace:
             t.insert("end", f"\t{v}\n", "row")
 
         parser = self.region_parser.get(id(regs[0]))
-        samples = sorted({(r.source, r.sample) for r in regs})
-        if len(regs) == 1 or len(samples) == 1:
+        if len(regs) == 1:
             base = parser.region_metadata(regs[0])
 
             def section(title, keys):
@@ -1778,23 +2056,61 @@ class Workspace:
                 "Operator", "Acquisition computer", "X-ray source", "Anode",
                 "Photon energy (eV)", "Source power (W)", "Charge neutraliser",
                 "Ion gun / sputtering"])
-            if len(regs) == 1:
-                r = regs[0]
-                section("Region", [
-                    "Region", "Pass energy (eV)", "Lens mode", "Aperture",
-                    "BE start (eV)", "BE end (eV)", "Step (eV)", "Dwell (s)",
-                    "Points", "Quality"])
-                if r.note:
-                    row("Note", r.note)
-            else:
-                head(f"{len(regs)} regions")
-                for r in regs[:60]:
-                    row(r.name, f"pass {r.pass_energy:g} eV"
-                        if r.pass_energy else "")
-                if len(regs) > 60:
-                    row("…", f"and {len(regs) - 60} more")
+            r = regs[0]
+            section("Region", [
+                "Region", "Pass energy (eV)", "Lens mode", "Aperture",
+                "BE start (eV)", "BE end (eV)", "Step (eV)", "Dwell (s)",
+                "Points", "Quality"])
+            if r.note:
+                row("Note", r.note)
         else:
-            head(f"{len(regs)} spectra from {len(samples)} samples")
+            self._metadata_many(regs, head, row)
+        t.config(state="disabled")
+
+    def _metadata_many(self, regs, head, row):
+        """Details for several spectra: say what is the same for all of them
+        once, and for settings that differ, which regions share each value."""
+        rows = []
+        for r in regs:
+            p = self.region_parser.get(id(r))
+            if p is not None:
+                rows.append((r.name, p.region_metadata(r)))
+        samples = sorted({(r.source, r.sample) for r in regs})
+        head(f"{len(regs)} spectra" + (f" from {len(samples)} samples"
+                                       if len(samples) > 1 else ""))
+        ms = metasummary
+        ident, _ = ms.summarise(rows, ms.IDENT_FIELDS)
+        if ident:
+            head("Sample" if len(samples) == 1 else "Shared")
+            for k, v in ident:
+                row(k, v)
+        run, run_var = ms.summarise(rows, [f for f in ms.RUN_FIELDS
+                                           if f != "Date acquired"])
+        when = ms.date_range(rows)
+        if run or when:
+            head("Acquisition")
+            if when:
+                row("Date acquired", when)
+            for k, v in run:
+                row(k, v)
+            for k, groups in run_var:              # e.g. two X-ray anodes
+                for i, (v, labels) in enumerate(groups):
+                    row(k if i == 0 else "",
+                        f"{v}  ·  {ms.compact_labels(labels)}")
+        common, varying = ms.summarise(rows, ms.SETTING_FIELDS)
+        if common or varying:
+            head("Scan settings")
+            for k, v in common:
+                row(k, f"{v}  ·  all")
+            for k, groups in varying:
+                for i, (v, labels) in enumerate(groups):
+                    row(k if i == 0 else "",
+                        f"{v}  ·  {ms.compact_labels(labels)}")
+        if len(samples) == 1:
+            head("Regions")
+            row("", ms.compact_labels([r.name for r in regs], limit=12))
+        else:
+            head("Samples")
             for src, s in samples[:80]:
                 rs = [r for r in regs if (r.source, r.sample) == (src, s)]
                 label = s or src or "(unnamed)"
@@ -1803,7 +2119,6 @@ class Workspace:
                 row(label, ", ".join(dict.fromkeys(r.name for r in rs)))
             if len(samples) > 80:
                 row("…", f"and {len(samples) - 80} more samples")
-        t.config(state="disabled")
 
     # -- images tab -----------------------------------------------------
     def _refresh_info(self):

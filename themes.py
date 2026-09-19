@@ -19,7 +19,7 @@ DEFAULT = "Light"
 # Every palette must define every key (checked by tests/test_themes.py).
 KEYS = ("bg", "panel", "fg", "muted", "accent", "entry", "select_bg",
         "select_fg", "border", "hint", "plot_bg", "plot_fg", "plot_grid",
-        "cycle", "box_edge", "box_fill", "box_mark")
+        "cycle", "heat", "box_edge", "box_fill", "box_mark")
 
 # Colour-blind-safe categorical data colours (Okabe-Ito derived); a
 # luminance-lifted set for dark backgrounds.
@@ -32,48 +32,63 @@ DATA_SOLARIZED = ["#268bd2", "#dc322f", "#859900", "#b58900", "#6c71c4",
 DATA_CONTRAST = ["#FFFF00", "#00FFFF", "#FF00FF", "#00FF00", "#FF8000",
                  "#FFFFFF", "#FF5555"]
 
+# Sequential ramps for heat maps (low -> high intensity). Light backgrounds
+# run light -> dark, dark backgrounds dark -> light, so weak signal always
+# recedes into the plot background; lightness changes monotonically.
+HEAT_LIGHT = ["#F3F7F9", "#BFDDE8", "#5FA8C7", "#1F6E9C", "#0B2F4F"]
+HEAT_DARK = ["#0C1014", "#3B1F5E", "#8A2A6B", "#E0533F", "#FCC24A", "#FFF6D6"]
+HEAT_MIDNIGHT = ["#0A1020", "#1D2A6B", "#2F6DB5", "#38BDF8", "#BDF0FF"]
+HEAT_SOLARIZED = ["#FFFDF5", "#EEE8D5", "#93C5D8", "#268BD2", "#073642"]
+HEAT_CONTRAST = ["#000000", "#3A00A0", "#D000D0", "#FFFF00", "#FFFFFF"]
+
 PALETTES = {
     "Light": {
         "bg": "#ECEFF1", "panel": "#E1E6E9", "fg": "#1A2127", "muted": "#56636E",
         "accent": "#0F6B8C", "entry": "#FFFFFF", "select_bg": "#CFE6EE",
         "select_fg": "#0A2530", "border": "#C5CDD3", "hint": "#A8321F",
         "plot_bg": "#FFFFFF", "plot_fg": "#1A2127", "plot_grid": "#DDE3E7",
-        "cycle": DATA_LIGHT, "box_edge": "#56636E", "box_fill": "#FFFFFF",
+        "cycle": DATA_LIGHT, "heat": HEAT_LIGHT,
+        "box_edge": "#56636E", "box_fill": "#FFFFFF",
         "box_mark": "#1A2127"},
     "Dark": {                                    # plot = recessed instrument screen
         "bg": "#12161A", "panel": "#1A2026", "fg": "#D7DEE4", "muted": "#8E9AA5",
         "accent": "#4CC2E0", "entry": "#0F1418", "select_bg": "#21495A",
         "select_fg": "#FFFFFF", "border": "#2A333B", "hint": "#FF8A80",
         "plot_bg": "#0C1014", "plot_fg": "#D7DEE4", "plot_grid": "#232B32",
-        "cycle": DATA_DARK, "box_edge": "#8E9AA5", "box_fill": "#0F1418",
+        "cycle": DATA_DARK, "heat": HEAT_DARK,
+        "box_edge": "#8E9AA5", "box_fill": "#0F1418",
         "box_mark": "#D7DEE4"},
     "Midnight": {
         "bg": "#0F172A", "panel": "#1E293B", "fg": "#E2E8F0", "muted": "#94A3B8",
         "accent": "#38BDF8", "entry": "#0B1224", "select_bg": "#1D4ED8",
         "select_fg": "#FFFFFF", "border": "#334155", "hint": "#FCA5A5",
         "plot_bg": "#0A1020", "plot_fg": "#E2E8F0", "plot_grid": "#1E2A44",
-        "cycle": DATA_DARK, "box_edge": "#94A3B8", "box_fill": "#0B1224",
+        "cycle": DATA_DARK, "heat": HEAT_MIDNIGHT,
+        "box_edge": "#94A3B8", "box_fill": "#0B1224",
         "box_mark": "#E2E8F0"},
     "Solarized Light": {
         "bg": "#FDF6E3", "panel": "#EEE8D5", "fg": "#073642", "muted": "#586E75",
         "accent": "#268BD2", "entry": "#FFFDF5", "select_bg": "#D5E6EE",
         "select_fg": "#073642", "border": "#D3CBB6", "hint": "#C02A27",
         "plot_bg": "#FFFDF5", "plot_fg": "#073642", "plot_grid": "#E3DCC6",
-        "cycle": DATA_SOLARIZED, "box_edge": "#586E75", "box_fill": "#FFFDF5",
+        "cycle": DATA_SOLARIZED, "heat": HEAT_SOLARIZED,
+        "box_edge": "#586E75", "box_fill": "#FFFDF5",
         "box_mark": "#073642"},
     "High contrast": {
         "bg": "#000000", "panel": "#101010", "fg": "#FFFFFF", "muted": "#CCCCCC",
         "accent": "#FFFF00", "entry": "#000000", "select_bg": "#FFFF00",
         "select_fg": "#000000", "border": "#FFFFFF", "hint": "#FF6060",
         "plot_bg": "#000000", "plot_fg": "#FFFFFF", "plot_grid": "#555555",
-        "cycle": DATA_CONTRAST, "box_edge": "#FFFFFF", "box_fill": "#000000",
+        "cycle": DATA_CONTRAST, "heat": HEAT_CONTRAST,
+        "box_edge": "#FFFFFF", "box_fill": "#000000",
         "box_mark": "#FFFF00"},
     "System": {                                  # native ttk theme (Windows/macOS/Linux)
         "bg": "#F0F0F0", "panel": "#E6E6E6", "fg": "#1A1A1A", "muted": "#595959",
         "accent": "#0F6B8C", "entry": "#FFFFFF", "select_bg": "#CDE0F7",
         "select_fg": "#000000", "border": "#B5B5B5", "hint": "#AA0000",
         "plot_bg": "#FFFFFF", "plot_fg": "#222222", "plot_grid": "#CCCCCC",
-        "cycle": DATA_LIGHT, "box_edge": "#4A4A4A", "box_fill": "#FFFFFF",
+        "cycle": DATA_LIGHT, "heat": HEAT_LIGHT,
+        "box_edge": "#4A4A4A", "box_fill": "#FFFFFF",
         "box_mark": "#1A1A1A"},
 }
 THEME_NAMES = list(PALETTES)

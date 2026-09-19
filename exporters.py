@@ -12,6 +12,8 @@ import math
 import struct
 import datetime
 
+import metasummary
+
 # ==========================================================================
 #  EXPORTERS
 # ==========================================================================
@@ -185,13 +187,8 @@ def export_metadata_csv(parser, path):
     return len(rows)
 
 
-# Fields that are constant for a sample -> shown once in the PDF header block.
-_SAMPLE_LEVEL = [
-    "Date acquired", "Instrument", "Acquisition computer", "X-ray source",
-    "Anode", "Source power (W)", "Lens mode", "Aperture",
-    "Charge neutraliser", "Ion gun / sputtering",
-]
-# Per-region columns for the PDF table.
+# Per-region columns for the PDF table. A column whose value is the same for
+# every region of the sample is dropped and stated once in the header block.
 _REGION_COLS = [
     ("Region", "Region"), ("PE (eV)", "Pass energy (eV)"),
     ("BE start", "BE start (eV)"), ("BE end", "BE end (eV)"),
@@ -199,6 +196,40 @@ _REGION_COLS = [
     ("Points", "Points"), ("Quality", "Quality"),
     ("hv (eV)", "Photon energy (eV)"),
 ]
+
+
+def _sample_block(rows):
+    """Tidy one sample's metadata for the report.
+
+    Returns ``(info, columns)``: ``info`` is ``[(field, value)]`` for the
+    header block (what is the same for every region, and pass energy grouped
+    by region, e.g. "40: Mo 3d, S 2p; 160: Survey") and ``columns`` the
+    per-region table columns that still differ."""
+    ms = metasummary
+    lrows = [(r.get("Region", ""), r) for r in rows]
+    info = []
+    when = ms.date_range(lrows, sep=" to ")
+    if when:
+        info.append(("Date acquired", when))
+    common, run_var = ms.summarise(
+        lrows, [f for f in ms.RUN_FIELDS if f != "Date acquired"])
+    info += common
+    for field, groups in run_var:
+        info.append((field, "; ".join(
+            f"{v}: {ms.compact_labels(ls, 10)}" for v, ls in groups)))
+    constants, columns = ms.split_columns(
+        rows, _REGION_COLS,
+        keep=("BE start (eV)", "BE end (eV)", "Points"))
+    have = {k for k, _ in info}
+    info += [(f, v) for f, v in constants if f not in have]
+    lens, _ = ms.summarise(lrows, ["Lens mode", "Aperture"])
+    info += [(f, v) for f, v in lens if f not in have]
+    _c, pe = ms.summarise(lrows, ["Pass energy (eV)"])
+    for field, groups in pe:
+        info.append((field, "; ".join(
+            f"{v}: {ms.compact_labels(ls, 10)}" for v, ls in groups)))
+        columns = [c for c in columns if c[1] != field]
+    return info, columns
 
 
 def export_metadata_pdf(parser, path):
@@ -217,6 +248,7 @@ def export_metadata_pdf(parser, path):
 
 
 def _metadata_pdf_reportlab(parser, samples, path):
+    from xml.sax.saxutils import escape as xml_escape
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
@@ -263,24 +295,26 @@ def _metadata_pdf_reportlab(parser, samples, path):
         if si > 0:
             story.append(PageBreak())
         story.append(Paragraph(f"Sample: {sample}", h2))
-        # sample-level block (use first region's values)
-        base = rows[0]
-        info = [[k, base.get(k, "")] for k in _SAMPLE_LEVEL]
-        info_tbl = Table(info, colWidths=[55 * mm, 110 * mm])
-        info_tbl.setStyle(TableStyle([
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-            ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#2c3e50")),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-            ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-        ]))
-        story.append(info_tbl)
+        info, columns = _sample_block(rows)
+        if info:
+            info_tbl = Table(
+                [[k, Paragraph(xml_escape(v), small)] for k, v in info],
+                colWidths=[55 * mm, 200 * mm])
+            info_tbl.setStyle(TableStyle([
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#2c3e50")),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ]))
+            story.append(info_tbl)
         story.append(Spacer(1, 4 * mm))
         story.append(Paragraph(f"Regions ({len(rows)})", small))
 
-        table = [[c[0] for c in _REGION_COLS]]
+        table = [[c[0] for c in columns]]
         for row in rows:
-            table.append([row.get(c[1], "") for c in _REGION_COLS])
+            table.append([row.get(c[1], "") for c in columns])
         t = Table(table, repeatRows=1)
         t.setStyle(hdr_style)
         story.append(t)
@@ -303,12 +337,12 @@ def _metadata_pdf_matplotlib(parser, samples, path):
                          fontsize=12, x=0.02, ha="left")
             ax = fig.add_axes([0.02, 0.02, 0.96, 0.84])
             ax.axis("off")
-            base = rows[0]
-            lines = [f"{k}: {base.get(k, '')}" for k in _SAMPLE_LEVEL]
+            info, columns = _sample_block(rows)
+            lines = [f"{k}: {v}" for k, v in info]
             ax.text(0, 1.0, "\n".join(lines), va="top", fontsize=8,
                     family="monospace")
-            col_labels = [c[0] for c in _REGION_COLS]
-            cells = [[row.get(c[1], "") for c in _REGION_COLS] for row in rows]
+            col_labels = [c[0] for c in columns]
+            cells = [[row.get(c[1], "") for c in columns] for row in rows]
             tbl = ax.table(cellText=cells, colLabels=col_labels,
                            loc="lower center", cellLoc="center")
             tbl.auto_set_font_size(False)
