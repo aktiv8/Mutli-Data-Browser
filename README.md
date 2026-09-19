@@ -338,6 +338,21 @@ one that cannot be worked out says what to enter, e.g. *"enter the etch rate in
 Tools ▸ Sputter settings"*. The settings are kept in the workbook per sample,
 appear in the metadata (per level: depth and fluence) and in the methods text.
 
+## VAMAS that keeps its metadata
+
+VAMAS has no fields for most acquisition details, so an exported `.vms` now
+carries them in its comments: a delimited block
+(`=== eXPoSe SpectraDeck metadata ===` … `=== end of … ===`) in the file header for the
+instrument-wide entries and in each block comment for that spectrum — lens
+mode, aperture, neutraliser, ion gun, dates, stage position, depth level and
+etch time, sputter settings, your notes and energy shift. Other software just
+shows it as text. **Reading such a file back restores it** (instrument, dates,
+positions, depth profile, sputter settings), while values VAMAS stores exactly
+(photon energy, pass energy, dwell, step) are never taken from the text. Files
+without the block read exactly as before. The abscissa start, step and photon
+energy are now written to 10 significant digits (they were 6), so a re-read
+spectrum matches the original to the last digit.
+
 ## Depth profiles
 
 Sputter depth profiles are detected automatically (from the Kratos file's
