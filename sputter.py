@@ -181,6 +181,7 @@ _CURRENT = re.compile(r"(\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*(pA|nA|uA|µA|"
                       r"μA|mA|A)\b")
 _RASTER = re.compile(r"(\d+(?:\.\d+)?)\s*(?:mm)?\s*[x×X]\s*"
                      r"(\d+(?:\.\d+)?)\s*(mm|um|µm|μm)\b")
+_RATE = re.compile(r"(\d+(?:\.\d+)?)\s*(nm|\u00c5|A)\s*/\s*(s|min)\b")
 _ION = re.compile(r"\b(Ar\d*|He|Ne|Xe|Kr|O2|N2|Cs|Ga|Bi\d*|C60|H2O)"
                   r"(\d*[+-])?(?![A-Za-z])")
 
@@ -208,6 +209,11 @@ def from_text(text) -> dict:
         scale = 1.0 if m.group(3) == "mm" else 0.001
         out["raster_x"] = float(m.group(1)) * scale
         out["raster_y"] = float(m.group(2)) * scale
+    m = _RATE.search(t)
+    if m:
+        unit = ("nm" if m.group(2) == "nm" else "\u00c5") + "/" + m.group(3)
+        out["etch_rate"] = float(m.group(1))
+        out["rate_unit"] = unit
     return sanitise(out) if out else {}
 
 

@@ -416,6 +416,9 @@ class SpectrumFile:
         md["Quality"] = r.conditions.get("Quality", "")
         md["Charge neutraliser"] = self.instrument.get("Charge neutraliser", "")
         md["Ion gun / sputtering"] = self.instrument.get("Ion gun / sputtering", "")
+        for k, v in (r.extra.get("preserved_metadata") or {}).items():
+            if not md.get(k):              # restored from a VAMAS comment
+                md[k] = v
         if self.annotations is not None:
             md = self.annotations.apply_metadata(
                 self.file_id, self._pos.get(id(r)), r, md)

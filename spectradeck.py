@@ -3808,6 +3808,8 @@ class Workspace:
             messagebox.showinfo("Export", "No decodable spectra to export.")
             return False
         source_parser = self.region_parser.get(id(regions[0]))
+        metas = [self.region_parser[id(r)].region_metadata(r)
+                 if id(r) in self.region_parser else None for r in regions]
         if self.cfg.get("apply_corrections", True):     # names, BE shift
             regions = [self._display(r) for r in regions]
         if fmt == "csv":
@@ -3831,7 +3833,7 @@ class Workspace:
                     operator=inst.get("Acquisition computer", ""),
                     experiment_id=os.path.basename(
                         (parser.path if parser else "") or ""),
-                    include_transmission=include_tf)
+                    include_transmission=include_tf, metadata=metas)
         except Exception as exc:
             messagebox.showerror("Export failed", str(exc))
             return False

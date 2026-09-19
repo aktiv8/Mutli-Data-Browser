@@ -13,6 +13,7 @@ import struct
 import datetime
 
 import metasummary
+import vamasmeta
 
 # ==========================================================================
 #  EXPORTERS
@@ -40,7 +41,8 @@ def export_csv(regions, path):
 
 def export_vamas(regions, path, institution="Not specified",
                  instrument="", operator="", experiment_id="",
-                 sample_id="Sample", include_transmission=True):
+                 sample_id="Sample", include_transmission=True,
+                 metadata=None, experiment_metadata=None):
     """Export selected regions as a VAMAS (ISO 14976) file.
 
     Sequential block layout: experiment mode NORM, scan mode REGULAR,
@@ -48,10 +50,21 @@ def export_vamas(regions, path, institution="Not specified",
     function is available it is written as a second corresponding variable
     ("Transmission"), interleaved with intensity, matching CasaXPS exports.
     Only regions with decodable data are written.
+
+    ``metadata`` (one dict per input region, e.g. ``parser.region_metadata``)
+    is written into the block comments and ``experiment_metadata`` (default:
+    what every region agrees on) into the file header, inside a delimited
+    block (see ``vamasmeta``), so reading the file back restores it.
     """
-    usable = [r for r in regions if r.decodable and r.counts]
+    pairs = [(r, metadata[i] if metadata and i < len(metadata) else None)
+             for i, r in enumerate(regions) if r.decodable and r.counts]
+    usable = [r for r, _m in pairs]
     if not usable:
         raise ValueError("None of the selected regions contain decodable data.")
+    metas = [m for _r, m in pairs]
+    exp_md = (experiment_metadata if experiment_metadata is not None
+              else vamasmeta.common_experiment([m for m in metas if m]))
+    header_comment = vamasmeta.encode(exp_md, vamasmeta.EXPERIMENT_KEYS)
 
     L = []
     a = L.append
@@ -62,7 +75,9 @@ def export_vamas(regions, path, institution="Not specified",
     a(instrument)
     a(operator)
     a(experiment_id)
-    a("0")            # number of lines in comment
+    a(str(len(header_comment)))   # number of lines in comment
+    for c in header_comment:
+        a(c)
     a("NORM")         # experiment mode
     a("REGULAR")      # scan mode
     a(str(len(usable)))  # number of spectral regions (NORM)
@@ -75,7 +90,7 @@ def export_vamas(regions, path, institution="Not specified",
 
     now = datetime.datetime.now()
     SENT = "1E+37"    # VAMAS "not specified" sentinel
-    for r in usable:
+    for r, md in pairs:
         hv = r.photon_energy if r.photon_energy else 1486.69
         # Kinetic-energy abscissa (matches CasaXPS and the transmission axis).
         ke = r.kinetic_energy or [hv - be for be in r.energy]
@@ -101,12 +116,16 @@ def export_vamas(regions, path, institution="Not specified",
             comment.append(f"Etch level : {r.etch_level}")
         if r.etch_time is not None:
             comment.append(f"Etch time (s) : {r.etch_time:g}")
+        if md:
+            comment += vamasmeta.encode(
+                {k: v for k, v in md.items()
+                 if k not in vamasmeta.EXPERIMENT_KEYS})
         a(str(len(comment)))      # lines in block comment
         for c in comment:
             a(c)
         a("XPS")                  # technique
         a(anode)                  # analysis source label
-        a(f"{hv:.6g}")            # source characteristic energy
+        a(f"{hv:.10g}")           # source characteristic energy
         a(power or SENT)          # source strength (W)
         a(SENT)                   # beam width x
         a(SENT)                   # beam width y
@@ -127,8 +146,8 @@ def export_vamas(regions, path, institution="Not specified",
         # (scan mode REGULAR)
         a("Kinetic energy")       # abscissa label
         a("eV")                   # abscissa units
-        a(f"{ke0:.6g}")           # abscissa start
-        a(f"{dke:.6g}")           # abscissa increment
+        a(f"{ke0:.10g}")          # abscissa start
+        a(f"{dke:.10g}")          # abscissa increment
         a(str(n_cv))              # number of corresponding variables
         a("Intensity"); a("d")    # corresponding var 1: label, units
         if trans:
@@ -164,7 +183,10 @@ def export_vamas(regions, path, institution="Not specified",
                 a(fc(c))
 
     a("end of experiment")
-    with open(path, "w", newline="\r\n") as fh:
+    # Latin-1: what other VAMAS software (CasaXPS) reads; anything beyond it
+    # was escaped in the metadata block, other fields fall back to "?"
+    with open(path, "w", newline="\r\n", encoding="latin-1",
+              errors="replace") as fh:
         fh.write("\n".join(L) + "\n")
     return len(usable)
 

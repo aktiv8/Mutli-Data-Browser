@@ -12,6 +12,8 @@ from __future__ import annotations
 import os
 import re
 
+import vamasmeta
+import sputter
 from .base import (Region, SpectrumFile, clean, clean_text, canon_region_name,
                    guess_region_name, unset, kv_from_lines,
                    read_bytes)
@@ -260,7 +262,12 @@ class VamasFile(SpectrumFile):
             v = self._lookup(k)
             if v:
                 instr[k] = v
+        # what an earlier export wrote into the comments (vamasmeta)
+        for k, v in vamasmeta.decode(h["comments"]).items():
+            if k in vamasmeta.EXPERIMENT_KEYS and v:
+                instr[k] = v
         self.instrument = {k: v for k, v in instr.items() if v}
+        self._restore_sputter()
         self._detect_profile(h, blocks, counts)
         self._positions_from_comments(blocks)
 
@@ -347,6 +354,7 @@ class VamasFile(SpectrumFile):
         r.extra["comments"] = kv
         r.lens_mode = self._lookup("Lens mode", kv)
         r.aperture = self._lookup("Aperture", kv)
+        vamasmeta.apply_to_region(r, vamasmeta.decode(b["comments"]))
         r.extra["expvals"] = list(zip([v[0] for v in h["expvars"]],
                                       b["expvals"]))
         return r
@@ -408,6 +416,21 @@ class VamasFile(SpectrumFile):
         for r in self.regions:
             if r.sample in pos:
                 r.pos_x, r.pos_y = pos[r.sample]
+
+    def _restore_sputter(self):
+        """Sputter settings an earlier export recorded, as the prefill."""
+        for r in self.regions:
+            md = r.extra.get("preserved_metadata") or {}
+            parts = [md.get("Sputter ion", ""),
+                     f"{md['Sputter energy (eV)']} eV"
+                     if md.get("Sputter energy (eV)") else "",
+                     md.get("Sputter current", ""),
+                     f"{md['Raster (mm)']} mm" if md.get("Raster (mm)") else "",
+                     md.get("Etch rate", "")]
+            text = " ".join(x for x in parts if x).strip()
+            if text:
+                self.sputter_hint = sputter.from_text(text)
+                return
 
     # -- depth profile ---------------------------------------------------
     def _detect_profile(self, h, blocks, counts):

@@ -80,22 +80,24 @@ def unique_name(name, used) -> str:
 
 # -- spectra ---------------------------------------------------------------------
 def sample_groups(docs, display=None):
-    """``[(file_parser, sample_label, [regions])]`` in file order, holding only
-    spectra with data. ``display(region)`` returns the region as it should be
-    exported (names, BE shift); the sample label is taken from it."""
+    """``[(file_parser, sample_label, [regions], [metadata])]`` in file order,
+    holding only spectra with data. ``display(region)`` returns the region as
+    it should be exported (names, BE shift); the sample label is taken from
+    it. ``metadata`` are the file's own ``region_metadata`` of each."""
     out = []
     for p in docs:
-        order, groups = [], {}
+        order, groups, metas = [], {}, {}
         for r in p.regions:
             if not (r.decodable and r.counts):
                 continue
             d = display(r) if display else r
             key = d.sample
             if key not in groups:
-                groups[key] = []
+                groups[key], metas[key] = [], []
                 order.append(key)
             groups[key].append(d)
-        out += [(p, k, groups[k]) for k in order]
+            metas[key].append(p.region_metadata(r))
+        out += [(p, k, groups[k], metas[k]) for k in order]
     return out
 
 
@@ -105,7 +107,7 @@ def spectra_parts(docs, display=None):
     parts, notes = [], []
     used_v, used_c = set(), set()
     multi = len(docs) > 1
-    for p, sample, regions in sample_groups(docs, display):
+    for p, sample, regions, metas in sample_groups(docs, display):
         base = safe_stem(sample, "unnamed sample")
         if multi:
             base = safe_stem(os.path.splitext(os.path.basename(p.path or ""))[0],
@@ -119,7 +121,7 @@ def spectra_parts(docs, display=None):
                     regions, v, instrument=inst.get("Instrument", ""),
                     operator=inst.get("Acquisition computer", ""),
                     experiment_id=os.path.basename(p.path or ""),
-                    sample_id=sample or "Sample")
+                    sample_id=sample or "Sample", metadata=metas)
                 exporters.export_csv(regions, c)
                 with open(v, "rb") as fh:
                     vdata = fh.read()
