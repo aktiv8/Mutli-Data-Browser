@@ -46,7 +46,7 @@ import math
 
 import tkinter as tk
 import tkinter.font as tkfont
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 # Optional dependencies ----------------------------------------------------
 try:
@@ -76,12 +76,18 @@ import themes
 import viewdata
 import metasummary
 import workbook as wbk
+import annotations
+import calibration
+import xpslines
 import report
 import pptx_export
 import importplan
 import workbook_ui
 from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
                     ramp)
+from plots import (interp_intensity, trace_label, nice_step, dodge,
+                   normalise_name, norm_factor, add_ke_axis, draw_stack,
+                   draw_heatmap, draw_waterfall3d)  # noqa: F401
 from pdf_preview import PdfPreview, HAVE_PDF, open_external
 from exporters import (export_csv, export_vamas, export_metadata_csv,
                        export_metadata_pdf)
@@ -148,46 +154,6 @@ def stage_to_pixel(x_mm, y_mm, img_w, img_h, c):
     return img_w / 2.0 + rx, img_h / 2.0 + ry
 
 
-def interp_intensity(region, energy):
-    """Linear interpolation of a region's intensity at a given energy.
-    Works for ascending or descending energy axes; clamps at the ends."""
-    xs, ys = region.energy, region.counts
-    if not xs or not ys:
-        return None
-    pts = sorted(zip(xs, ys))
-    xs2 = [p[0] for p in pts]
-    ys2 = [p[1] for p in pts]
-    if energy <= xs2[0]:
-        return ys2[0]
-    if energy >= xs2[-1]:
-        return ys2[-1]
-    import bisect
-    i = bisect.bisect_left(xs2, energy)
-    x0, x1 = xs2[i - 1], xs2[i]
-    y0, y1 = ys2[i - 1], ys2[i]
-    f = (energy - x0) / (x1 - x0) if x1 != x0 else 0.0
-    return y0 + f * (y1 - y0)
-
-
-def trace_label(r, multi_file=False, show_name=True):
-    """Short end-of-trace label. Depth profiles: the level (and etch time);
-    otherwise the sample, plus the region name only where a panel mixes
-    regions. Unnamed samples fall back to the file stem (several files) or the
-    region name. Colour already tells files apart, so no file prefix."""
-    if r.etch_level is not None:
-        base = (f"L{r.etch_level} ({r.etch_time:g} s)"
-                if r.etch_time is not None else f"L{r.etch_level}")
-    else:
-        parts = [r.sample] if r.sample else []
-        if show_name and parts:
-            parts.append(r.name)
-        if not parts:
-            parts = [os.path.splitext(r.source)[0]
-                     if (multi_file and r.source) else r.name]
-        base = " ".join(parts)
-    return base if len(base) <= 24 else base[:22] + "…"
-
-
 def colour_slots(docs):
     """{id(region): palette slot}: one slot per file when several files are
     loaded, else one per sample, so a file/sample keeps its colour whatever is
@@ -208,34 +174,6 @@ def stack_colours(slots, cycle, background):
     if len(slots) > 1 and len(set(slots)) == 1:
         return ramp(cycle[slots[0] % len(cycle)], len(slots), background)
     return [cycle[s % len(cycle)] for s in slots]
-
-
-def nice_step(x):
-    """Round a positive number down to 1, 2 or 5 x 10^n."""
-    if not x or x <= 0 or not math.isfinite(x):
-        return 1.0
-    e = math.floor(math.log10(x))
-    m = x / 10 ** e
-    for k in (5, 2, 1):
-        if m >= k:
-            return k * 10 ** e
-    return 10 ** e
-
-
-def dodge(values, gap):
-    """Nudge label positions upward so neighbours are at least ``gap`` apart
-    (order preserved). Returns the new positions."""
-    order = sorted(range(len(values)), key=lambda i: values[i])
-    out = list(values)
-    for a, b in zip(order, order[1:]):
-        if out[b] - out[a] < gap:
-            out[b] = out[a] + gap
-    return out
-
-
-def normalise_name(name):
-    """Case/whitespace-insensitive key for a region (element) name."""
-    return re.sub(r"\s+", " ", (name or "").strip()).lower()
 
 
 def regions_under(node):
@@ -323,215 +261,6 @@ def _grid_dims(n):
     cols = min(4, max(1, math.ceil(math.sqrt(n))))
     rows = min(4, math.ceil(n / cols))
     return rows, cols
-
-
-def norm_factor(r, mode, cursor=None):
-    """Divisor that normalises spectrum r for the chosen mode."""
-    ys = r.counts
-    if mode == "Max = 1":
-        m = max(ys)
-        return m if m else 1.0
-    if mode == "Area = 1":
-        s = sum(abs(y) for y in ys)
-        return s / len(ys) if s else 1.0
-    if mode == "At cursor" and cursor is not None:
-        v = interp_intensity(r, cursor)
-        return v if v and v > 0 else 1.0
-    return 1.0
-
-
-def add_ke_axis(ax, hv, muted, label=True):
-    """Mirror a binding-energy axis along the top as kinetic energy
-    (KE = hν − BE)."""
-    def flip(x):
-        return hv - x
-    sec = ax.secondary_xaxis("top", functions=(flip, flip))
-    sec.spines["top"].set_visible(True)
-    sec.spines["top"].set_color(muted)
-    sec.tick_params(labelsize=8)
-    if label:
-        sec.set_xlabel("Kinetic Energy (eV)", fontsize=8, color=muted)
-    return sec
-
-
-def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
-               title="", subtitle="", selected=(), multi_file=False,
-               first_col=True, bottom_row=True, accent="#0F6B8C",
-               muted="#56636E", scale="Binding", ke_top=False,
-               top_row=False):
-    """Draw one panel: a single spectrum plain, several stacked by y offset.
-
-    Stacked panels drop the (meaningless) y ticks for a scale bar and label
-    each trace at its right-hand end, in the trace colour, with labels nudged
-    apart. ``selected`` holds ``id(region)`` of spectra to draw heavier."""
-    normed = [[y / norm_factor(r, norm, cursor) for y in r.counts]
-              for r in regs]
-    n = len(regs)
-    stacked = n > 1
-    spans = [(max(v) - min(v)) for v in normed if v]
-    step = offset * (max(spans) if spans else 1.0) if stacked else 0.0
-    r0 = regs[0]
-    axes_x = [viewdata.energy_axis(r, scale) for r in regs]
-    a0 = axes_x[0]
-    binding = a0.invert
-    show_name = len({normalise_name(r.name) for r in regs}) > 1
-    label_every = max(1, math.ceil(n / 12))
-    ends = []
-    for i, (r, v) in enumerate(zip(regs, normed)):
-        yoff = [y + i * step for y in v]
-        col = colours[i] if colours else None
-        sel = id(r) in selected
-        ax.plot(axes_x[i].x, yoff, color=col,
-                lw=1.9 if sel else (0.8 if n > 12 else 1.1),
-                zorder=3 if sel else 2)
-        if stacked and i % label_every == 0:
-            xs = axes_x[i].x
-            j = (min if binding else max)(range(len(xs)), key=xs.__getitem__)
-            lo, hi = max(0, j - 2), min(len(yoff), j + 3)
-            ends.append((sum(yoff[lo:hi]) / (hi - lo),
-                         trace_label(r, multi_file, show_name), col))
-    if norm == "At cursor" and cursor is not None:
-        cx = (r0.photon_energy - cursor
-              if a0.label == "Kinetic Energy" else cursor)
-        ax.axvline(cx, color=accent, ls="--", lw=0.9)
-    ax.margins(x=0.02, y=0.06)
-    ax.relim()
-    ax.autoscale_view()
-    y0, y1 = ax.get_ylim()
-    yspan = (y1 - y0) or 1.0
-    yaxis_tf = ax.get_yaxis_transform()          # x: axes fraction, y: data
-    if stacked:
-        ax.set_yticks([])
-        ax.spines["left"].set_visible(False)
-        # scale bar to the left of the axes replaces the y axis
-        bar = nice_step(yspan * 0.22)
-        base = y0 + yspan * 0.06
-        ax.plot([-0.018, -0.018], [base, base + bar], transform=yaxis_tf,
-                color=muted, lw=1.6, solid_capstyle="butt", clip_on=False)
-        unit = "" if norm != "None" else f" {r0.count_units}"
-        ax.text(-0.03, base + bar / 2,
-                (f"{bar:,.0f}" if bar >= 1 else f"{bar:g}") + unit,
-                transform=yaxis_tf, rotation=90, ha="right", va="center",
-                fontsize=8, color=muted, clip_on=False)
-        pos = dodge([e[0] for e in ends], 0.062 * yspan)
-        for (_y, text, col), yy in zip(ends, pos):
-            t = ax.text(1.012, yy, text, transform=yaxis_tf, color=col,
-                        fontsize=8, va="center", ha="left", clip_on=False)
-            t.set_in_layout(False)      # the page reserves the gutter itself
-    ax.set_title(title, loc="left")
-    if subtitle:
-        ax.set_title(subtitle, loc="right", fontsize=8, fontweight="normal",
-                     color=muted)
-    if bottom_row:
-        ax.set_xlabel(f"{a0.label.capitalize()} ({a0.units})")
-    if first_col and not stacked:
-        ax.set_ylabel(f"{r0.count_label} ({r0.count_units})" if norm == "None"
-                      else f"{r0.count_label} (normalised)")
-    if binding:
-        ax.invert_xaxis()
-    if ke_top and binding and top_row and viewdata.photon_energy(regs):
-        add_ke_axis(ax, viewdata.photon_energy(regs), muted)
-
-
-def _titles(ax, title, subtitle, muted):
-    ax.set_title(title, loc="left")
-    if subtitle:
-        ax.set_title(subtitle, loc="right", fontsize=8, fontweight="normal",
-                     color=muted)
-
-
-def draw_heatmap(fig, ax, regs, zi, norm="None", cmap=None, title="",
-                 subtitle="", first_col=True, bottom_row=True, top_row=False,
-                 muted="#56636E", scale="Binding", ke_top=False):
-    """One panel as a heat map: energy across, ``zi`` (etch time / level,
-    acquisition time or trace order, ascending downwards) down, intensity as
-    colour. ``regs`` must already be in z order (see viewdata.z_sorted)."""
-    import numpy as np
-    from matplotlib.colors import LinearSegmentedColormap
-    from matplotlib.ticker import MaxNLocator
-    axes_x = [viewdata.energy_axis(r, scale) for r in regs]
-    a0, r0 = axes_x[0], regs[0]
-    ys = [[y / norm_factor(r, norm) for y in r.counts] for r in regs]
-    grid, rows = viewdata.build_matrix([a.x for a in axes_x], ys)
-    if cmap is None:
-        cmap = LinearSegmentedColormap.from_list("heat", ["#FFFFFF", "#000000"])
-    cmap = cmap.with_extremes(bad=(0, 0, 0, 0))   # outside a trace's range
-    mesh = ax.pcolormesh(viewdata.edges(list(grid)),
-                         viewdata.edges(list(zi.values)),
-                         np.ma.masked_invalid(rows), cmap=cmap,
-                         shading="flat", rasterized=True)
-    ax.set_xlim(grid[0], grid[-1])
-    ax.set_ylim(max(viewdata.edges(list(zi.values))),
-                min(viewdata.edges(list(zi.values))))     # first trace on top
-    if a0.invert:
-        ax.invert_xaxis()
-    if len(regs) == 1:
-        ax.set_yticks([zi.values[0]])
-    elif zi.mode in ("Trace order", "Etch level"):
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-    ax.set_ylabel(zi.label)
-    _titles(ax, title, subtitle, muted)
-    if bottom_row:
-        ax.set_xlabel(f"{a0.label.capitalize()} ({a0.units})")
-    cb = fig.colorbar(mesh, ax=ax, pad=0.02, fraction=0.05, aspect=24)
-    cb.outline.set_visible(False)
-    cb.ax.tick_params(labelsize=7, length=2)
-    cb.set_label("Normalised" if norm != "None"
-                 else f"{r0.count_label} ({r0.count_units})", fontsize=8)
-    if ke_top and a0.invert and top_row and viewdata.photon_energy(regs):
-        add_ke_axis(ax, viewdata.photon_energy(regs), muted)
-    return mesh
-
-
-def draw_waterfall3d(ax, regs, zi, norm="None", colours=None, title="",
-                     subtitle="", pal=None, scale="Binding"):
-    """One panel as a 3-D waterfall: energy (x), trace z (y), intensity
-    (vertical). ``ax`` must be a 3-D axes; ``regs`` in z order."""
-    from matplotlib.collections import PolyCollection
-    from matplotlib.colors import to_rgba
-    pal = pal or themes.PALETTES[themes.DEFAULT]
-    axes_x = [viewdata.energy_axis(r, scale) for r in regs]
-    a0, r0 = axes_x[0], regs[0]
-    ys = [[y / norm_factor(r, norm) for y in r.counts] for r in regs]
-    floor = min(min(v) for v in ys if v)
-    n = len(regs)
-    for i, (a, v, z) in enumerate(zip(axes_x, ys, zi.values)):
-        col = colours[i] if colours else None
-        verts = [(a.x[0], floor)] + list(zip(a.x, v)) + [(a.x[-1], floor)]
-        ax.add_collection3d(
-            PolyCollection([verts], facecolors=[to_rgba(col or "#888", 0.10)],
-                           edgecolors="none"), zs=z, zdir="y")
-        ax.plot(a.x, [z] * len(a.x), v, color=col,
-                lw=0.8 if n > 12 else 1.1)
-    xs = [x for a in axes_x for x in a.x]
-    ax.set_xlim(min(xs), max(xs))
-    zlo, zhi = min(zi.values), max(zi.values)
-    pad = 0.5 if zhi == zlo else 0.0
-    ax.set_ylim(zlo - pad, zhi + pad)
-    ax.set_zlim(floor, max(max(v) for v in ys if v))
-    if a0.invert:
-        ax.invert_xaxis()
-    _titles(ax, title, subtitle, pal["muted"])
-    ax.set_xlabel(f"{a0.label.capitalize()} ({a0.units})", labelpad=2)
-    ax.set_ylabel(zi.label, labelpad=2)
-    ax.text2D(0.0, 0.9, "Normalised" if norm != "None"
-              else f"{r0.count_label} ({r0.count_units})",
-              transform=ax.transAxes, fontsize=8, color=pal["muted"])
-    ax.tick_params(labelsize=7, pad=0)
-    ax.view_init(elev=24, azim=-58)
-    try:                                   # fill the panel (matplotlib >= 3.3)
-        ax.set_box_aspect((1.5, 1.0, 0.75), zoom=1.1)
-    except Exception:
-        pass
-    for axis in (ax.xaxis, ax.yaxis, ax.zaxis):
-        try:
-            axis.set_pane_color(to_rgba(pal["plot_bg"], 0.0))
-            axis.label.set_color(pal["plot_fg"])
-            axis._axinfo["grid"]["color"] = to_rgba(pal["plot_grid"])
-            axis._axinfo["axisline"]["color"] = to_rgba(pal["muted"])
-        except Exception:
-            pass
-    ax.tick_params(colors=pal["muted"])
 
 
 class CalibrationPanel(ttk.LabelFrame):
@@ -636,7 +365,7 @@ class Workspace:
     x-range) are stacked with a y offset on one panel."""
 
     PANEL_CHOICES = ["Auto", "1", "2", "4", "6", "9", "12", "16"]
-    TRACE_CHOICES = ["All", "3", "5", "10", "20", "50", "100"]
+    TRACE_CHOICES = ["All", "1", "3", "5", "10", "20", "50", "100"]
     NORM_MODES = ["None", "Max = 1", "Area = 1", "At cursor"]
     GROUP_MODES = {"Element name": "name", "Energy range": "range",
                    "Element, per sample": "sample",
@@ -706,11 +435,36 @@ class Workspace:
         self.file_origin = {}       # id(parser) -> path it was first added from
         self._fid_used = set()      # file ids handed out this session
         self._sha_cache = {}
+        self.ann = annotations.Annotations()    # renames, notes, BE shifts...
+        self._disp_cache = {}       # id(region) -> region as drawn/exported
+        self._pick_cb = None        # set while waiting for a click on the plot
+        self._axinfo = {}           # axes -> (photon energy, kind, n traces)
+        self._click_cb = None       # persistent plot-click hook (Identify)
+        self._xps_lines = None      # element line table, loaded on demand
 
         self._build_menu()
         self._build_body()
         self.set_theme(self.theme_name, save=False)
         root.after(80, self._restore_layout)
+        self._setup_dnd()
+
+    def _setup_dnd(self):
+        """Accept files / folders dropped on the window (needs the optional
+        tkinterdnd2 package; silently absent otherwise)."""
+        try:
+            from tkinterdnd2 import DND_FILES
+            self.root.drop_target_register(DND_FILES)
+            self.root.dnd_bind("<<Drop>>", self._on_drop)
+            self.dnd_ok = True
+        except Exception:
+            self.dnd_ok = False
+
+    def _on_drop(self, event):
+        try:
+            paths = list(self.root.tk.splitlist(event.data))
+        except tk.TclError:
+            return
+        self.root.after(10, lambda: self._open_paths(paths))
 
     # -- construction ---------------------------------------------------
     def _build_menu(self):
@@ -721,6 +475,12 @@ class Workspace:
         filem.add_command(label="Open spectra file(s)…",
                           command=self.open_files)
         filem.add_command(label="Open folder…", command=self.open_folder)
+        self.recent_menu = tk.Menu(filem, tearoff=0,
+                                   postcommand=self._build_recent_menu)
+        self.themes.register_menu(self.recent_menu)
+        filem.add_cascade(label="Open recent", menu=self.recent_menu)
+        filem.add_command(label="Save plot image…",
+                          command=self.save_plot_image)
         filem.add_command(label="Close all files", command=self.close_all)
         filem.add_command(label="Ask about .avg / .vgd duplicates again",
                           command=self._forget_dup_choice)
@@ -763,6 +523,15 @@ class Workspace:
         wbm.add_command(label="Export PowerPoint…",
                         command=self.export_powerpoint)
         bar.add_cascade(label="Workbook", menu=wbm)
+        tm = tk.Menu(bar, tearoff=0)
+        self.themes.register_menu(tm)
+        tm.add_command(label="Calibrate binding energy…",
+                       command=self.open_calibrate)
+        tm.add_command(label="Identify peaks…",
+                       command=self.open_identify)
+        tm.add_command(label="Rename…   (F2)", command=self.rename_selected)
+        tm.add_command(label="Notes…", command=self.notes_selected)
+        bar.add_cascade(label="Tools", menu=tm)
         viewm = tk.Menu(bar, tearoff=0)
         self.themes.register_menu(viewm)
         viewm.add_command(label="Expand all", command=lambda: self._expand(True))
@@ -790,9 +559,14 @@ class Workspace:
         self.root.config(menu=bar)
 
     def _build_body(self):
-        self.status = ttk.Label(self.root, anchor="w", style="Status.TLabel",
+        bar = ttk.Frame(self.root)
+        bar.pack(side="bottom", fill="x")
+        self.cursor_lbl = ttk.Label(bar, anchor="e", style="Status.TLabel",
+                                    text="")
+        self.cursor_lbl.pack(side="right", padx=(0, 8))
+        self.status = ttk.Label(bar, anchor="w", style="Status.TLabel",
                                 text="No files loaded. Use Open to add spectra.")
-        self.status.pack(side="bottom", fill="x")
+        self.status.pack(side="left", fill="x", expand=True)
         ttk.Separator(self.root).pack(side="bottom", fill="x")
         self._build_toolbar()
 
@@ -1001,6 +775,8 @@ class Workspace:
     def _on_close(self):
         if not self._confirm_discard():
             return
+        if HAVE_MPL:
+            self._stop_play()
         self._drop_wb_dir()
         cfg = self.cfg
         try:
@@ -1074,6 +850,7 @@ class Workspace:
         self.tree.pack(side="left", expand=True, fill="both")
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<space>", self._on_tree_space)
+        self.tree.bind("<F2>", lambda e: self.rename_selected())
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<<TreeviewOpen>>", lambda e: self._note_open(True))
         self.tree.bind("<<TreeviewClose>>", lambda e: self._note_open(False))
@@ -1248,6 +1025,13 @@ class Workspace:
             self.trace_bar = ttk.Frame(parent)
             self.trace_lbl = ttk.Label(self.trace_bar, text="", width=22,
                                        style="Muted.TLabel")
+            self.play_btn = ttk.Button(self.trace_bar, text="\u25b6", width=3,
+                                       style="Tool.TButton",
+                                       command=self._toggle_play)
+            self.play_btn.pack(side="left", padx=(0, 6))
+            Tooltip(self.play_btn, "Play through the traces (levels). "
+                                   "\u2190 / \u2192 step one at a time.",
+                    lambda: self.palette)
             self.trace_lbl.pack(side="left")
             self.trace_scale = ttk.Scale(
                 self.trace_bar, from_=0, to=1, orient="horizontal",
@@ -1259,10 +1043,15 @@ class Workspace:
             w = self.canvas.get_tk_widget()
             w.pack(side="top", expand=True, fill="both")
             self.canvas.mpl_connect("button_press_event", self._on_plot_click)
+            self.canvas.mpl_connect("motion_notify_event", self._on_motion)
+            self.canvas.mpl_connect("figure_leave_event",
+                                    lambda e: self.cursor_lbl.config(text=""))
             w.bind("<MouseWheel>", self._on_wheel)
             w.bind("<Button-4>", lambda e: self._on_wheel(e, 120))
             w.bind("<Button-5>", lambda e: self._on_wheel(e, -120))
             w.bind("<Enter>", lambda e: w.focus_set())
+            w.bind("<Left>", lambda e: self._step_traces(-1))
+            w.bind("<Right>", lambda e: self._step_traces(1))
             for key, fn in (("<Prior>", self.prev_page), ("<Next>", self.next_page),
                             ("<Home>", lambda: self._jump(0)),
                             ("<End>", lambda: self._jump(10 ** 9))):
@@ -1360,12 +1149,87 @@ class Workspace:
         self.meta.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.meta.pack(side="left", expand=True, fill="both")
+        self.meta.bind("<Double-Button-1>",
+                       lambda e: (self._meta_edit(self._meta_key_at(e)),
+                                  "break")[1])
+        self.meta.bind("<Button-3>", self._meta_menu)
         self.meta_hint = ttk.Label(
             body, style="Muted.TLabel", wraplength=300, justify="left",
             text="Select a spectrum in the tree to see how it was acquired.\n\n"
                  "Ticking its box plots it.")
         self._restyle_details()
         self._update_metadata()
+
+    def _meta_key_at(self, event):
+        try:
+            idx = self.meta.index(f"@{event.x},{event.y}")
+        except tk.TclError:
+            return None
+        line = self.meta.get(f"{idx} linestart", f"{idx} lineend")
+        if "\t" not in line:
+            return None
+        return line.split("\t", 1)[0]
+
+    def _meta_target(self):
+        """(parser, region, position) of the single selected spectrum."""
+        if len(self.sel_regions) != 1:
+            messagebox.showinfo("Edit metadata", "Select a single spectrum "
+                                                 "to edit its metadata.")
+            return None
+        r = self.sel_regions[0]
+        p = self.region_parser.get(id(r))
+        return (p, r, p.region_pos(r)) if p else None
+
+    def _meta_edit(self, key=None, add=False):
+        target = self._meta_target()
+        if target is None:
+            return
+        p, r, pos = target
+        if add:
+            key = simpledialog.askstring("Add field", "Field name:",
+                                         parent=self.root)
+            if not key or not key.strip():
+                return
+            key = key.strip()
+            current = ""
+        else:
+            if not key:
+                return
+            current = p.region_metadata(r).get(key, "")
+        val = simpledialog.askstring(
+            "Edit metadata", f"{key}\n(saved in the workbook; the file itself "
+                             f"is never changed)", initialvalue=current,
+            parent=self.root)
+        if val is None:
+            return
+        self.ann.set_meta(p.file_id, pos, key, val.strip())
+        self._ann_changed()
+
+    def _meta_reset(self, key=None):
+        target = self._meta_target()
+        if target is None:
+            return
+        p, r, pos = target
+        self.ann.reset_meta(p.file_id, pos, key)
+        self._ann_changed()
+
+    def _meta_menu(self, event):
+        key = self._meta_key_at(event)
+        menu = self._menu(self.meta)
+        can = len(self.sel_regions) == 1
+        st = "normal" if can else "disabled"
+        menu.add_command(label="Edit value…", state=st if key else "disabled",
+                         command=lambda: self._meta_edit(key))
+        menu.add_command(label="Add field…", state=st,
+                         command=lambda: self._meta_edit(add=True))
+        menu.add_command(label="Reset this value", state=st if key else
+                         "disabled", command=lambda: self._meta_reset(key))
+        menu.add_command(label="Reset all edits of this spectrum", state=st,
+                         command=lambda: self._meta_reset())
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     def _restyle_details(self):
         p = self.palette
@@ -1437,12 +1301,71 @@ class Workspace:
                     "Open", "Open an experiment workbook on its own, not "
                             "together with other files.")
             return
+        for p in paths:
+            self._add_recent(p)
         self._add_files(paths)
+
+    # -- recent files ------------------------------------------------------------
+    def _add_recent(self, path):
+        path = os.path.abspath(path)
+        lst = [p for p in self.cfg.get("recent", []) if p != path]
+        self.cfg["recent"] = [path] + lst[:9]
+
+    def _build_recent_menu(self):
+        m = self.recent_menu
+        m.delete(0, "end")
+        items = [p for p in self.cfg.get("recent", []) if os.path.exists(p)]
+        if not items:
+            m.add_command(label="(none)", state="disabled")
+            return
+        for p in items:
+            folder = os.path.isdir(p)
+            trimmed = p.rstrip("\\/")
+            name = os.path.basename(trimmed) or p
+            where = os.path.dirname(trimmed)
+            label = ("[folder] " if folder else "") + name
+            if where:
+                label += f"   \u2014   {where}"
+            m.add_command(label=label,
+                          command=lambda p=p: self._open_recent(p))
+        m.add_separator()
+        m.add_command(label="Clear list", command=self._clear_recent)
+
+    def _clear_recent(self):
+        self.cfg["recent"] = []
+
+    def _open_recent(self, path):
+        if not os.path.exists(path):
+            messagebox.showinfo("Open recent", f"{path} no longer exists.")
+            return
+        self._open_paths([path])
+
+    def _open_paths(self, paths):
+        """Open files, folders and workbooks given as paths (recent list,
+        drag-and-drop, command line)."""
+        books, folders, files = importplan.classify_paths(paths)
+        if books:
+            if len(books) == 1 and not folders and not files:
+                self.open_workbook(books[0])
+            else:
+                messagebox.showinfo(
+                    "Open", "Open an experiment workbook on its own, not "
+                            "together with other files.")
+            return
+        for folder in folders:
+            self._open_folder_path(folder)
+        if files:
+            for f in files:
+                self._add_recent(f)
+            self._add_files(files)
 
     def open_folder(self):
         folder = filedialog.askdirectory(title="Open all spectra files in folder")
-        if not folder:
-            return
+        if folder:
+            self._open_folder_path(folder)
+
+    def _open_folder_path(self, folder):
+        self._add_recent(folder)
         paths = []
         for name in sorted(os.listdir(folder)):
             p = os.path.join(folder, name)
@@ -1464,8 +1387,26 @@ class Workspace:
         if paths is None:                       # import cancelled
             return
         problems = []
-        for path in paths:
-            problems += self._add_file(path)
+        many = len(paths) >= 3
+        prog = (workbook_ui.ProgressDialog(self.root, self, "Loading files",
+                                           len(paths)) if many else None)
+        self.root.config(cursor="watch")
+        try:
+            for i, path in enumerate(paths):
+                if prog is not None:
+                    prog.step(f"{i + 1} of {len(paths)}:  "
+                              f"{os.path.basename(path)}")
+                    if prog.cancelled:
+                        problems.append(f"Loading cancelled after {i} of "
+                                        f"{len(paths)} files.")
+                        break
+                problems += self._add_file(path, refresh=not many)
+        finally:
+            self.root.config(cursor="")
+            if prog is not None:
+                prog.close()
+            if many:
+                self._finish_adding()
         if problems:
             shown = problems[:12]
             more = f"\n… and {len(problems) - 12} more" if len(problems) > 12 else ""
@@ -1499,7 +1440,14 @@ class Workspace:
                             "You will be asked again when a folder holds the "
                             "same data as .avg and .vgd.")
 
-    def _add_file(self, path, file_id=None, origin=""):
+    def _finish_adding(self):
+        """One refresh after a batch of ``_add_file(..., refresh=False)``."""
+        self._recompute_colours()
+        self._populate_tree()
+        self._refresh_images()
+        self._schedule_render(reset_page=True)
+
+    def _add_file(self, path, file_id=None, origin="", refresh=True):
         """Load one file into the tree. Returns a list of problem strings."""
         name = os.path.basename(path)
         if any(p.path == path for p in self.docs):
@@ -1515,12 +1463,11 @@ class Workspace:
         self._fid_used.add(fid)
         self.file_ids[id(parser)] = fid
         self.file_origin[id(parser)] = origin or path
+        parser.annotations, parser.file_id = self.ann, fid
         for r in parser.regions:
             self.region_parser[id(r)] = parser
-        self._recompute_colours()
-        self._populate_tree()
-        self._refresh_images()
-        self._schedule_render(reset_page=True)
+        if refresh:
+            self._finish_adding()
         problems = []
         if parser.corruption["corrupted"]:
             problems.append(f"{name}: {parser.corruption['message']}")
@@ -1529,6 +1476,257 @@ class Workspace:
 
     def _recompute_colours(self):
         self.color_slot = colour_slots(self.docs)
+
+    # -- annotations: what the user changed, applied on the way out -------------
+    def _display(self, r):
+        """``r`` as it should be drawn and exported: display names applied and
+        the binding-energy shift added (the photon energy moves with it, so
+        the kinetic energy of every point is unchanged). Returns ``r`` itself
+        when nothing applies."""
+        q = self._disp_cache.get(id(r))
+        if q is not None:
+            return q
+        p = self.region_parser.get(id(r))
+        fid = self.file_ids.get(id(p), "") if p else ""
+        ann = self.ann
+        dn = ann.region_label(fid, r.sample, r.name)
+        ds = ann.sample_label(fid, r.sample)
+        shift = (ann.shift_for(fid, r.sample, r.name)
+                 if viewdata.is_binding(r) else 0.0)
+        if dn == r.name and ds == r.sample and not shift:
+            q = r
+        else:
+            q = copy.copy(r)
+            q.name, q.sample = dn, ds
+            if shift:
+                q.energy = [e + shift for e in r.energy]
+                if r.photon_energy:
+                    q.photon_energy = r.photon_energy + shift
+        self._disp_cache[id(r)] = q
+        return q
+
+    def _ann_changed(self, relabel=True):
+        """Call after any change to ``self.ann`` (or after replacing it).
+        ``relabel=False`` skips rebuilding the tree (markers do not show
+        there)."""
+        self._disp_cache.clear()
+        for p in self.docs:
+            p.annotations = self.ann
+            p.file_id = self.file_ids.get(id(p), "")
+        if relabel:
+            keep = {id(r) for r in self.sel_regions}
+            self._populate_tree()
+            if keep:
+                self.tree.selection_set(
+                    [iid for iid, r in self.leaf_region.items()
+                     if id(r) in keep])
+            self._update_metadata()
+        self._schedule_render()
+        self._update_title()
+
+    def _node_label(self, parser, node, sample):
+        """Tree text for a node, with display names applied."""
+        ann = self.ann
+        fid = self.file_ids.get(id(parser), "")
+        if node.type_name == "sample":
+            return ann.sample_label(fid, sample) if sample else node.label
+        if node.type_name == "regionfolder":
+            return ann.region_label(fid, sample or "", node.label)
+        r = node.region
+        if (r is not None and node.type_name == "EscaSpectrum"
+                and node.label.startswith(r.name)):
+            label = node.label
+            dn = ann.region_label(fid, r.sample, r.name)
+            ds = ann.sample_label(fid, r.sample)
+            if dn != r.name:
+                label = dn + label[len(r.name):]
+            if ds != r.sample and f"({r.sample})" in label:
+                label = label.replace(f"({r.sample})", f"({ds})", 1)
+            return label
+        return node.label
+
+    def _target_of(self, iid):
+        """What a tree row stands for when renaming / annotating:
+        ``(kind, fid, sample, name, current, original)`` or None."""
+        item = self.node_map.get(iid)
+        if not item:
+            return None
+        parser, node = item
+        fid = self.file_ids.get(id(parser), "")
+        regs = regions_under(node)
+        if node.type_name == "sample":
+            sample = regs[0].sample if regs else (
+                "" if node.label == "(unnamed)" else node.label)
+            return ("sample", fid, sample, "",
+                    self.ann.sample_label(fid, sample), sample)
+        if not regs:
+            return None
+        r = regs[0]
+        if node.type_name == "regionfolder" or (
+                node.type_name == "EscaSpectrum"
+                and not node.label.startswith("Level")):
+            return ("region", fid, r.sample, r.name,
+                    self.ann.region_label(fid, r.sample, r.name), r.name)
+        return None
+
+    # -- binding-energy calibration ----------------------------------------------
+    def calibration_regions(self):
+        regs = [r for r in (self.sel_regions or self._ticked_regions())
+                if r.decodable and r.counts and viewdata.is_binding(r)]
+        return regs[:60]
+
+    def calibration_label(self, r):
+        p = self.region_parser.get(id(r))
+        fid = self.file_ids.get(id(p), "") if p else ""
+        name = self.ann.region_label(fid, r.sample, r.name)
+        if r.etch_level is not None:
+            name += f" L{r.etch_level}"
+        sample = self.ann.sample_label(fid, r.sample)
+        return f"{name}  \u2013  {sample or os.path.basename(r.source)}"
+
+    def open_calibrate(self):
+        regs = self.calibration_regions()
+        if not regs:
+            messagebox.showinfo(
+                "Calibrate", "Select or tick a spectrum measured on a "
+                             "binding-energy axis first (e.g. the C 1s).")
+            return
+        workbook_ui.CalibrateDialog(self.root, self, regs)
+
+    def _calibration_scope(self, r, scope):
+        p = self.region_parser.get(id(r))
+        fid = self.file_ids.get(id(p), "") if p else ""
+        if scope == "region":
+            return (annotations.region_key(fid, r.sample, r.name),
+                    f"{self.ann.region_label(fid, r.sample, r.name)} in "
+                    f"{self.ann.sample_label(fid, r.sample) or 'the sample'}")
+        if scope == "sample":
+            return (annotations.sample_key(fid, r.sample),
+                    self.ann.sample_label(fid, r.sample) or "the sample")
+        return fid, os.path.basename(getattr(p, "path", "") or "the file")
+
+    def apply_calibration(self, r, scope, shift, entry):
+        key, where = self._calibration_scope(r, scope)
+        self.ann.set_shift(key, shift, dict(entry, scope_text=where))
+        self._ann_changed()
+        self.status.config(text=f"Binding energies of {where} shifted by "
+                                f"{shift:+.3f} eV.")
+
+    def clear_calibration(self, r, scope):
+        key, where = self._calibration_scope(r, scope)
+        self.ann.set_shift(key, 0.0)
+        self._ann_changed()
+        self.status.config(text=f"Shift of {where} removed.")
+
+    def calibration_statement(self):
+        return calibration.statement(self.ann.calibration,
+                                     self.ann.calibration_statement)
+
+    # -- element identification ------------------------------------------------
+    def element_lines(self):
+        if self._xps_lines is None:
+            self._xps_lines = xpslines.load_lines()
+        return self._xps_lines
+
+    def open_identify(self):
+        regs = self.calibration_regions()
+        if not regs:
+            messagebox.showinfo(
+                "Identify peaks", "Select or tick a survey (or any "
+                                  "binding-energy spectrum) first.")
+            return
+        if not self.element_lines():
+            messagebox.showwarning("Identify peaks",
+                                   "assets/xps_lines.json is missing or "
+                                   "empty.")
+            return
+        workbook_ui.IdentifyDialog(self.root, self, regs)
+
+    def _marker_key(self, r):
+        p = self.region_parser.get(id(r))
+        return (self.file_ids.get(id(p), "") if p else ""), r.sample, r.name
+
+    def _marker_shift(self, r):
+        fid, sample, name = self._marker_key(r)
+        return self.ann.shift_for(fid, sample, name)
+
+    def identify_markers(self, r):
+        return self.ann.markers_for(*self._marker_key(r))
+
+    def identify_add(self, r, be_measured, label):
+        self.ann.add_marker(*self._marker_key(r), be_measured, label)
+        self._ann_changed(relabel=False)
+
+    def identify_remove(self, r, marker):
+        self.ann.remove_marker(*self._marker_key(r), marker["be"],
+                               marker["label"])
+        self._ann_changed(relabel=False)
+
+    def identify_clear(self, r):
+        self.ann.clear_markers(*self._marker_key(r))
+        self._ann_changed(relabel=False)
+
+    def identify_auto(self, r):
+        found = xpslines.auto_label(r.energy, r.counts, self.element_lines(),
+                                    hv=r.photon_energy)
+        for be, label in found:
+            self.ann.add_marker(*self._marker_key(r), be, label)
+        self._ann_changed(relabel=False)
+        return len(found)
+
+    def rename_selected(self):
+        sel = self.tree.selection() or (self.tree.focus(),)
+        self._rename(sel[0] if sel else "")
+
+    def _rename(self, iid, reset=False):
+        t = self._target_of(iid)
+        if t is None:
+            messagebox.showinfo("Rename", "Select a sample or a region "
+                                          "(not a single level) to rename.")
+            return
+        kind, fid, sample, name, current, original = t
+        if reset:
+            new = original
+        else:
+            new = simpledialog.askstring(
+                "Rename", f"Display name for '{original}'\n(the name in the "
+                          f"file is always kept; leave empty to reset):",
+                initialvalue=current, parent=self.root)
+            if new is None:
+                return
+        if kind == "sample":
+            self.ann.set_name("sample_names",
+                              annotations.sample_key(fid, sample), new,
+                              original)
+        else:
+            self.ann.set_name("region_names",
+                              annotations.region_key(fid, sample, name), new,
+                              original)
+        self._ann_changed()
+
+    def notes_selected(self):
+        sel = self.tree.selection() or (self.tree.focus(),)
+        self._notes(sel[0] if sel else "")
+
+    def _notes(self, iid):
+        t = self._target_of(iid)
+        if t is None:
+            messagebox.showinfo("Notes", "Select a sample or a region to "
+                                         "add notes to.")
+            return
+        kind, fid, sample, name, current, original = t
+        table, key = (("sample_notes", annotations.sample_key(fid, sample))
+                      if kind == "sample" else
+                      ("region_notes",
+                       annotations.region_key(fid, sample, name)))
+
+        def done(text):
+            self.ann.set_note(table, key, text)
+            self._ann_changed()
+
+        workbook_ui.NotesDialog(
+            self.root, self, f"Notes \u2013 {current or original}",
+            getattr(self.ann, table).get(key, ""), done)
 
     def trace_colours(self, regs, pal=None):
         pal = pal or self.palette
@@ -1582,9 +1780,11 @@ class Workspace:
             hay = (node.label + " " + " ".join(str(c) for c in node.cols)).lower()
             return flt in hay or any(matches(c) for c in node.children)
 
-        def add(parent, parser, node, depth, n_samples):
+        def add(parent, parser, node, depth, n_samples, sample=None):
             if not matches(node):
                 return
+            if node.type_name == "sample":
+                sample = "" if node.label == "(unnamed)" else node.label
             leaves = [r for r in regions_under(node) if r.decodable and r.counts]
             ids = frozenset(id(r) for r in leaves)
             opened = True if flt else self._open.get(
@@ -1594,7 +1794,9 @@ class Workspace:
             colour = (self.trace_color.get(id(node.region))
                       if state == 2 and node.region is not None else None)
             iid = self.tree.insert(
-                parent, "end", text=" " + node.label, open=opened, values=cols,
+                parent, "end", text=" " + self._node_label(parser, node,
+                                                           sample),
+                open=opened, values=cols,
                 image=self.swatches.get(state, colour) if ids
                 else self.blank_img)
             self.node_map[iid] = (parser, node)
@@ -1604,7 +1806,7 @@ class Workspace:
                 if node.region is not None:
                     self.leaf_region[iid] = node.region
             for c in node.children:
-                add(iid, parser, c, depth + 1, n_samples)
+                add(iid, parser, c, depth + 1, n_samples, sample)
 
         for p in self.docs:
             if p.tree:
@@ -1722,6 +1924,16 @@ class Workspace:
         else:
             menu.add_command(label="(no decodable spectra here)",
                              state="disabled")
+        target = self._target_of(row)
+        if target is not None:
+            menu.add_separator()
+            menu.add_command(label="Rename…   (F2)",
+                             command=lambda: self._rename(row))
+            if target[4] != target[5]:
+                menu.add_command(label="Reset name",
+                                 command=lambda: self._rename(row, True))
+            menu.add_command(label="Notes…",
+                             command=lambda: self._notes(row))
         item = self.node_map.get(row)
         if item and item[1] is item[0].tree:
             menu.add_separator()
@@ -1825,6 +2037,43 @@ class Workspace:
             self._schedule_render()
         return "break"
 
+    def _step_traces(self, d):
+        if not self._trace_bar_on:
+            return
+        self.trace_start += d
+        self._schedule_render()
+
+    def _toggle_play(self):
+        if getattr(self, "_play_job", None):
+            self._stop_play()
+            return
+        if not self._trace_bar_on:
+            messagebox.showinfo("Play", "Set Traces to a number (for example "
+                                        "1) so a window of traces can move.")
+            return
+        self.play_btn.config(text="\u23f8")
+        self._play_job = self.root.after(350, self._play_tick)
+
+    def _stop_play(self):
+        job = getattr(self, "_play_job", None)
+        if job:
+            try:
+                self.root.after_cancel(job)
+            except tk.TclError:
+                pass
+        self._play_job = None
+        if HAVE_MPL:
+            self.play_btn.config(text="\u25b6")
+
+    def _play_tick(self):
+        if not self._trace_bar_on:
+            self._stop_play()
+            return
+        top = int(float(self.trace_scale.cget("to")))
+        self.trace_start = 0 if self.trace_start >= top else self.trace_start + 1
+        self._schedule_render()
+        self._play_job = self.root.after(350, self._play_tick)
+
     def _on_trace_scale(self, val):
         if self._scale_guard:
             return
@@ -1851,6 +2100,8 @@ class Workspace:
                 text=f"Traces {a}–{min(a + limit - 1, longest)} of {longest}")
         if on != self._trace_bar_on:
             self._trace_bar_on = on
+            if not on:
+                self._stop_play()
             self._layout_bottom()
 
     def _render(self):
@@ -1921,8 +2172,10 @@ class Workspace:
         view = self.view_var.get()
         scale = self.scale_var.get()
         ke_top = bool(self.ke_var.get()) and scale == "Binding"
-        selected = {id(r) for r in self.sel_regions}
+        selected = ({id(r) for r in self.sel_regions}
+                    | {id(self._display(r)) for r in self.sel_regions})
         axmap, stacked_axes, axhv = {}, [], {}
+        axinfo = {}
         notes = []
         if fig is self.fig:
             self._view_notes = notes
@@ -1934,17 +2187,19 @@ class Workspace:
             s = min(start, len(rs) - limit) if limit and len(rs) > limit else 0
             vis = rs[s:s + limit] if limit and len(rs) > limit else rs
             colours = self.trace_colours(rs, base)[s:s + len(vis)]
+            disp = [self._display(r) for r in vis]      # names, BE shift
             if scale == "Kinetic" and not all(
-                    viewdata.energy_axis(r, scale).ok for r in vis):
+                    viewdata.energy_axis(r, scale).ok for r in disp):
                 notes.append("no photon energy for some spectra: shown "
                              "as binding energy")
-            if ke_top and viewdata.mixed_photon_energy(vis):
+            if ke_top and viewdata.mixed_photon_energy(disp):
                 notes.append("photon energies differ: KE axis uses the first")
             if len(rs) == 1:
-                title = rs[0].name
-                subtitle = rs[0].sample
+                title = disp[0].name
+                subtitle = disp[0].sample
             else:
-                title = key
+                title = (disp[0].name if normalise_name(key)
+                         == normalise_name(rs[0].name) else key)
                 subtitle = (f"{len(rs)} spectra" if len(vis) == len(rs)
                             else f"{s + 1}–{s + len(vis)} of {len(rs)}")
             top_row = i < cols
@@ -1961,7 +2216,8 @@ class Workspace:
                                  f"{zi.mode.lower()}")
                 if view == "Heatmap":
                     ax = fig.add_subplot(rows, cols, i + 1)
-                    draw_heatmap(fig, ax, vis, zvis, norm,
+                    axhv[ax] = viewdata.photon_energy(disp)
+                    draw_heatmap(fig, ax, disp, zvis, norm,
                                  themes.scale_colourmap(cmap_name, reverse,
                                                         base), title,
                                  subtitle, first_col=(i % cols == 0),
@@ -1970,28 +2226,38 @@ class Workspace:
                                  scale=scale, ke_top=ke_top)
                 else:
                     ax = fig.add_subplot(rows, cols, i + 1, projection="3d")
-                    draw_waterfall3d(ax, vis, zvis, norm, colours, title,
+                    draw_waterfall3d(ax, disp, zvis, norm, colours, title,
                                      subtitle, pal, scale)
                 axmap[ax] = key
+                axinfo[ax] = (viewdata.photon_energy(disp), view.lower(),
+                              len(disp), zvis.label)
                 continue
             ax = fig.add_subplot(rows, cols, i + 1)
             cur = None
             if norm == "At cursor":
                 cur = self.cursors.get(key)
                 if cur is None:
-                    e = vis[0].energy
+                    e = disp[0].energy
                     cur = self.cursors[key] = (e[0] + e[-1]) / 2.0
-            draw_stack(ax, vis, offset, norm, cur, colours, title, subtitle,
+            marks = []
+            if vis:
+                shift0 = self._marker_shift(vis[0])
+                marks = [(m["be"] + shift0, m["label"])
+                         for m in self.identify_markers(vis[0])]
+            draw_stack(ax, disp, offset, norm, cur, colours, title, subtitle,
                        selected, multi, first_col=(i % cols == 0),
                        bottom_row=(i + cols >= len(chunk)),
                        accent=pal["accent"], muted=pal["muted"],
-                       scale=scale, ke_top=ke_top, top_row=top_row)
+                       scale=scale, ke_top=ke_top, top_row=top_row,
+                       markers=marks)
             axmap[ax] = key
-            axhv[ax] = viewdata.photon_energy(vis)
+            axhv[ax] = viewdata.photon_energy(disp)
+            axinfo[ax] = (axhv[ax], "stack", len(disp), "")
             if len(vis) > 1:
                 stacked_axes.append(ax)
         if fig is self.fig:
             self._axhv = axhv
+            self._axinfo = axinfo
         if rect is not None:            # leave room for a heading / caption
             fig.tight_layout(rect=rect)
         else:
@@ -2003,7 +2269,64 @@ class Workspace:
             ax.set_position([b.x0, b.y0, max(0.05, b.width - gutter), b.height])
         return axmap
 
+    def _binding_at(self, event):
+        """Binding energy (as measured, before any shift) under the pointer,
+        or None if it cannot be told."""
+        ax = event.inaxes
+        info = self._axinfo.get(ax)
+        if ax is None or event.xdata is None or info is None:
+            return None
+        x, hv = float(event.xdata), info[0]
+        if self.scale_var.get() == "Kinetic":
+            if not hv:
+                return None
+            x = hv - x
+        key = self._axmap.get(ax)
+        shift = 0.0
+        if key is not None:
+            for k, rs in self._groups():
+                if k == key and rs:
+                    r = rs[0]
+                    p = self.region_parser.get(id(r))
+                    shift = self.ann.shift_for(
+                        self.file_ids.get(id(p), ""), r.sample, r.name)
+                    break
+        return x - shift
+
+    def _on_motion(self, event):
+        ax = event.inaxes
+        info = self._axinfo.get(ax) if ax is not None else None
+        if info is None or event.xdata is None or event.ydata is None:
+            self.cursor_lbl.config(text="")
+            return
+        hv, kind, n, zlabel = info
+        x = float(event.xdata)
+        if self.scale_var.get() == "Kinetic":
+            text = f"KE {x:.2f} eV" + (f"   BE {hv - x:.2f} eV" if hv else "")
+        else:
+            text = f"BE {x:.2f} eV" + (f"   KE {hv - x:.2f} eV" if hv else "")
+        if kind == "stack" and n == 1:
+            text += f"   y {event.ydata:.5g}"
+        elif kind == "heatmap":
+            text += f"   {zlabel or 'z'} {event.ydata:.5g}"
+        self.cursor_lbl.config(text=text)
+
     def _on_plot_click(self, event):
+        if self._click_cb is not None and event.inaxes is not None:
+            if not str(getattr(self.toolbar, "mode", "")):
+                be = self._binding_at(event)
+                if be is not None:
+                    self._click_cb(be, event)
+                return
+        if self._pick_cb is not None and event.inaxes is not None:
+            if str(getattr(self.toolbar, "mode", "")):
+                return
+            be = self._binding_at(event)
+            if be is not None:
+                cb, self._pick_cb = self._pick_cb, None
+                self.canvas.get_tk_widget().config(cursor="")
+                cb(be)
+            return
         if (self.norm_var.get() != "At cursor" or event.inaxes is None
                 or event.xdata is None or self.view_var.get() != "Stack"):
             return
@@ -2017,6 +2340,45 @@ class Workspace:
                 x = hv - x              # cursors are kept as binding energy
             self.cursors[key] = x
             self._schedule_render()
+
+    def save_plot_image(self):
+        """Save the panels currently shown as PNG / SVG / PDF."""
+        if not HAVE_MPL:
+            messagebox.showinfo("Save plot image",
+                                "matplotlib is required to save plots.")
+            return
+        if not self._groups():
+            messagebox.showinfo("Save plot image", "Tick some spectra first.")
+            return
+
+        def go(style, width, height, dpi):
+            path = filedialog.asksaveasfilename(
+                title="Save plot image", defaultextension=".png",
+                initialfile="spectra.png",
+                filetypes=[("PNG image", "*.png"), ("SVG (vector)", "*.svg"),
+                           ("PDF (vector)", "*.pdf")])
+            if not path:
+                return
+            groups = self._groups()
+            npp = self._panels_per_page(len(groups))
+            chunk = groups[self.panel_start:self.panel_start + npp]
+            paper = style.startswith("Paper")
+            base = PRINT if paper else None
+            pal = self._plot_palette(PRINT if paper else self.palette,
+                                     paper=paper)[0]
+            fig = Figure(figsize=(width, height), dpi=dpi)
+            try:
+                with matplotlib.rc_context(mpl_rc(pal)):
+                    self._draw_page(fig, chunk, self._traces_limit(),
+                                    self.trace_start, pal=base)
+                    fig.savefig(path, dpi=dpi,
+                                facecolor=pal["plot_bg"])
+            except Exception as exc:
+                messagebox.showerror("Save plot image", str(exc))
+                return
+            self.status.config(text=f"Plot saved to {path}")
+
+        workbook_ui.ImageOptionsDialog(self.root, self, go)
 
     # -- experiment workbook (.xpscontainer) --------------------------------
     STATE_CHOICES = {
@@ -2122,7 +2484,8 @@ class Workspace:
 
     def _wb_active(self):
         return bool(self.wb_path or self.figures or self.logo
-                    or any(self.details.values()))
+                    or any(self.details.values())
+                    or not self.ann.is_empty())
 
     def _signature(self):
         st = self.capture_state()
@@ -2131,7 +2494,8 @@ class Workspace:
         files = sorted(f"{self.file_ids.get(id(p))}:{os.path.basename(p.path)}"
                        for p in self.docs)
         return json.dumps({"d": self.details, "l": self.logo,
-                           "f": self.figures, "s": st, "files": files},
+                           "f": self.figures, "s": st, "files": files,
+                           "a": self.ann.to_json()},
                           sort_keys=True, default=str)
 
     def _wb_dirty(self):
@@ -2174,6 +2538,7 @@ class Workspace:
         self.logo, self.figures = "", []
         self.wb_path, self.wb_extra, self.wb_created = None, {}, ""
         self._fid_used = set()
+        self.ann = annotations.Annotations()
 
     def new_workbook(self):
         if not self._confirm_discard():
@@ -2232,6 +2597,7 @@ class Workspace:
             details=dict(self.details), state=self.capture_state(),
             figures=copy.deepcopy(self.figures), files=entries,
             logo=self.logo, metadata=self._metadata_snapshot(),
+            annotations=self.ann.to_json(),
             created=self.wb_created, extra=dict(self.wb_extra))
         self.root.config(cursor="watch")
         self.root.update_idletasks()
@@ -2244,6 +2610,7 @@ class Workspace:
             self.root.config(cursor="")
         self.wb_path, self.wb_created = path, book.created
         self._wb_sig = self._signature()
+        self._add_recent(path)
         self._update_title()
         return True
 
@@ -2273,6 +2640,7 @@ class Workspace:
         self._reset_workbook()
         self.wb_dir = folder
         self._fid_used = {f.id for f in book.files}
+        self.ann = annotations.Annotations.from_json(book.annotations)
         problems = list(book.warnings)
         for f in book.files:
             problems += self._add_file(f.path, file_id=f.id,
@@ -2281,11 +2649,13 @@ class Workspace:
         self.figures = book.figures
         self.wb_path, self.wb_extra = path, book.extra
         self.wb_created = book.created
+        self._ann_changed()
         missing = self.apply_state(book.state)
         if missing:
             problems.append(f"{missing} ticked spectrum(s) could not be "
                             f"found in the loaded files.")
         self._wb_sig = self._signature()
+        self._add_recent(path)
         self._update_title()
         if problems:
             messagebox.showwarning("Workbook opened with warnings",
@@ -2373,8 +2743,9 @@ class Workspace:
         if not HAVE_MPL:
             sections = tuple(s for s in sections if s != "figures")
         return report.build_report(
-            path, self.details, self.logo, self._report_file_rows(),
-            self.docs, figures, self._report_figure_pages, sections)
+            path, dict(self.details, calibration=self.calibration_statement()),
+            self.logo, self._report_file_rows(), self.docs, figures,
+            self._report_figure_pages, sections)
 
     def _report_ready(self):
         if not self.docs:
@@ -2400,8 +2771,9 @@ class Workspace:
         if not HAVE_MPL:
             sections = tuple(s for s in sections if s != "figures")
         return pptx_export.build_deck(
-            path, self.details, self.logo, self._report_file_rows(),
-            self.docs, figures, self._deck_images, sections)
+            path, dict(self.details, calibration=self.calibration_statement()),
+            self.logo, self._report_file_rows(), self.docs, figures,
+            self._deck_images, sections)
 
     def export_powerpoint(self):
         if not self._report_ready():
@@ -2695,13 +3067,18 @@ class Workspace:
         def head(txt):
             t.insert("end", txt + "\n", "h")
 
+        edited = set()
+
         def row(k, v):
             t.insert("end", k, ("row", "k"))
-            t.insert("end", f"\t{v}\n", "row")
+            t.insert("end", f"\t{v}" + ("  \u270e" if k in edited else "")
+                     + "\n", "row")
 
         parser = self.region_parser.get(id(regs[0]))
         if len(regs) == 1:
             base = parser.region_metadata(regs[0])
+            edited = self.ann.edited_keys(parser.file_id,
+                                          parser.region_pos(regs[0]))
 
             def section(title, keys):
                 items = [(k, base[k]) for k in keys if base.get(k)]
@@ -2723,6 +3100,17 @@ class Workspace:
                 "Points", "Quality"])
             if r.note:
                 row("Note", r.note)
+            section("Corrections and notes", ["BE shift (eV)", "Notes"])
+            shown = {"Sample", "Source file", "File format", "Date acquired",
+                     "Etch level", "Etch time (s)", "Instrument", "Operator",
+                     "Acquisition computer", "X-ray source", "Anode",
+                     "Photon energy (eV)", "Source power (W)",
+                     "Charge neutraliser", "Ion gun / sputtering", "Region",
+                     "Pass energy (eV)", "Lens mode", "Aperture",
+                     "BE start (eV)", "BE end (eV)", "Step (eV)", "Dwell (s)",
+                     "Points", "Quality", "BE shift (eV)", "Notes"}
+            section("Edited fields", [k for k in base
+                                      if k in edited and k not in shown])
         else:
             self._metadata_many(regs, head, row)
         t.config(state="disabled")
@@ -2999,6 +3387,9 @@ class Workspace:
         if not regions:
             messagebox.showinfo("Export", "No decodable spectra to export.")
             return False
+        source_parser = self.region_parser.get(id(regions[0]))
+        if self.cfg.get("apply_corrections", True):     # names, BE shift
+            regions = [self._display(r) for r in regions]
         if fmt == "csv":
             path = filedialog.asksaveasfilename(
                 defaultextension=".csv", filetypes=[("CSV", "*.csv")])
@@ -3008,7 +3399,7 @@ class Workspace:
                 filetypes=[("VAMAS", "*.vms"), ("VAMAS", "*.vamas")])
         if not path:
             return False
-        parser = self.region_parser.get(id(regions[0]))
+        parser = source_parser
         inst = parser.instrument if parser else {}
         try:
             if fmt == "csv":
@@ -3301,11 +3692,15 @@ class ExportDialog(tk.Toplevel):
 
 def main():
     fonts.register_process_fonts()          # before Tk enumerates fonts
-    root = tk.Tk()
+    try:                                     # drag-and-drop if it is installed
+        from tkinterdnd2 import TkinterDnD
+        root = TkinterDnD.Tk()
+    except Exception:
+        root = tk.Tk()
     app = Workspace(root)
-    args = [a for a in sys.argv[1:] if a.lower().endswith(wbk.EXT)]
-    if args:                                 # e.g. double-clicking a workbook
-        root.after(300, lambda: app.open_workbook(os.path.abspath(args[0])))
+    args = [os.path.abspath(a) for a in sys.argv[1:] if os.path.exists(a)]
+    if args:                     # double-clicking a workbook, or "open with"
+        root.after(300, lambda: app._open_paths(args))
     root.mainloop()
 
 

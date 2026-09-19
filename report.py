@@ -106,6 +106,11 @@ def cover_story(details, logo, file_rows):
         for para in paras:
             story += [Paragraph(para, body), Spacer(1, 3 * mm)]
 
+    cal = (details.get("calibration") or "").strip()
+    if cal:
+        story += [Paragraph("Energy calibration", styles["Heading2"]),
+                  Paragraph(xml_escape(cal), body), Spacer(1, 3 * mm)]
+
     if file_rows:
         story += [Spacer(1, 4 * mm),
                   Paragraph("Data files", styles["Heading2"])]

@@ -300,7 +300,11 @@ def _title_slide(deck, details, logo):
 
 def _summary_slides(deck, details, n0):
     n = n0
-    pages = chunk_paragraphs(paragraphs(details.get("summary")))
+    paras = paragraphs(details.get("summary"))
+    cal = (details.get("calibration") or "").strip()
+    if cal:
+        paras.append("Energy calibration: " + cal)
+    pages = chunk_paragraphs(paras)
     for i, page in enumerate(pages):
         n += 1
         slide = deck.content_slide("Summary" + (" (continued)" if i else ""),

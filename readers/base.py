@@ -204,6 +204,10 @@ class SpectrumFile:
         self.summary = {}
         self.warnings: list = []       # non-fatal notes shown after loading
         self._sample_pos = {}
+        # set by the app: user edits kept beside the data (annotations.py)
+        self.annotations = None
+        self.file_id = ""
+        self._pos = {}                 # id(region) -> position in regions
 
     def load(self, path: str):
         raise NotImplementedError
@@ -213,12 +217,17 @@ class SpectrumFile:
         name = os.path.basename(self.path or "")
         for r in self.regions:
             r.source = name
+        self._pos = {id(r): i for i, r in enumerate(self.regions)}
         self._build_tree()
         self._build_summary()
         return self
 
     def date_for_region(self, r) -> str:
         return r.date
+
+    def region_pos(self, r):
+        """Position of ``r`` in ``self.regions`` (None if it is not ours)."""
+        return self._pos.get(id(r))
 
     # -- positions / images ---------------------------------------------
     def analysis_positions(self):
@@ -396,6 +405,9 @@ class SpectrumFile:
         md["Quality"] = r.conditions.get("Quality", "")
         md["Charge neutraliser"] = self.instrument.get("Charge neutraliser", "")
         md["Ion gun / sputtering"] = self.instrument.get("Ion gun / sputtering", "")
+        if self.annotations is not None:
+            md = self.annotations.apply_metadata(
+                self.file_id, self._pos.get(id(r)), r, md)
         return md
 
     def metadata_rows(self):
@@ -409,5 +421,7 @@ class SpectrumFile:
             groups.setdefault(r.sample, []).append(self.region_metadata(r))
             if r.sample not in order:
                 order.append(r.sample)
-        return [(s, groups[s]) for s in order]
+        ann = self.annotations
+        return [(ann.sample_label(self.file_id, s) if ann else s, groups[s])
+                for s in order]
 

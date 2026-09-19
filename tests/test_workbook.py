@@ -381,6 +381,19 @@ class TestImportPlan(unittest.TestCase):
         self.assertIn("/d/one.vgd", out)
         self.assertNotIn("/d/TWO.vgd", out)
 
+    def test_classify_paths(self):
+        with tempfile.TemporaryDirectory() as d:
+            folder = os.path.join(d, "sub")
+            os.makedirs(folder)
+            book = os.path.join(d, "x.XPSContainer")
+            data = os.path.join(d, "a.vgd")
+            for f in (book, data):
+                open(f, "w").close()
+            books, folders, files = importplan.classify_paths(
+                [data, folder, book, os.path.join(d, "missing.avg")])
+        self.assertEqual((books, folders), ([book], [folder]))
+        self.assertEqual(files, [data, os.path.join(d, "missing.avg")])
+
     def test_unknown_choice(self):
         with self.assertRaises(ValueError):
             importplan.apply_choice(self.PATHS,

@@ -34,6 +34,7 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
 | `report.py` | the experiment report PDF |
 | `pptx_export.py` | the PowerPoint export (python-pptx) |
+| `annotations.py`, `calibration.py`, `xpslines.py`, `assets/xps_lines.json` | your edits (names, notes, metadata, BE shifts, peak markers), calibration maths and the element-line table |
 | `importplan.py` | choosing between `.avg` / `.vgd` copies of the same data |
 | `viewdata.py`, `metasummary.py` | plot-view and metadata-tidying helpers |
 | `themes.py` | design tokens and colour themes |
@@ -176,6 +177,36 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
    **Transmission** function as corresponding variables (toggle it off in the
    dialog). *Metadata to CSV / PDF* saves per-sample acquisition metadata; with
    several files open, select a row of the file you want first.
+
+## Editing, calibration and element labels (Tools menu)
+
+Nothing here changes the instrument files: your edits are stored beside the
+data (in the workbook) and applied when you plot, export and report.
+
+* **Rename** (F2, or right-click a sample / region): give samples and regions
+  display names; the original name is always kept and shown in Details.
+  **Notes…** adds free text to a sample or region.
+* **Edit metadata**: double-click a value in *Details* (or right-click → Edit
+  value / Add field / Reset). Edited values carry a ✎ mark and flow into the
+  PDF, PowerPoint and CSV.
+* **Calibrate binding energy…**: pick a reference spectrum, find the peak
+  (or click it on the plot), choose the reference (C 1s 284.8, Au 4f7/2
+  83.95, Ag, Cu, Fermi edge or your own value) and apply the shift to a
+  region, a sample or a whole file. Plots, CSV and VAMAS exports use the
+  shifted energies (VAMAS carries the shift through the source energy, so
+  kinetic energies are unchanged), and the report gets a calibration
+  statement.
+* **Identify peaks…**: click a survey peak to list candidate element lines,
+  add the one you want as a marker, or **Auto-label** every peak. Markers
+  follow BE shifts and the KE axis. Line positions are approximate (typical
+  values, chemical shifts of a few eV are normal); edit
+  `assets/xps_lines.json` to change or extend them.
+* **Cursor read-out** (status bar): BE, KE and intensity under the pointer.
+* **Comforts**: File → *Open recent*, *Save plot image…* (PNG / SVG / PDF, any
+  size and dpi), drag files or folders onto the window (needs the optional
+  `tkinterdnd2`, which the launcher installs when it can), a progress box with
+  **Cancel** when loading many files, and ▶ / ← → to play through the traces
+  (set *Traces* to 1 to step through depth levels one at a time).
 
 ## Experiment workbooks (`.xpscontainer`)
 

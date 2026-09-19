@@ -1,0 +1,641 @@
+{
+ "comment": "Approximate XPS line positions (eV) for labelling. Al K-alpha binding energies, typical for the elemental or common compound state; chemical shifts of a few eV are normal. Edit or extend this file freely. 'be' = binding energy; Auger lines give 'ke' (kinetic energy) instead. rank 1 = the line normally used, higher = weaker/secondary.",
+ "lines": [
+  {
+   "el": "Li",
+   "line": "1s",
+   "be": 55,
+   "rank": 1
+  },
+  {
+   "el": "Be",
+   "line": "1s",
+   "be": 111,
+   "rank": 1
+  },
+  {
+   "el": "B",
+   "line": "1s",
+   "be": 188,
+   "rank": 1
+  },
+  {
+   "el": "C",
+   "line": "1s",
+   "be": 285,
+   "rank": 1
+  },
+  {
+   "el": "N",
+   "line": "1s",
+   "be": 400,
+   "rank": 1
+  },
+  {
+   "el": "O",
+   "line": "1s",
+   "be": 532,
+   "rank": 1
+  },
+  {
+   "el": "O",
+   "line": "2s",
+   "be": 24,
+   "rank": 3
+  },
+  {
+   "el": "F",
+   "line": "1s",
+   "be": 686,
+   "rank": 1
+  },
+  {
+   "el": "Na",
+   "line": "1s",
+   "be": 1071,
+   "rank": 1
+  },
+  {
+   "el": "Na",
+   "line": "2p",
+   "be": 31,
+   "rank": 3
+  },
+  {
+   "el": "Mg",
+   "line": "2p",
+   "be": 50,
+   "rank": 1
+  },
+  {
+   "el": "Mg",
+   "line": "2s",
+   "be": 89,
+   "rank": 2
+  },
+  {
+   "el": "Mg",
+   "line": "1s",
+   "be": 1303,
+   "rank": 2
+  },
+  {
+   "el": "Al",
+   "line": "2p",
+   "be": 73,
+   "rank": 1
+  },
+  {
+   "el": "Al",
+   "line": "2s",
+   "be": 118,
+   "rank": 2
+  },
+  {
+   "el": "Si",
+   "line": "2p",
+   "be": 99,
+   "rank": 1
+  },
+  {
+   "el": "Si",
+   "line": "2s",
+   "be": 150,
+   "rank": 2
+  },
+  {
+   "el": "P",
+   "line": "2p",
+   "be": 130,
+   "rank": 1
+  },
+  {
+   "el": "P",
+   "line": "2s",
+   "be": 191,
+   "rank": 2
+  },
+  {
+   "el": "S",
+   "line": "2p",
+   "be": 164,
+   "rank": 1
+  },
+  {
+   "el": "S",
+   "line": "2s",
+   "be": 228,
+   "rank": 2
+  },
+  {
+   "el": "Cl",
+   "line": "2p",
+   "be": 200,
+   "rank": 1
+  },
+  {
+   "el": "Cl",
+   "line": "2s",
+   "be": 270,
+   "rank": 2
+  },
+  {
+   "el": "Ar",
+   "line": "2p",
+   "be": 242,
+   "rank": 1
+  },
+  {
+   "el": "K",
+   "line": "2p3/2",
+   "be": 293,
+   "rank": 1
+  },
+  {
+   "el": "K",
+   "line": "2s",
+   "be": 378,
+   "rank": 2
+  },
+  {
+   "el": "Ca",
+   "line": "2p3/2",
+   "be": 347,
+   "rank": 1
+  },
+  {
+   "el": "Sc",
+   "line": "2p3/2",
+   "be": 399,
+   "rank": 1
+  },
+  {
+   "el": "Ti",
+   "line": "2p3/2",
+   "be": 454,
+   "rank": 1
+  },
+  {
+   "el": "V",
+   "line": "2p3/2",
+   "be": 512,
+   "rank": 1
+  },
+  {
+   "el": "Cr",
+   "line": "2p3/2",
+   "be": 574,
+   "rank": 1
+  },
+  {
+   "el": "Mn",
+   "line": "2p3/2",
+   "be": 639,
+   "rank": 1
+  },
+  {
+   "el": "Fe",
+   "line": "2p3/2",
+   "be": 707,
+   "rank": 1
+  },
+  {
+   "el": "Co",
+   "line": "2p3/2",
+   "be": 778,
+   "rank": 1
+  },
+  {
+   "el": "Ni",
+   "line": "2p3/2",
+   "be": 853,
+   "rank": 1
+  },
+  {
+   "el": "Cu",
+   "line": "2p3/2",
+   "be": 933,
+   "rank": 1
+  },
+  {
+   "el": "Zn",
+   "line": "2p3/2",
+   "be": 1022,
+   "rank": 1
+  },
+  {
+   "el": "Ga",
+   "line": "3d",
+   "be": 19,
+   "rank": 2
+  },
+  {
+   "el": "Ga",
+   "line": "2p3/2",
+   "be": 1117,
+   "rank": 1
+  },
+  {
+   "el": "Ge",
+   "line": "3d",
+   "be": 29,
+   "rank": 1
+  },
+  {
+   "el": "Ge",
+   "line": "2p3/2",
+   "be": 1217,
+   "rank": 2
+  },
+  {
+   "el": "As",
+   "line": "3d",
+   "be": 41,
+   "rank": 1
+  },
+  {
+   "el": "As",
+   "line": "2p3/2",
+   "be": 1323,
+   "rank": 2
+  },
+  {
+   "el": "Se",
+   "line": "3d",
+   "be": 55,
+   "rank": 1
+  },
+  {
+   "el": "Br",
+   "line": "3d",
+   "be": 69,
+   "rank": 1
+  },
+  {
+   "el": "Kr",
+   "line": "3d",
+   "be": 93,
+   "rank": 1
+  },
+  {
+   "el": "Rb",
+   "line": "3d5/2",
+   "be": 110,
+   "rank": 1
+  },
+  {
+   "el": "Sr",
+   "line": "3d5/2",
+   "be": 133,
+   "rank": 1
+  },
+  {
+   "el": "Y",
+   "line": "3d5/2",
+   "be": 157,
+   "rank": 1
+  },
+  {
+   "el": "Zr",
+   "line": "3d5/2",
+   "be": 179,
+   "rank": 1
+  },
+  {
+   "el": "Nb",
+   "line": "3d5/2",
+   "be": 202,
+   "rank": 1
+  },
+  {
+   "el": "Mo",
+   "line": "3d5/2",
+   "be": 228,
+   "rank": 1
+  },
+  {
+   "el": "Tc",
+   "line": "3d5/2",
+   "be": 254,
+   "rank": 1
+  },
+  {
+   "el": "Ru",
+   "line": "3d5/2",
+   "be": 280,
+   "rank": 1
+  },
+  {
+   "el": "Rh",
+   "line": "3d5/2",
+   "be": 307,
+   "rank": 1
+  },
+  {
+   "el": "Pd",
+   "line": "3d5/2",
+   "be": 335,
+   "rank": 1
+  },
+  {
+   "el": "Ag",
+   "line": "3d5/2",
+   "be": 368,
+   "rank": 1
+  },
+  {
+   "el": "Cd",
+   "line": "3d5/2",
+   "be": 405,
+   "rank": 1
+  },
+  {
+   "el": "In",
+   "line": "3d5/2",
+   "be": 444,
+   "rank": 1
+  },
+  {
+   "el": "Sn",
+   "line": "3d5/2",
+   "be": 485,
+   "rank": 1
+  },
+  {
+   "el": "Sb",
+   "line": "3d5/2",
+   "be": 528,
+   "rank": 1
+  },
+  {
+   "el": "Te",
+   "line": "3d5/2",
+   "be": 573,
+   "rank": 1
+  },
+  {
+   "el": "I",
+   "line": "3d5/2",
+   "be": 619,
+   "rank": 1
+  },
+  {
+   "el": "Xe",
+   "line": "3d5/2",
+   "be": 669,
+   "rank": 1
+  },
+  {
+   "el": "Cs",
+   "line": "3d5/2",
+   "be": 726,
+   "rank": 1
+  },
+  {
+   "el": "Ba",
+   "line": "3d5/2",
+   "be": 781,
+   "rank": 1
+  },
+  {
+   "el": "La",
+   "line": "3d5/2",
+   "be": 835,
+   "rank": 1
+  },
+  {
+   "el": "Ce",
+   "line": "3d5/2",
+   "be": 883,
+   "rank": 1
+  },
+  {
+   "el": "Pr",
+   "line": "3d5/2",
+   "be": 932,
+   "rank": 1
+  },
+  {
+   "el": "Nd",
+   "line": "3d5/2",
+   "be": 981,
+   "rank": 1
+  },
+  {
+   "el": "Sm",
+   "line": "3d5/2",
+   "be": 1082,
+   "rank": 1
+  },
+  {
+   "el": "Eu",
+   "line": "3d5/2",
+   "be": 1135,
+   "rank": 1
+  },
+  {
+   "el": "Gd",
+   "line": "3d5/2",
+   "be": 1186,
+   "rank": 1
+  },
+  {
+   "el": "Tb",
+   "line": "3d5/2",
+   "be": 1241,
+   "rank": 1
+  },
+  {
+   "el": "Dy",
+   "line": "4d",
+   "be": 154,
+   "rank": 1
+  },
+  {
+   "el": "Ho",
+   "line": "4d",
+   "be": 161,
+   "rank": 1
+  },
+  {
+   "el": "Er",
+   "line": "4d",
+   "be": 168,
+   "rank": 1
+  },
+  {
+   "el": "Tm",
+   "line": "4d",
+   "be": 176,
+   "rank": 1
+  },
+  {
+   "el": "Yb",
+   "line": "4d",
+   "be": 185,
+   "rank": 1
+  },
+  {
+   "el": "Lu",
+   "line": "4d",
+   "be": 196,
+   "rank": 1
+  },
+  {
+   "el": "Hf",
+   "line": "4f7/2",
+   "be": 14,
+   "rank": 1
+  },
+  {
+   "el": "Ta",
+   "line": "4f7/2",
+   "be": 22,
+   "rank": 1
+  },
+  {
+   "el": "W",
+   "line": "4f7/2",
+   "be": 31,
+   "rank": 1
+  },
+  {
+   "el": "Re",
+   "line": "4f7/2",
+   "be": 40,
+   "rank": 1
+  },
+  {
+   "el": "Os",
+   "line": "4f7/2",
+   "be": 51,
+   "rank": 1
+  },
+  {
+   "el": "Ir",
+   "line": "4f7/2",
+   "be": 61,
+   "rank": 1
+  },
+  {
+   "el": "Pt",
+   "line": "4f7/2",
+   "be": 71,
+   "rank": 1
+  },
+  {
+   "el": "Au",
+   "line": "4f7/2",
+   "be": 84,
+   "rank": 1
+  },
+  {
+   "el": "Hg",
+   "line": "4f7/2",
+   "be": 100,
+   "rank": 1
+  },
+  {
+   "el": "Tl",
+   "line": "4f7/2",
+   "be": 118,
+   "rank": 1
+  },
+  {
+   "el": "Pb",
+   "line": "4f7/2",
+   "be": 137,
+   "rank": 1
+  },
+  {
+   "el": "Bi",
+   "line": "4f7/2",
+   "be": 157,
+   "rank": 1
+  },
+  {
+   "el": "Th",
+   "line": "4f7/2",
+   "be": 333,
+   "rank": 1
+  },
+  {
+   "el": "U",
+   "line": "4f7/2",
+   "be": 380,
+   "rank": 1
+  },
+  {
+   "el": "C",
+   "line": "KLL",
+   "ke": 263,
+   "rank": 3
+  },
+  {
+   "el": "N",
+   "line": "KLL",
+   "ke": 381,
+   "rank": 3
+  },
+  {
+   "el": "O",
+   "line": "KLL",
+   "ke": 510,
+   "rank": 3
+  },
+  {
+   "el": "F",
+   "line": "KLL",
+   "ke": 655,
+   "rank": 3
+  },
+  {
+   "el": "Na",
+   "line": "KLL",
+   "ke": 990,
+   "rank": 3
+  },
+  {
+   "el": "Mg",
+   "line": "KLL",
+   "ke": 1180,
+   "rank": 3
+  },
+  {
+   "el": "Cu",
+   "line": "L3M45M45",
+   "ke": 918,
+   "rank": 3
+  },
+  {
+   "el": "Zn",
+   "line": "L3M45M45",
+   "ke": 992,
+   "rank": 3
+  },
+  {
+   "el": "Ag",
+   "line": "M4N45N45",
+   "ke": 358,
+   "rank": 3
+  },
+  {
+   "el": "In",
+   "line": "M4N45N45",
+   "ke": 405,
+   "rank": 3
+  },
+  {
+   "el": "Sn",
+   "line": "M4N45N45",
+   "ke": 420,
+   "rank": 3
+  },
+  {
+   "el": "Ga",
+   "line": "L3M45M45",
+   "ke": 1065,
+   "rank": 3
+  }
+ ]
+}

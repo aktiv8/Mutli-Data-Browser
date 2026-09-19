@@ -408,3 +408,441 @@ class SectionsDialog(tk.Toplevel):
             return
         self.destroy()
         self.on_ok(chosen)
+
+
+class NotesDialog(tk.Toplevel):
+    """Free-text notes for a sample or region; ``on_ok(text)`` gets the text."""
+
+    def __init__(self, master, app, title, text, on_ok):
+        super().__init__(master)
+        self.on_ok = on_ok
+        self.title(title)
+        self.transient(master)
+        self.grab_set()
+        body = ttk.Frame(self, padding=12)
+        body.pack(fill="both", expand=True)
+        self.text = tk.Text(body, wrap="word", height=10, width=56, undo=True,
+                            relief="flat", borderwidth=1,
+                            font="TkDefaultFont")
+        self.text.pack(fill="both", expand=True)
+        self.text.insert("1.0", text)
+        bar = ttk.Frame(body)
+        bar.pack(fill="x", pady=(10, 0))
+        ttk.Button(bar, text="Cancel", command=self.destroy).pack(
+            side="right")
+        ttk.Button(bar, text="OK", command=self._ok).pack(
+            side="right", padx=(0, 6))
+        self.bind("<Escape>", lambda e: self.destroy())
+        _finish(self, app, 520, 340)
+        self.text.configure(bg=app.palette["entry"], fg=app.palette["fg"],
+                            insertbackground=app.palette["fg"])
+        self.text.focus_set()
+
+    def _ok(self):
+        text = self.text.get("1.0", "end").rstrip()
+        self.destroy()
+        self.on_ok(text)
+
+
+class CalibrateDialog(tk.Toplevel):
+    """Binding-energy calibration: find (or click) a reference peak, enter its
+    reference energy, and apply the shift to a region, a sample or the file.
+
+    Uses ``app.calibration_label(region)``, ``app.apply_calibration(...)``,
+    ``app.clear_calibration(...)`` and ``app._pick_cb``. Not modal, so the
+    plot can be clicked while it is open."""
+
+    def __init__(self, master, app, regions):
+        import calibration
+        super().__init__(master)
+        self.app, self.cal = app, calibration
+        self.regions = regions
+        self.title("Calibrate binding energy")
+        self.transient(master)
+        body = ttk.Frame(self, padding=12)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(1, weight=1)
+        r = 0
+        ttk.Label(body, text="Reference spectrum").grid(
+            row=r, column=0, sticky="w", pady=3)
+        self.reg_var = tk.StringVar()
+        names = [app.calibration_label(x) for x in regions]
+        self.reg_cb = ttk.Combobox(body, textvariable=self.reg_var,
+                                   values=names, state="readonly", width=44)
+        self.reg_cb.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
+        self.reg_cb.current(0)
+        r += 1
+        ttk.Label(body, text="Reference peak").grid(row=r, column=0,
+                                                    sticky="w", pady=3)
+        self.preset_var = tk.StringVar(value=calibration.PRESETS[0][0])
+        pc = ttk.Combobox(body, textvariable=self.preset_var, state="readonly",
+                          values=[p[0] for p in calibration.PRESETS],
+                          width=44)
+        pc.grid(row=r, column=1, columnspan=2, sticky="ew", pady=3)
+        pc.bind("<<ComboboxSelected>>", lambda e: self._preset())
+        r += 1
+        self.vars = {}
+        for key, label, init in (("ref", "Reference BE (eV)", "284.80"),
+                                 ("centre", "Search around (eV)", "285.00"),
+                                 ("half", "± window (eV)", "2.0"),
+                                 ("meas", "Measured BE (eV)", "")):
+            ttk.Label(body, text=label).grid(row=r, column=0, sticky="w",
+                                             pady=3)
+            self.vars[key] = tk.StringVar(value=init)
+            e = ttk.Entry(body, textvariable=self.vars[key], width=12)
+            e.grid(row=r, column=1, sticky="w", pady=3)
+            self.vars[key].trace_add("write", lambda *a: self._update())
+            r += 1
+        btns = ttk.Frame(body)
+        btns.grid(row=r - 1, column=2, sticky="e")
+        ttk.Button(btns, text="Find peak", command=self._find).pack(
+            side="left")
+        ttk.Button(btns, text="Click on plot", command=self._pick).pack(
+            side="left", padx=(4, 0))
+        self.result = ttk.Label(body, style="Muted.TLabel", wraplength=440,
+                                justify="left")
+        self.result.grid(row=r, column=0, columnspan=3, sticky="w",
+                         pady=(6, 2))
+        r += 1
+        self.scope = tk.StringVar(value="sample")
+        box = ttk.LabelFrame(body, text="Apply the shift to")
+        box.grid(row=r, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        for value, text in (("region", "this region of this sample"),
+                            ("sample", "every region of this sample"),
+                            ("file", "every sample in this file")):
+            ttk.Radiobutton(box, text=text, value=value,
+                            variable=self.scope).pack(anchor="w", padx=8,
+                                                      pady=1)
+        r += 1
+        bar = ttk.Frame(body)
+        bar.grid(row=r, column=0, columnspan=3, sticky="e", pady=(12, 0))
+        ttk.Button(bar, text="Close", command=self.destroy).pack(side="right")
+        ttk.Button(bar, text="Remove shift", command=self._remove).pack(
+            side="right", padx=(0, 6))
+        ttk.Button(bar, text="Apply", command=self._apply).pack(
+            side="right", padx=(0, 6))
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Destroy>", lambda e: self._cancel_pick()
+                  if e.widget is self else None)
+        _finish(self, app, 560, 460)
+        self._update()
+
+    # -- helpers -----------------------------------------------------------------
+    def _region(self):
+        return self.regions[self.reg_cb.current()]
+
+    def _num(self, key):
+        try:
+            return float(self.vars[key].get())
+        except ValueError:
+            return None
+
+    def _preset(self):
+        for label, centre, ref in self.cal.PRESETS:
+            if label == self.preset_var.get() and ref is not None:
+                self.vars["ref"].set(f"{ref:.2f}")
+                self.vars["centre"].set(f"{centre:.2f}")
+                self.vars["half"].set("2.0")
+
+    def _find(self):
+        centre, half = self._num("centre"), self._num("half")
+        if centre is None or half is None:
+            self.result.config(text="Enter the search centre and window.")
+            return
+        r = self._region()
+        hit = self.cal.find_peak(r.energy, r.counts, centre - half,
+                                 centre + half)
+        if hit is None:
+            self.result.config(text="No data in that window.")
+            return
+        self.vars["meas"].set(f"{hit[0]:.3f}")
+
+    def _pick(self):
+        self.app._pick_cb = self._picked
+        self.result.config(text="Click the peak on the plot…")
+        try:
+            self.app.canvas.get_tk_widget().config(cursor="crosshair")
+        except tk.TclError:
+            pass
+
+    def _picked(self, be):
+        if self.winfo_exists():
+            self.vars["meas"].set(f"{be:.3f}")
+
+    def _cancel_pick(self):
+        self.app._pick_cb = None
+
+    def _shift(self):
+        ref, meas = self._num("ref"), self._num("meas")
+        if ref is None or meas is None:
+            return None
+        return self.cal.shift_for(meas, ref)
+
+    def _update(self):
+        shift = self._shift()
+        if shift is None:
+            self.result.config(text="Find or click the reference peak, or "
+                                    "type its measured energy.")
+        else:
+            self.result.config(
+                text=f"Shift = {shift:+.3f} eV  (measured "
+                     f"{self._num('meas'):.3f} → "
+                     f"{self._num('ref'):.3f} eV)")
+
+    def _apply(self):
+        shift = self._shift()
+        if shift is None:
+            messagebox.showinfo("Calibrate", "Enter the reference and "
+                                             "measured energies first.",
+                                parent=self)
+            return
+        ref_text = self.preset_var.get().split(" - ")[0]
+        if ref_text == "Custom":
+            ref_text = "the reference peak"
+        self.app.apply_calibration(
+            self._region(), self.scope.get(), shift,
+            {"measured": self._num("meas"), "reference": self._num("ref"),
+             "ref_text": ref_text})
+
+    def _remove(self):
+        self.app.clear_calibration(self._region(), self.scope.get())
+
+
+class ProgressDialog(tk.Toplevel):
+    """A modal 'Loading n of N' box with a Cancel button. Call ``step(text)``
+    between units of work (it keeps the UI alive) and check ``cancelled``."""
+
+    def __init__(self, master, app, title, total):
+        super().__init__(master)
+        self.total, self.done, self.cancelled = max(1, total), 0, False
+        self.title(title)
+        self.transient(master)
+        self.grab_set()
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill="both", expand=True)
+        self.label = ttk.Label(body, text="", width=54)
+        self.label.pack(anchor="w")
+        self.bar = ttk.Progressbar(body, maximum=self.total, length=380)
+        self.bar.pack(fill="x", pady=(8, 10))
+        ttk.Button(body, text="Cancel", command=self._cancel).pack(
+            side="right")
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        _finish(self, app, 460, 130)
+
+    def _cancel(self):
+        self.cancelled = True
+        self.label.config(text="Cancelling after the current file…")
+
+    def step(self, text):
+        self.label.config(text=text)
+        self.bar["value"] = self.done
+        self.done += 1
+        self.update()
+
+    def close(self):
+        try:
+            self.grab_release()
+            self.destroy()
+        except tk.TclError:
+            pass
+
+
+class ImageOptionsDialog(tk.Toplevel):
+    """Options for 'Save plot image': style, size and resolution.
+    ``on_ok(style, width_in, height_in, dpi)`` is called on OK."""
+
+    def __init__(self, master, app, on_ok):
+        super().__init__(master)
+        self.on_ok = on_ok
+        self.title("Save plot image")
+        self.transient(master)
+        self.grab_set()
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Style").grid(row=0, column=0, sticky="w",
+                                           pady=3)
+        self.style = tk.StringVar(value="Paper (white)")
+        ttk.Combobox(body, textvariable=self.style, state="readonly", width=18,
+                     values=["Paper (white)", "Current theme"]).grid(
+            row=0, column=1, sticky="w", pady=3)
+        self.vars = {}
+        for r, (key, label, init) in enumerate((
+                ("w", "Width (inches)", "8"), ("h", "Height (inches)", "5"),
+                ("dpi", "Resolution (dpi)", "300")), start=1):
+            ttk.Label(body, text=label).grid(row=r, column=0, sticky="w",
+                                             pady=3, padx=(0, 12))
+            self.vars[key] = tk.StringVar(value=init)
+            ttk.Entry(body, textvariable=self.vars[key], width=8).grid(
+                row=r, column=1, sticky="w", pady=3)
+        ttk.Label(body, style="Muted.TLabel", wraplength=300,
+                  text="Saves the panels currently shown (PNG, SVG or PDF, "
+                       "chosen next).").grid(row=4, column=0, columnspan=2,
+                                             sticky="w", pady=(6, 0))
+        bar = ttk.Frame(body)
+        bar.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        ttk.Button(bar, text="Cancel", command=self.destroy).pack(side="right")
+        ttk.Button(bar, text="Next…", command=self._ok).pack(
+            side="right", padx=(0, 6))
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Return>", lambda e: self._ok())
+        _finish(self, app, 380, 260)
+
+    def _ok(self):
+        try:
+            w, h = float(self.vars["w"].get()), float(self.vars["h"].get())
+            dpi = int(float(self.vars["dpi"].get()))
+        except ValueError:
+            messagebox.showinfo("Save plot image", "Enter numbers for the "
+                                                   "size and resolution.",
+                                parent=self)
+            return
+        if not (1 <= w <= 40 and 1 <= h <= 40 and 50 <= dpi <= 1200):
+            messagebox.showinfo("Save plot image",
+                                "Size 1-40 inches, resolution 50-1200 dpi.",
+                                parent=self)
+            return
+        style = self.style.get()
+        self.destroy()
+        self.on_ok(style, w, h, dpi)
+
+
+class IdentifyDialog(tk.Toplevel):
+    """Label the peaks of a survey with element lines. Click a peak on the
+    plot to list the candidate lines near it, add the one you want as a
+    marker, or let 'Auto-label' do every peak. Markers are kept with the
+    workbook. Uses ``app.identify_*`` methods and ``app._click_cb``; not
+    modal, so the plot stays usable."""
+
+    def __init__(self, master, app, regions):
+        import xpslines
+        super().__init__(master)
+        self.app, self.xl = app, xpslines
+        self.lines = app.element_lines()
+        self.regions = regions
+        self.clicked = None                    # measured BE of the last click
+        self.cands = []
+        self.title("Identify peaks")
+        self.transient(master)
+        body = ttk.Frame(self, padding=12)
+        body.pack(fill="both", expand=True)
+        body.columnconfigure(0, weight=1)
+        top = ttk.Frame(body)
+        top.grid(row=0, column=0, sticky="ew")
+        top.columnconfigure(1, weight=1)
+        ttk.Label(top, text="Spectrum").grid(row=0, column=0, sticky="w",
+                                             padx=(0, 8))
+        self.reg_cb = ttk.Combobox(
+            top, state="readonly", width=44,
+            values=[app.calibration_label(r) for r in regions])
+        self.reg_cb.grid(row=0, column=1, sticky="ew")
+        self.reg_cb.current(0)
+        self.reg_cb.bind("<<ComboboxSelected>>",
+                         lambda e: self._refresh_markers())
+        ttk.Label(top, text="Window ± (eV)").grid(
+            row=1, column=0, sticky="w", pady=(6, 0))
+        self.window = tk.StringVar(value="2.0")
+        ttk.Entry(top, textvariable=self.window, width=7).grid(
+            row=1, column=1, sticky="w", pady=(6, 0))
+        self.hint = ttk.Label(body, style="Muted.TLabel", wraplength=470,
+                              justify="left",
+                              text="Click a peak on the plot to see the "
+                                   "candidate lines. Line positions are "
+                                   "approximate (chemical shifts of a few eV "
+                                   "are normal).")
+        self.hint.grid(row=1, column=0, sticky="w", pady=(8, 4))
+        ttk.Label(body, text="Candidates").grid(row=2, column=0, sticky="w")
+        self.cand_list = tk.Listbox(body, height=6, exportselection=False,
+                                    activestyle="none")
+        self.cand_list.grid(row=3, column=0, sticky="ew")
+        self.cand_list.bind("<Double-Button-1>", lambda e: self._add())
+        row = ttk.Frame(body)
+        row.grid(row=4, column=0, sticky="w", pady=(4, 8))
+        ttk.Button(row, text="Add marker", command=self._add).pack(
+            side="left")
+        ttk.Button(row, text="Auto-label all peaks",
+                   command=self._auto).pack(side="left", padx=(6, 0))
+        ttk.Label(body, text="Markers on this spectrum").grid(
+            row=5, column=0, sticky="w")
+        self.mark_list = tk.Listbox(body, height=6, exportselection=False,
+                                    activestyle="none")
+        self.mark_list.grid(row=6, column=0, sticky="ew")
+        row2 = ttk.Frame(body)
+        row2.grid(row=7, column=0, sticky="w", pady=(4, 0))
+        ttk.Button(row2, text="Remove selected",
+                   command=self._remove).pack(side="left")
+        ttk.Button(row2, text="Clear all", command=self._clear).pack(
+            side="left", padx=(6, 0))
+        ttk.Button(body, text="Close", command=self.destroy).grid(
+            row=8, column=0, sticky="e", pady=(10, 0))
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Destroy>", lambda e: self._detach()
+                  if e.widget is self else None)
+        _finish(self, app, 520, 640)
+        for lb in (self.cand_list, self.mark_list):
+            lb.configure(bg=app.palette["entry"], fg=app.palette["fg"],
+                         selectbackground=app.palette["select_bg"],
+                         selectforeground=app.palette["select_fg"],
+                         highlightthickness=0, relief="flat")
+        app._click_cb = self._on_click
+        self._refresh_markers()
+
+    def _detach(self):
+        if self.app._click_cb == self._on_click:
+            self.app._click_cb = None
+
+    def _region(self):
+        return self.regions[self.reg_cb.current()]
+
+    def _win(self):
+        try:
+            return max(0.1, float(self.window.get()))
+        except ValueError:
+            return 2.0
+
+    def _on_click(self, be, event=None):
+        self.clicked = be
+        hv = self._region().photon_energy
+        self.cands = self.xl.candidates(be, self._win(), self.lines, hv)
+        self.cand_list.delete(0, "end")
+        for d, e in self.cands:
+            self.cand_list.insert(
+                "end", f"{self.xl.label_of(e):<12} "
+                       f"{self.xl.line_be(e, hv):8.1f} eV   ({d:+.1f})")
+        if self.cands:
+            self.cand_list.selection_set(0)
+        self.hint.config(text=f"Peak at {be:.2f} eV measured: "
+                              f"{len(self.cands)} candidate line(s) within "
+                              f"±{self._win():g} eV.")
+
+    def _add(self):
+        sel = self.cand_list.curselection()
+        if self.clicked is None or not sel:
+            return
+        d, e = self.cands[sel[0]]
+        self.app.identify_add(self._region(), self.clicked,
+                              self.xl.label_of(e))
+        self._refresh_markers()
+
+    def _auto(self):
+        n = self.app.identify_auto(self._region())
+        self.hint.config(text=f"{n} peak(s) labelled.")
+        self._refresh_markers()
+
+    def _refresh_markers(self):
+        self.mark_list.delete(0, "end")
+        for m in self.app.identify_markers(self._region()):
+            self.mark_list.insert("end", f"{m['label']:<12} @ {m['be']:.2f} eV")
+
+    def _remove(self):
+        sel = self.mark_list.curselection()
+        if not sel:
+            return
+        m = self.app.identify_markers(self._region())[sel[0]]
+        self.app.identify_remove(self._region(), m)
+        self._refresh_markers()
+
+    def _clear(self):
+        self.app.identify_clear(self._region())
+        self._refresh_markers()

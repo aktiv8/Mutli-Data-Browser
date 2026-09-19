@@ -38,6 +38,7 @@ STAMP = os.path.join(VENV_DIR, ".requirements.sha1")
 
 REQUIRED = ["matplotlib>=3.5", "pillow>=9.0", "reportlab>=3.6", "pymupdf>=1.24",
             "python-pptx>=0.6.23"]
+OPTIONAL = ["tkinterdnd2>=0.3"]         # drag-and-drop of files onto the window
 
 
 def log(msg):
@@ -108,6 +109,11 @@ def pip_install():
         log("Dependency install failed. Check your internet connection or "
             "proxy settings and try:  python launch.py --reinstall")
         sys.exit(res.returncode)
+    for pkg in OPTIONAL:                     # best effort: the app runs without
+        res = subprocess.run([py, "-m", "pip", "install", pkg])
+        if res.returncode != 0:
+            log(f"Optional package {pkg} could not be installed "
+                f"(drag-and-drop of files will be unavailable).")
     with open(STAMP, "w") as fh:
         fh.write(reqs_hash())
 

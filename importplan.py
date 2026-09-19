@@ -44,3 +44,18 @@ def apply_choice(paths, pairs, choice):
         elif c == "vgd":
             drop.add(avg)
     return [p for p in paths if p not in drop]
+
+
+def classify_paths(paths):
+    """Split dropped or chosen paths into ``(workbooks, folders, files)``
+    (workbooks are ``.xpscontainer`` files; the order of ``paths`` is kept)."""
+    books, folders, files = [], [], []
+    for p in paths:
+        p = str(p)
+        if os.path.isdir(p):
+            folders.append(p)
+        elif p.lower().endswith(".xpscontainer"):
+            books.append(p)
+        else:
+            files.append(p)
+    return books, folders, files

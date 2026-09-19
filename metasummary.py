@@ -114,7 +114,7 @@ SETUP_FIELDS = [
     "X-ray source", "Anode", "Photon energy (eV)", "Source power (W)",
     "Charge neutraliser", "Ion gun / sputtering", "Lens mode", "Aperture",
     "Pass energy (eV)", "Step (eV)", "Dwell (s)", "Quality",
-    "Position X (mm)", "Position Y (mm)",
+    "Position X (mm)", "Position Y (mm)", "BE shift (eV)", "Notes",
 ]
 # Only Latin-1 characters: the PDF uses the built-in Helvetica.
 SHORT = {
@@ -122,7 +122,7 @@ SHORT = {
     "Source power (W)": "Power (W)", "Charge neutraliser": "Neutraliser",
     "Ion gun / sputtering": "Ion gun", "Lens mode": "Lens",
     "Pass energy (eV)": "PE (eV)", "Position X (mm)": "X (mm)",
-    "Position Y (mm)": "Y (mm)",
+    "Position Y (mm)": "Y (mm)", "BE shift (eV)": "BE shift",
 }
 # Scan ranges describe the region rather than the setup: always columns.
 RANGE_COLS = [("BE start", "BE start (eV)"), ("BE end", "BE end (eV)"),

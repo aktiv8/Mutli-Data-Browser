@@ -12,6 +12,7 @@ files is JSON: opening a workbook never executes anything from it.
     state.json      the current look (view, colours, ticks, ...)
     figures.json    named looks with captions
     metadata.json   read-only snapshot of the acquisition metadata
+    annotations.json  renames, notes, edited metadata, BE shifts, markers
     data/<id>/<original file name>      the instrument files, byte-for-byte
     assets/logo.<ext>                   optional letterhead image
     preview.png                         thumbnail of the plot
@@ -66,6 +67,7 @@ class Workbook:
     files: list = field(default_factory=list)       # [FileEntry]
     logo: str = ""               # local path of the letterhead image
     metadata: dict = field(default_factory=dict)
+    annotations: dict = field(default_factory=dict)  # annotations.to_json()
     created: str = ""
     modified: str = ""
     extra: dict = field(default_factory=dict)       # unknown manifest keys
@@ -193,6 +195,7 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> None:
             put_json("state.json", wb.state)
             put_json("figures.json", wb.figures)
             put_json("metadata.json", wb.metadata)
+            put_json("annotations.json", wb.annotations)
             for f, entry in zip(wb.files, manifest["files"]):
                 zf.write(f.path, entry["member"])
             if logo_member:
@@ -263,6 +266,8 @@ def load(path, extract_dir) -> Workbook:
             if isinstance(figs, list) else []
         meta = _read_json(zf, "metadata.json", {})
         wb.metadata = meta if isinstance(meta, dict) else {}
+        ann = _read_json(zf, "annotations.json", {})
+        wb.annotations = ann if isinstance(ann, dict) else {}
 
         os.makedirs(extract_dir, exist_ok=True)
         for entry in manifest.get("files", []):
