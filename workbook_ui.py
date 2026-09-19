@@ -369,3 +369,42 @@ class DuplicateFormatDialog(tk.Toplevel):
             choice, remember = mode, self.remember.get()
         self.result = (choice, remember)
         self.destroy()
+
+
+class SectionsDialog(tk.Toplevel):
+    """A small checklist of sections to include; ``on_ok(chosen_keys)`` is
+    called with the ticked keys (in order) when the user confirms."""
+
+    def __init__(self, master, app, title, options, on_ok):
+        super().__init__(master)
+        self.on_ok = on_ok
+        self.title(title)
+        self.transient(master)
+        self.grab_set()
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Include:").pack(anchor="w")
+        self.vars = []
+        for key, label in options:
+            var = tk.BooleanVar(value=True)
+            ttk.Checkbutton(body, text=label, variable=var).pack(
+                anchor="w", padx=(12, 0), pady=2)
+            self.vars.append((key, var))
+        bar = ttk.Frame(body)
+        bar.pack(fill="x", pady=(14, 0))
+        ttk.Button(bar, text="Cancel", command=self.destroy).pack(
+            side="right")
+        ttk.Button(bar, text="Export…", command=self._ok).pack(
+            side="right", padx=(0, 6))
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Return>", lambda e: self._ok())
+        _finish(self, app, 360, 60 + 32 * len(options) + 70)
+
+    def _ok(self):
+        chosen = tuple(k for k, v in self.vars if v.get())
+        if not chosen:
+            messagebox.showinfo("Export", "Choose at least one section.",
+                                parent=self)
+            return
+        self.destroy()
+        self.on_ok(chosen)

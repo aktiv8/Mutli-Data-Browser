@@ -314,7 +314,10 @@ class TestReport(Tmp):
         self.assertIn("Para <two>.", text[0])
         self.assertIn("ACME", text[0])
         self.assertIn("a.vgd", text[0])
-        self.assertIn("40: Mo 3d; 160: Survey", "".join(text[1:-2]))
+        meta = "".join(text[1:-2])
+        for token in ("Common to every region", "Survey", "Mo 3d", "160",
+                      "PE (eV)"):
+            self.assertIn(token, meta)
         self.assertIn("figure 1", text[-2])
         self.assertIn(f"report page {n} of {n}", text[-1])
         self.assertEqual(self.calls, [(1, "One"), (2, "Two")])

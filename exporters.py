@@ -187,51 +187,6 @@ def export_metadata_csv(parser, path):
     return len(rows)
 
 
-# Per-region columns for the PDF table. A column whose value is the same for
-# every region of the sample is dropped and stated once in the header block.
-_REGION_COLS = [
-    ("Region", "Region"), ("PE (eV)", "Pass energy (eV)"),
-    ("BE start", "BE start (eV)"), ("BE end", "BE end (eV)"),
-    ("Step (eV)", "Step (eV)"), ("Dwell (s)", "Dwell (s)"),
-    ("Points", "Points"), ("Quality", "Quality"),
-    ("hv (eV)", "Photon energy (eV)"),
-]
-
-
-def _sample_block(rows):
-    """Tidy one sample's metadata for the report.
-
-    Returns ``(info, columns)``: ``info`` is ``[(field, value)]`` for the
-    header block (what is the same for every region, and pass energy grouped
-    by region, e.g. "40: Mo 3d, S 2p; 160: Survey") and ``columns`` the
-    per-region table columns that still differ."""
-    ms = metasummary
-    lrows = [(r.get("Region", ""), r) for r in rows]
-    info = []
-    when = ms.date_range(lrows, sep=" to ")
-    if when:
-        info.append(("Date acquired", when))
-    common, run_var = ms.summarise(
-        lrows, [f for f in ms.RUN_FIELDS if f != "Date acquired"])
-    info += common
-    for field, groups in run_var:
-        info.append((field, "; ".join(
-            f"{v}: {ms.compact_labels(ls, 10)}" for v, ls in groups)))
-    constants, columns = ms.split_columns(
-        rows, _REGION_COLS,
-        keep=("BE start (eV)", "BE end (eV)", "Points"))
-    have = {k for k, _ in info}
-    info += [(f, v) for f, v in constants if f not in have]
-    lens, _ = ms.summarise(lrows, ["Lens mode", "Aperture"])
-    info += [(f, v) for f, v in lens if f not in have]
-    _c, pe = ms.summarise(lrows, ["Pass energy (eV)"])
-    for field, groups in pe:
-        info.append((field, "; ".join(
-            f"{v}: {ms.compact_labels(ls, 10)}" for v, ls in groups)))
-        columns = [c for c in columns if c[1] != field]
-    return info, columns
-
-
 def export_metadata_pdf(parser, path):
     """Write a formatted, per-sample metadata report as PDF.
 
@@ -247,117 +202,236 @@ def export_metadata_pdf(parser, path):
         return _metadata_pdf_matplotlib(parser, samples, path)
 
 
+NAVY = "#2c3e50"
+PAGE_MARGIN_MM = 15
+TEXT_WIDTH_MM = 210 - 2 * PAGE_MARGIN_MM          # portrait A4
+
+
 def _metadata_story(parser, samples, title="ESCApe Acquisition Metadata",
                     level=1, fname=None):
-    """Flowables for one file's metadata report. Shared by the metadata PDF
-    and the experiment report (which nests it one heading level down)."""
+    """Flowables for one file's metadata report (portrait A4, 180 mm wide).
+
+    Shared by the metadata PDF and the experiment report. What is the same
+    for the whole file is stated once, what is constant within a sample sits
+    on the sample's line, and the rest is a compact scan table; nothing is
+    dropped (see ``metasummary.layout_file``)."""
     from xml.sax.saxutils import escape as xml_escape
     from reportlab.lib import colors
     from reportlab.lib.units import mm
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import (
-        Paragraph, Spacer, Table, TableStyle, PageBreak)
+    from reportlab.platypus import (CondPageBreak, KeepTogether, Paragraph,
+                                    Spacer, Table, TableStyle)
 
+    lay = metasummary.layout_file(samples)
+    navy = colors.HexColor(NAVY)
     styles = getSampleStyleSheet()
-    h1 = styles["Heading%d" % level]
-    h2 = styles["Heading%d" % (level + 1)]
+    head = styles["Heading%d" % level]
     small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8,
                            leading=10)
+    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=7.5,
+                          leading=9)
+    key_style = ParagraphStyle("key", parent=cell, fontName="Helvetica-Bold",
+                               textColor=navy)
+    sample_style = ParagraphStyle("sample", parent=styles["Normal"],
+                                  fontName="Helvetica-Bold", fontSize=10.5,
+                                  leading=13, textColor=navy, spaceBefore=9,
+                                  spaceAfter=3)
+    strip_head = ParagraphStyle("strip", parent=cell, fontSize=7,
+                                fontName="Helvetica-Bold", spaceBefore=4,
+                                spaceAfter=1)
+    tiny = ParagraphStyle("tiny", parent=cell, fontSize=6.5, leading=8)
+
+    def P(text, style=cell):
+        return Paragraph(xml_escape(str(text)), style)
+
+    def kv_grid(items, per_row=3):
+        """Key / value pairs, ``per_row`` pairs across."""
+        rows = []
+        for i in range(0, len(items), per_row):
+            chunk = items[i:i + per_row]
+            row = []
+            for k, v in chunk:
+                row += [P(metasummary.SHORT.get(k, k), key_style), P(v)]
+            row += [""] * (2 * per_row - len(row))
+            rows.append(row)
+        lab, val = 24 * mm, (TEXT_WIDTH_MM * mm / per_row) - 24 * mm
+        t = Table(rows, colWidths=[lab, val] * per_row)
+        t.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 1),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 1),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        return t
+
+    table_style = [
+        ("BACKGROUND", (0, 0), (-1, 0), navy),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 7.5),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#c8d0d8")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [colors.white, colors.HexColor("#f2f5f8")]),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
+    ]
+
     story = []
     fname = fname or os.path.basename(parser.path or "experiment")
-    story.append(Paragraph(xml_escape(title), h1))
+    story.append(Paragraph(xml_escape(title), head))
     story.append(Paragraph(
-        f"File: {xml_escape(fname)} &nbsp;&nbsp; Samples: {len(samples)} &nbsp;&nbsp; "
-        f"Regions: {parser.summary['n_regions']} &nbsp;&nbsp; "
+        f"File: {xml_escape(fname)} &nbsp;|&nbsp; "
+        + (f"{xml_escape(parser.format_name)} &nbsp;|&nbsp; "
+           if getattr(parser, "format_name", "") else "")
+        + f"Samples: {len(samples)} &nbsp;|&nbsp; "
+        f"Regions: {lay.n_regions} &nbsp;|&nbsp; "
         f"Generated: {datetime.datetime.now():%Y-%m-%d %H:%M}", small))
     if parser.corruption["corrupted"]:
         story.append(Paragraph(
             "<font color='red'>Warning: this file's binary data is corrupted; "
             "numeric values may be unavailable.</font>", small))
-    story.append(Spacer(1, 6 * mm))
+    story.append(Spacer(1, 3 * mm))
 
-    hdr_style = TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#b0b0b0")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
-         [colors.white, colors.HexColor("#f2f5f8")]),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-    ])
+    if lay.common:
+        story.append(Paragraph("Common to every region", strip_head))
+        story.append(kv_grid(lay.common))
 
-    for si, (sample, rows) in enumerate(samples):
-        if si > 0:
-            story.append(PageBreak())
-        story.append(Paragraph(f"Sample: {sample}", h2))
-        info, columns = _sample_block(rows)
-        if info:
-            info_tbl = Table(
-                [[k, Paragraph(xml_escape(v), small)] for k, v in info],
-                colWidths=[55 * mm, 200 * mm])
-            info_tbl.setStyle(TableStyle([
-                ("FONTSIZE", (0, 0), (-1, -1), 8),
-                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#2c3e50")),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-                ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-                ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ]))
-            story.append(info_tbl)
-        story.append(Spacer(1, 4 * mm))
-        story.append(Paragraph(f"Regions ({len(rows)})", small))
-
-        table = [[c[0] for c in columns]]
-        for row in rows:
-            table.append([row.get(c[1], "") for c in columns])
-        t = Table(table, repeatRows=1)
-        t.setStyle(hdr_style)
+    for sl in lay.samples:
+        story.append(CondPageBreak(45 * mm))
+        story.append(Paragraph(
+            f"{xml_escape(sl.name)} "
+            f"<font size='8' color='#6b7785'>&nbsp;{sl.n_regions} "
+            f"region{'s' if sl.n_regions != 1 else ''}</font>",
+            sample_style))
+        if sl.line:
+            story.append(kv_grid(sl.line))
+            story.append(Spacer(1, 1.5 * mm))
+        weights = metasummary.column_weights(sl.columns)
+        total = sum(weights)
+        widths = [TEXT_WIDTH_MM * mm * w / total for w in weights]
+        data = [[P(c, ParagraphStyle("h", parent=cell, textColor=colors.white,
+                                     fontName="Helvetica-Bold"))
+                 for c in sl.columns]]
+        for row in sl.rows:
+            data.append([P(row.get(c, "")) for c in sl.columns])
+        t = Table(data, colWidths=widths, repeatRows=1)
+        t.setStyle(TableStyle(table_style))
         story.append(t)
+
+        for title_, entries in sl.strips:
+            story.append(Paragraph(xml_escape(title_), strip_head))
+            per_col = -(-len(entries) // 3)                 # ceil
+            blocks = [entries[i * per_col:(i + 1) * per_col]
+                      for i in range(3)]
+            head_row = []
+            for _ in range(3):
+                head_row += [P("Level", tiny), P("Etch (s)", tiny),
+                             P("Acquired", tiny)]
+            grid = [head_row]
+            for r in range(per_col):
+                line = []
+                for b in blocks:
+                    line += ([P(x, tiny) for x in b[r]] if r < len(b)
+                             else [P("", tiny)] * 3)
+                grid.append(line)
+            w = TEXT_WIDTH_MM * mm / 3
+            st = Table(grid, colWidths=[w * 0.16, w * 0.22, w * 0.62] * 3,
+                       repeatRows=1)
+            st.setStyle(TableStyle([
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("LINEBELOW", (0, 0), (-1, 0), 0.4, navy),
+                ("TOPPADDING", (0, 0), (-1, -1), 0.5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0.5),
+                ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                ("LINEAFTER", (2, 0), (2, -1), 0.25, colors.HexColor("#c8d0d8")),
+                ("LINEAFTER", (5, 0), (5, -1), 0.25, colors.HexColor("#c8d0d8")),
+            ]))
+            story.append(st)
     return story
 
 
+def _numbered_canvas():
+    """A canvas class that writes 'Page x of y' at the foot of every page."""
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+
+    class NumberedCanvas(canvas.Canvas):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._pages = []
+
+        def showPage(self):
+            self._pages.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._pages)
+            for state in self._pages:
+                self.__dict__.update(state)
+                self.setFont("Helvetica", 7.5)
+                self.setFillGray(0.4)
+                self.drawRightString(A4[0] - PAGE_MARGIN_MM * mm, 8 * mm,
+                                     f"Page {self._pageNumber} of {total}")
+                super().showPage()
+            super().save()
+
+    return NumberedCanvas
+
+
 def _metadata_pdf_reportlab(parser, samples, path):
-    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.platypus import SimpleDocTemplate
 
-    doc = SimpleDocTemplate(path, pagesize=landscape(A4),
-                            leftMargin=14 * mm, rightMargin=14 * mm,
-                            topMargin=14 * mm, bottomMargin=12 * mm,
+    doc = SimpleDocTemplate(path, pagesize=A4,
+                            leftMargin=PAGE_MARGIN_MM * mm,
+                            rightMargin=PAGE_MARGIN_MM * mm,
+                            topMargin=PAGE_MARGIN_MM * mm,
+                            bottomMargin=16 * mm,
                             title="ESCApe acquisition metadata")
-    doc.build(_metadata_story(parser, samples))
+    doc.build(_metadata_story(parser, samples),
+              canvasmaker=_numbered_canvas())
     return len(samples)
 
 
 def _metadata_pdf_matplotlib(parser, samples, path):
+    """Plain-text fallback (no reportlab): the same content, monospaced."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from matplotlib.backends.backend_pdf import PdfPages
 
+    lay = metasummary.layout_file(samples)
     fname = os.path.basename(parser.path or "experiment")
+    lines = [f"ESCApe metadata - {fname}", ""]
+    if lay.common:
+        lines.append("Common to every region")
+        lines += [f"  {k}: {v}" for k, v in lay.common]
+        lines.append("")
+    for sl in lay.samples:
+        lines.append(f"{sl.name}  ({sl.n_regions} regions)")
+        lines += [f"  {k}: {v}" for k, v in sl.line]
+        lines.append("  " + " | ".join(sl.columns))
+        for row in sl.rows:
+            lines.append("  " + " | ".join(row.get(c, "")
+                                           for c in sl.columns))
+        for title_, entries in sl.strips:
+            lines.append(f"  {title_}")
+            lines += [f"    level {a}  etch {b} s  {c}"
+                      for a, b, c in entries]
+        lines.append("")
+    per_page = 78
     with PdfPages(path) as pdf:
-        for sample, rows in samples:
-            fig = plt.figure(figsize=(11.7, 8.3))  # A4 landscape
-            fig.suptitle(f"ESCApe metadata — {fname}\nSample: {sample}",
-                         fontsize=12, x=0.02, ha="left")
-            ax = fig.add_axes([0.02, 0.02, 0.96, 0.84])
-            ax.axis("off")
-            info, columns = _sample_block(rows)
-            lines = [f"{k}: {v}" for k, v in info]
-            ax.text(0, 1.0, "\n".join(lines), va="top", fontsize=8,
-                    family="monospace")
-            col_labels = [c[0] for c in columns]
-            cells = [[row.get(c[1], "") for c in columns] for row in rows]
-            tbl = ax.table(cellText=cells, colLabels=col_labels,
-                           loc="lower center", cellLoc="center")
-            tbl.auto_set_font_size(False)
-            tbl.set_fontsize(7)
-            tbl.scale(1, 1.2)
+        for i in range(0, len(lines), per_page):
+            fig = plt.figure(figsize=(8.3, 11.7))
+            fig.text(0.05, 0.97, "\n".join(lines[i:i + per_page]), va="top",
+                     fontsize=7, family="monospace")
             pdf.savefig(fig)
             plt.close(fig)
     return len(samples)
-

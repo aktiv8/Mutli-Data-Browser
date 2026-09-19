@@ -33,13 +33,14 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `exporters.py` | CSV, VAMAS and metadata (CSV/PDF) writers |
 | `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
 | `report.py` | the experiment report PDF |
+| `pptx_export.py` | the PowerPoint export (python-pptx) |
 | `importplan.py` | choosing between `.avg` / `.vgd` copies of the same data |
 | `viewdata.py`, `metasummary.py` | plot-view and metadata-tidying helpers |
 | `themes.py` | design tokens and colour themes |
 | `fonts.py`, `assets/fonts/` | bundled IBM Plex Sans (SIL Open Font License) |
 | `pdf_preview.py` | in-app PDF preview (PyMuPDF) |
 | `launch.py` | one-step launcher (creates a venv, installs deps, starts the app) |
-| `requirements.txt` | Python packages (matplotlib, Pillow, reportlab, PyMuPDF) |
+| `requirements.txt` | Python packages (matplotlib, Pillow, reportlab, PyMuPDF, python-pptx) |
 | `run.bat` / `run.sh` | double-click launchers for Windows / macOS + Linux |
 | `tests/` | unit tests (`python -m unittest discover tests`) |
 
@@ -197,12 +198,32 @@ Save with **Ctrl+S**; the title bar shows `*` for unsaved changes and closing
 asks whether to save. The file is a ZIP archive with JSON and the original
 files inside, so it can be inspected with any zip tool and never runs code.
 
+**Metadata layout.** The metadata PDF and the report's metadata section use
+portrait A4 pages and lose nothing: settings that are the same for every
+region (photon energy, lens mode, …) are stated once at the top, settings that
+are constant within a sample (stage position, date, …) sit on that sample's
+line, and the rest is a compact scan table (pass energy, step, dwell, scan
+range, points, acquisition time). Samples flow one after another instead of
+one per page. A depth profile is one row per region — e.g. *levels 0–60 (61),
+etch 0–1800 s, 30 s steps* — but only where that reproduces every level
+exactly; otherwise (irregular etch times, per-level timestamps) a compact
+"per-level details" table lists every level. The metadata CSV still has one
+row per region and level.
+
 **Experiment report** (Workbook menu → *preview…* / *save PDF…*) builds a PDF
 you can hand to a customer as a report or appendix: a cover page (logo, title,
 details, your summary, the list of data files with hashes), the tidied
 metadata of every file, and one page set per saved figure (drawn on white with
 its caption). Tick the sections to include in the preview bar. With no saved
 figures the current view is used. It needs `reportlab` and `pymupdf`.
+
+**Export PowerPoint…** (Workbook menu) writes a 16:9 `.pptx` from the same
+material: a title slide (logo, customer, reference, operator, date), summary,
+data files, the metadata as native tables, and one slide per saved figure — a
+high-resolution picture with an editable caption and speaker notes describing
+the look and the spectra shown. Choose the sections to include in the dialog.
+It needs `python-pptx` (installed by the launcher). Slides are built with
+plain PowerPoint text and tables, so you can restyle them freely.
 
 ## Stacked / waterfall / heatmap plots
 

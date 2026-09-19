@@ -77,6 +77,7 @@ import viewdata
 import metasummary
 import workbook as wbk
 import report
+import pptx_export
 import importplan
 import workbook_ui
 from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
@@ -759,6 +760,8 @@ class Workspace:
                         command=self.preview_report)
         wbm.add_command(label="Experiment report — save PDF…",
                         command=self.save_report)
+        wbm.add_command(label="Export PowerPoint…",
+                        command=self.export_powerpoint)
         bar.add_cascade(label="Workbook", menu=wbm)
         viewm = tk.Menu(bar, tearoff=0)
         self.themes.register_menu(viewm)
@@ -2321,12 +2324,18 @@ class Workspace:
                          "size": size, "sha256": self._sha(p.path)})
         return rows
 
-    def _report_figure_pages(self, pdf, number, fig):
-        """Draw one saved figure (all its pages) onto a PdfPages."""
+    def _render_figure_pages(self, fig, consume, size=(11.7, 8.3),
+                             rect=(0.0, 0.17, 1.0, 0.94), decorate=True,
+                             number=1, dpi=150):
+        """Draw a saved figure with its own look (then restore the live
+        view) and hand every page, still under the print style, to
+        ``consume(page)``. Returns the list of its results. With
+        ``decorate`` the heading and caption are drawn onto the page."""
+        out = []
         with self._temp_state(fig["state"]):
             groups = self._groups()
             if not groups:
-                return 0
+                return out
             per = self._pdf_per_page()
             limit, start = self._traces_limit(), self.trace_start
             pages = (len(groups) + per - 1) // per
@@ -2335,20 +2344,27 @@ class Workspace:
                                     replace_whitespace=False)
             with matplotlib.rc_context(mpl_rc(paper)):
                 for pg in range(pages):
-                    page = Figure(figsize=(11.7, 8.3), dpi=150)
+                    page = Figure(figsize=size, dpi=dpi)
                     self._draw_page(page, groups[pg * per:(pg + 1) * per],
-                                    limit, start, pal=PRINT,
-                                    rect=(0.0, 0.17, 1.0, 0.94))
-                    head = f"Figure {number} — {fig.get('name', '')}"
-                    if pg:
-                        head += " (continued)"
-                    page.text(0.03, 0.975, head, fontsize=12,
-                              fontweight="bold", va="top")
-                    if caption and pg == 0:
-                        page.text(0.03, 0.145, caption, fontsize=9, va="top",
-                                  linespacing=1.4)
-                    pdf.savefig(page)
-        return pages
+                                    limit, start, pal=PRINT, rect=rect)
+                    if decorate:
+                        head = f"Figure {number} — {fig.get('name', '')}"
+                        if pg:
+                            head += " (continued)"
+                        page.text(0.03, 0.975, head, fontsize=12,
+                                  fontweight="bold", va="top")
+                        if caption and pg == 0:
+                            page.text(0.03, 0.145, caption, fontsize=9,
+                                      va="top", linespacing=1.4)
+                    out.append(consume(page))
+        return out
+
+    def _report_figure_pages(self, pdf, number, fig):
+        """Draw one saved figure (all its pages) onto a PdfPages."""
+        def consume(page):
+            pdf.savefig(page)
+            return 1
+        return len(self._render_figure_pages(fig, consume, number=number))
 
     def _build_report(self, path, sections):
         figures = self.figures or ([{
@@ -2366,6 +2382,60 @@ class Workspace:
                                                      "files first.")
             return False
         return True
+
+    def _deck_images(self, number, fig):
+        """PNG bytes of each page of a saved figure, sized for a slide."""
+        def consume(page):
+            buf = io.BytesIO()
+            page.savefig(buf, format="png", dpi=200)
+            return buf.getvalue()
+        return self._render_figure_pages(
+            fig, consume, size=pptx_export.FIGURE_SIZE, rect=None,
+            decorate=False, number=number)
+
+    def _build_deck(self, path, sections):
+        figures = self.figures or ([{
+            "name": "Current view", "caption": "",
+            "state": self.capture_state()}] if self._groups() else [])
+        if not HAVE_MPL:
+            sections = tuple(s for s in sections if s != "figures")
+        return pptx_export.build_deck(
+            path, self.details, self.logo, self._report_file_rows(),
+            self.docs, figures, self._deck_images, sections)
+
+    def export_powerpoint(self):
+        if not self._report_ready():
+            return
+
+        def go(sections):
+            stem = re.sub(r"[^\w.\- ]+", "_", self.details.get("title")
+                          or "experiment").strip()
+            path = filedialog.asksaveasfilename(
+                title="Export PowerPoint", defaultextension=".pptx",
+                initialfile=(stem or "experiment") + ".pptx",
+                filetypes=[("PowerPoint presentation", "*.pptx")])
+            if not path:
+                return
+            self.root.config(cursor="watch")
+            self.root.update_idletasks()
+            try:
+                n = self._build_deck(path, sections)
+            except pptx_export.PptxError as exc:
+                messagebox.showerror("PowerPoint", str(exc))
+                return
+            except Exception as exc:
+                messagebox.showerror("PowerPoint export failed", str(exc))
+                return
+            finally:
+                self.root.config(cursor="")
+            messagebox.showinfo("Saved",
+                                f"Presentation ({n} slides) saved to\n{path}")
+
+        workbook_ui.SectionsDialog(
+            self.root, self, "Export PowerPoint",
+            [("title", "Title and summary"), ("files", "Data files"),
+             ("metadata", "Acquisition metadata"),
+             ("figures", "Figures (one slide each)")], go)
 
     def save_report(self):
         if not self._report_ready():

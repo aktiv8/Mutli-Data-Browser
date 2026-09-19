@@ -89,7 +89,7 @@ def cover_story(details, logo, file_rows):
     rows = [(k, v) for k, v in rows if v]
     if rows:
         tbl = Table([[k, Paragraph(xml_escape(v), body)] for k, v in rows],
-                    colWidths=[35 * mm, 200 * mm])
+                    colWidths=[35 * mm, 145 * mm])
         tbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (0, -1), 10),
@@ -117,7 +117,7 @@ def cover_story(details, logo, file_rows):
                           _human_size(r.get("size", 0)),
                           (r.get("sha256") or "")[:16]])
         t = Table(table, repeatRows=1,
-                  colWidths=[85 * mm, 60 * mm, 18 * mm, 24 * mm, 45 * mm])
+                  colWidths=[62 * mm, 44 * mm, 15 * mm, 20 * mm, 39 * mm])
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -132,7 +132,7 @@ def cover_story(details, logo, file_rows):
 
 def _front_pdf(path, sections, details, logo, file_rows, docs):
     """Cover and/or metadata as one reportlab PDF. Returns False if empty."""
-    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
     from reportlab.platypus import PageBreak, SimpleDocTemplate
     import exporters
@@ -153,9 +153,9 @@ def _front_pdf(path, sections, details, logo, file_rows, docs):
                 level=2, fname=name)
     if not story:
         return False
-    doc = SimpleDocTemplate(path, pagesize=landscape(A4),
-                            leftMargin=14 * mm, rightMargin=14 * mm,
-                            topMargin=14 * mm, bottomMargin=14 * mm,
+    doc = SimpleDocTemplate(path, pagesize=A4,
+                            leftMargin=15 * mm, rightMargin=15 * mm,
+                            topMargin=15 * mm, bottomMargin=16 * mm,
                             title=(details.get("title") or "").strip()
                             or "Experiment report")
     doc.build(story)
