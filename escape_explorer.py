@@ -430,7 +430,7 @@ def _titles(ax, title, subtitle, muted):
                      color=muted)
 
 
-def draw_heatmap(fig, ax, regs, zi, norm="None", heat=None, title="",
+def draw_heatmap(fig, ax, regs, zi, norm="None", cmap=None, title="",
                  subtitle="", first_col=True, bottom_row=True, top_row=False,
                  muted="#56636E", scale="Binding", ke_top=False):
     """One panel as a heat map: energy across, ``zi`` (etch time / level,
@@ -443,9 +443,9 @@ def draw_heatmap(fig, ax, regs, zi, norm="None", heat=None, title="",
     a0, r0 = axes_x[0], regs[0]
     ys = [[y / norm_factor(r, norm) for y in r.counts] for r in regs]
     grid, rows = viewdata.build_matrix([a.x for a in axes_x], ys)
-    cmap = LinearSegmentedColormap.from_list("heat", heat or ["#FFFFFF",
-                                                              "#000000"])
-    cmap.set_bad((0, 0, 0, 0))                # outside a trace's range
+    if cmap is None:
+        cmap = LinearSegmentedColormap.from_list("heat", ["#FFFFFF", "#000000"])
+    cmap = cmap.with_extremes(bad=(0, 0, 0, 0))   # outside a trace's range
     mesh = ax.pcolormesh(viewdata.edges(list(grid)),
                          viewdata.edges(list(zi.values)),
                          np.ma.masked_invalid(rows), cmap=cmap,
@@ -646,6 +646,10 @@ class Workspace:
         if HAVE_MPL:
             themes.MPL_FAMILY = fonts.register_matplotlib()
         self.themes = ThemeManager(root)
+        ax_choice = self.cfg.get("axis_colour", "Theme default")
+        self.axis_choice = (ax_choice if ax_choice in themes.AXIS_CHOICES
+                            else "Theme default")
+        self.axis_custom = self.cfg.get("axis_colour_custom")
         self.theme_name = self.cfg.get("theme", "Light")
         if self.theme_name not in THEME_NAMES:
             self.theme_name = "Light"
@@ -840,9 +844,18 @@ class Workspace:
             side="right", padx=(12, 6))
 
     # -- theme --------------------------------------------------------------
+    def _plot_palette(self, pal=None, paper=False):
+        """``(palette, note)`` for drawing: the theme (or ``pal``) with the
+        chosen axis colour applied. On paper (PDF) "White" is ignored."""
+        pal = pal or self.palette
+        if paper and self.axis_choice == "White":
+            return pal, ""
+        return themes.with_axis_colour(pal, self.axis_choice,
+                                       self.axis_custom)
+
     def _apply_mpl_theme(self):
         if HAVE_MPL:
-            matplotlib.rcParams.update(mpl_rc(self.palette))
+            matplotlib.rcParams.update(mpl_rc(self._plot_palette()[0]))
 
     def set_theme(self, name, save=True):
         """Switch the colour theme live (widgets, tick boxes, plots)."""
@@ -953,6 +966,10 @@ class Workspace:
         self.preview.close_document()
         if self._pdf_dir:
             shutil.rmtree(self._pdf_dir, ignore_errors=True)
+        cfg["colour_scale"] = self.colscale_var.get()
+        cfg["colour_reverse"] = bool(self.colrev_var.get())
+        cfg["axis_colour"] = self.axis_choice
+        cfg["axis_colour_custom"] = self.axis_custom
         cfg["view_mode"] = self.view_var.get()
         cfg["energy_scale"] = self.scale_var.get()
         cfg["ke_top"] = bool(self.ke_var.get())
@@ -1100,6 +1117,35 @@ class Workspace:
                        "time, then trace order.")
         self._sync_view_controls()
 
+        # third view row: colours
+        ctl3 = ttk.Frame(parent)
+        ctl3.pack(side="top", fill="x", padx=10, pady=(0, 2))
+        ttk.Label(ctl3, text="Colour").pack(side="left")
+        sc_name = cfg.get("colour_scale", "Theme default")
+        self.colscale_var = tk.StringVar(
+            value=sc_name if sc_name in themes.SCALE_NAMES
+            else "Theme default")
+        cb = ttk.Combobox(ctl3, textvariable=self.colscale_var, width=13,
+                          state="readonly", values=themes.SCALE_NAMES)
+        cb.pack(side="left", padx=(6, 6))
+        cb.bind("<<ComboboxSelected>>", lambda e: self._schedule_render())
+        tip(cb, "Colour scale for the heatmap and for the traces of a stack "
+                "or waterfall (spread along the series). Theme default keeps "
+                "the colours of the current theme.")
+        self.colrev_var = tk.BooleanVar(value=bool(cfg.get("colour_reverse")))
+        rev = ttk.Checkbutton(ctl3, text="Reverse", variable=self.colrev_var,
+                              command=self._schedule_render)
+        rev.pack(side="left", padx=(0, 12))
+        tip(rev, "Flip the colour scale.")
+        ttk.Label(ctl3, text="Axes").pack(side="left")
+        self.axis_var = tk.StringVar(value=self.axis_choice)
+        ab = ttk.Combobox(ctl3, textvariable=self.axis_var, width=13,
+                          state="readonly", values=themes.AXIS_CHOICES)
+        ab.pack(side="left", padx=(6, 0))
+        ab.bind("<<ComboboxSelected>>", lambda e: self._on_axis_changed())
+        tip(ab, "Colour of the axis lines, ticks and labels. Black or white "
+                "are ignored where they would be hard to see.")
+
         # canvas + toolbar + contextual footer (bottom widgets are packed in
         # _layout_bottom so they can be shown and hidden in order)
         self.fig = self.canvas = self.toolbar = None
@@ -1176,6 +1222,20 @@ class Workspace:
             ttk.Label(parent, justify="left", padding=20,
                       text="matplotlib is not installed, so spectra cannot be "
                            "plotted.\n\n    pip install matplotlib").pack()
+
+    def _on_axis_changed(self):
+        if self.axis_var.get() == "Custom…":
+            from tkinter import colorchooser
+            _rgb, hexc = colorchooser.askcolor(
+                color=self.axis_custom or "#000000", parent=self.root,
+                title="Axis colour")
+            if not hexc:                       # cancelled: keep the old choice
+                self.axis_var.set(self.axis_choice)
+                return
+            self.axis_custom = hexc.upper()
+        self.axis_choice = self.axis_var.get()
+        self._apply_mpl_theme()
+        self._schedule_render()
 
     def _on_view_changed(self):
         self._sync_view_controls()
@@ -1378,6 +1438,12 @@ class Workspace:
 
     def trace_colours(self, regs, pal=None):
         pal = pal or self.palette
+        if HAVE_MPL:
+            along = themes.scale_colours(self.colscale_var.get(),
+                                         bool(self.colrev_var.get()),
+                                         len(regs), pal)
+            if along is not None:           # a colour scale, not the theme's
+                return along
         return stack_colours([self.color_slot.get(id(r), 0) for r in regs],
                              pal["cycle"], pal["plot_bg"])
 
@@ -1748,7 +1814,8 @@ class Workspace:
         """Draw one page of panels onto fig; returns {axes: group key}.
         ``limit``/``start`` show a window of long stacks; ``pal`` overrides the
         colours (PDFs pass the white 'print' palette)."""
-        pal = pal or self.palette
+        base = pal or self.palette          # theme colours (trace colours)
+        pal, axis_note = self._plot_palette(base, paper=pal is not None)
         rows, cols = _grid_dims(len(chunk))
         multi = len(self.docs) > 1
         norm = self.norm_var.get()
@@ -1761,10 +1828,14 @@ class Workspace:
         notes = []
         if fig is self.fig:
             self._view_notes = notes
+            if axis_note:
+                notes.append(axis_note)
+        cmap_name = self.colscale_var.get()
+        reverse = bool(self.colrev_var.get())
         for i, (key, rs) in enumerate(chunk):
             s = min(start, len(rs) - limit) if limit and len(rs) > limit else 0
             vis = rs[s:s + limit] if limit and len(rs) > limit else rs
-            colours = self.trace_colours(rs, pal)[s:s + len(vis)]
+            colours = self.trace_colours(rs, base)[s:s + len(vis)]
             if scale == "Kinetic" and not all(
                     viewdata.energy_axis(r, scale).ok for r in vis):
                 notes.append("no photon energy for some spectra: shown "
@@ -1792,7 +1863,9 @@ class Workspace:
                                  f"{zi.mode.lower()}")
                 if view == "Heatmap":
                     ax = fig.add_subplot(rows, cols, i + 1)
-                    draw_heatmap(fig, ax, vis, zvis, norm, pal["heat"], title,
+                    draw_heatmap(fig, ax, vis, zvis, norm,
+                                 themes.scale_colourmap(cmap_name, reverse,
+                                                        base), title,
                                  subtitle, first_col=(i % cols == 0),
                                  bottom_row=(i + cols >= len(chunk)),
                                  top_row=top_row, muted=pal["muted"],
@@ -1858,7 +1931,8 @@ class Workspace:
         groups = self._groups()
         limit = self._traces_limit() if windowed else None
         size = (11.7, 8.3) if landscape else (8.3, 11.7)
-        with matplotlib.rc_context(mpl_rc(PRINT)), PdfPages(path) as pdf:
+        paper = self._plot_palette(PRINT, paper=True)[0]
+        with matplotlib.rc_context(mpl_rc(paper)), PdfPages(path) as pdf:
             for p in range((len(groups) + per_page - 1) // per_page):
                 fig = Figure(figsize=size, dpi=150)
                 self._draw_page(fig, groups[p * per_page:(p + 1) * per_page],

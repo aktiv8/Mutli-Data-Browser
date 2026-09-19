@@ -192,5 +192,86 @@ class TestHeatPalettes(unittest.TestCase):
             self.assertLess(abs(lum[0] - bg), abs(lum[-1] - bg), name)
 
 
+try:
+    import matplotlib  # noqa: F401
+    HAVE_MPL = True
+except Exception:
+    HAVE_MPL = False
+
+
+@unittest.skipUnless(HAVE_MPL, "matplotlib not installed")
+class TestColourScales(unittest.TestCase):
+    def test_theme_default_keeps_theme_colours(self):
+        for name, p in themes.PALETTES.items():
+            self.assertIsNone(themes.scale_colours("Theme default", False, 5,
+                                                   p))
+            cmap = themes.scale_colourmap("Theme default", False, p)
+            from matplotlib.colors import LinearSegmentedColormap, to_hex
+            ref = LinearSegmentedColormap.from_list("heat", list(p["heat"]))
+            for t in (0.0, 0.3, 0.7, 1.0):
+                self.assertEqual(to_hex(cmap(t)), to_hex(ref(t)), name)
+
+    def test_every_scale_is_visible_on_every_palette(self):
+        for pname, p in themes.PALETTES.items():
+            for scale in themes.SCALE_NAMES[1:]:
+                for n in (1, 2, 8, 30):
+                    cols = themes.scale_colours(scale, False, n, p)
+                    self.assertEqual(len(cols), n)
+                    for c in cols:
+                        self.assertGreaterEqual(
+                            themes.contrast(c, p["plot_bg"]),
+                            themes.MIN_TRACE_CONTRAST - 1e-9,
+                            f"{pname}/{scale}/{n}: {c}")
+                    if n <= 8:
+                        self.assertEqual(len(set(cols)), n,
+                                         f"{pname}/{scale}/{n}")
+
+    def test_reverse_reverses(self):
+        p = themes.PALETTES["Light"]
+        fwd = themes.scale_colours("Viridis", False, 6, p)
+        self.assertEqual(themes.scale_colours("Viridis", True, 6, p),
+                         fwd[::-1])
+
+    def test_colourmap_is_a_private_copy(self):
+        p = themes.PALETTES["Light"]
+        self.assertIsNot(themes.scale_colourmap("Viridis", False, p),
+                         themes.scale_colourmap("Viridis", False, p))
+
+
+class TestAxisColour(unittest.TestCase):
+    def test_default_returns_the_palette_unchanged(self):
+        p = themes.PALETTES["Light"]
+        self.assertEqual(themes.with_axis_colour(p, "Theme default"), (p, ""))
+        self.assertEqual(themes.with_axis_colour(p, "Custom…", None), (p, ""))
+
+    def test_black_on_light_replaces_only_frame_and_text(self):
+        p = themes.PALETTES["Light"]
+        q, note = themes.with_axis_colour(p, "Black")
+        self.assertEqual(note, "")
+        self.assertEqual((q["muted"], q["plot_fg"]), ("#000000", "#000000"))
+        self.assertEqual({k: v for k, v in q.items()
+                          if k not in ("muted", "plot_fg")},
+                         {k: v for k, v in p.items()
+                          if k not in ("muted", "plot_fg")})
+        self.assertNotEqual(p["muted"], "#000000")     # original untouched
+        rc = themes.mpl_rc(q)
+        self.assertEqual(rc["axes.edgecolor"], "#000000")
+        self.assertEqual(rc["xtick.color"], "#000000")
+        self.assertEqual(rc["axes.labelcolor"], "#000000")
+
+    def test_invisible_choices_fall_back_with_a_note(self):
+        for pname, bad in (("Dark", "Black"), ("Light", "White"),
+                           ("High contrast", "Black")):
+            p = themes.PALETTES[pname]
+            q, note = themes.with_axis_colour(p, bad)
+            self.assertIs(q, p, pname)
+            self.assertIn("hard to see", note)
+
+    def test_custom_colour(self):
+        p = themes.PALETTES["Light"]
+        q, note = themes.with_axis_colour(p, "Custom…", "#7A1F1F")
+        self.assertEqual((q["muted"], note), ("#7A1F1F", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

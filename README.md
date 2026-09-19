@@ -113,6 +113,18 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
      time, else trace order), or pick one. Traces are ordered by it, surface /
      earliest first; if it is unavailable for a group the status bar says what
      was used instead.
+   * **Colour** — *Theme default* keeps the current theme's colours. Pick a
+     scale (Viridis, Plasma, Magma, Inferno, Cividis, Turbo, Coolwarm, Greys,
+     Blues, YlOrRd) to colour the heatmap's intensity and to spread the traces
+     of a stack or waterfall along the scale (by their place in the series, so
+     a depth profile runs from surface to bulk); **Reverse** flips it. The tree
+     swatches follow, so the tree stays the legend. Ends of a scale that would
+     vanish into the plot background are trimmed. With a scale chosen, traces
+     are no longer coloured per file / sample.
+   * **Axes** — colour of the axis lines, ticks and labels: *Theme default*,
+     *Black*, *White* or *Custom…*. A choice that would be hard to see on the
+     current background (black on Dark, white on Light) is ignored and the
+     status bar says so. PDFs ignore *White*.
    * **Energy** — *Binding* or *Kinetic* (KE = hν − BE; needs the photon
      energy, otherwise the spectrum stays on binding energy and the status bar
      says so). **KE top axis** mirrors the binding-energy axis along the top as

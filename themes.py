@@ -143,6 +143,94 @@ def ramp(colour, n, background):
     return [mix(colour, background, top * i / (n - 1)) for i in range(n)]
 
 
+# -- colour scales (heat map intensity, and trace colours along a series) -------
+# "Theme default" keeps the palette's own ``heat`` ramp / trace colours.
+COLOUR_SCALES = {
+    "Theme default": None, "Viridis": "viridis", "Plasma": "plasma",
+    "Magma": "magma", "Inferno": "inferno", "Cividis": "cividis",
+    "Turbo": "turbo", "Coolwarm": "coolwarm", "Greys": "Greys",
+    "Blues": "Blues", "YlOrRd": "YlOrRd",
+}
+SCALE_NAMES = list(COLOUR_SCALES)
+MIN_TRACE_CONTRAST = 2.0       # trace colour vs plot background (WCAG ratio)
+
+
+def scale_colourmap(name, reverse, pal):
+    """matplotlib Colormap for a scale name ("Theme default" = the palette's
+    ``heat`` ramp). Always a private copy, so callers may ``set_bad``."""
+    import copy
+    import matplotlib
+    from matplotlib.colors import LinearSegmentedColormap
+    key = COLOUR_SCALES.get(name)
+    if key is None:
+        cmap = LinearSegmentedColormap.from_list("heat", list(pal["heat"]))
+    else:
+        cmap = copy.copy(matplotlib.colormaps[key])
+    return cmap.reversed() if reverse else cmap
+
+
+def _legible(colour, bg, fg, need=MIN_TRACE_CONTRAST):
+    """``colour``, nudged toward ``fg`` until it stands out from ``bg``."""
+    for step in range(11):
+        c = mix(colour, fg, step / 10)
+        if contrast(c, bg) >= need:
+            return c
+    return fg
+
+
+def scale_colours(name, reverse, n, pal):
+    """``n`` trace colours spread along a scale, or None for "Theme default"
+    (the caller then keeps the theme's own trace colours).
+
+    The ends of a scale that would vanish into the plot background (the pale
+    end of Greys on white, the dark end of Magma on a dark plot) are trimmed,
+    and any colour still too faint (the pale middle of Coolwarm) is nudged
+    toward the foreground colour, so every trace stays visible. A lone trace
+    takes the middle of the scale."""
+    key = COLOUR_SCALES.get(name)
+    if key is None or n < 1:
+        return None
+    import matplotlib
+    cmap = matplotlib.colormaps[key]
+    bg, fg = pal["plot_bg"], pal["plot_fg"]
+
+    def at(t):
+        return _hex(cmap(t)[:3])
+
+    lo, hi = 0.0, 1.0
+    while lo < 0.5 and contrast(at(lo), bg) < MIN_TRACE_CONTRAST:
+        lo += 0.02
+    while hi > 0.5 and contrast(at(hi), bg) < MIN_TRACE_CONTRAST:
+        hi -= 0.02
+    ts = ([(lo + hi) / 2] if n == 1
+          else [lo + (hi - lo) * i / (n - 1) for i in range(n)])
+    if reverse:
+        ts = ts[::-1]
+    return [_legible(at(t), bg, fg) for t in ts]
+
+
+# -- axis colour (frame, ticks, labels) -----------------------------------------
+AXIS_CHOICES = ["Theme default", "Black", "White", "Custom…"]
+MIN_AXIS_CONTRAST = 3.0
+
+
+def with_axis_colour(pal, choice, custom=None):
+    """``(palette, note)``: a copy of ``pal`` whose frame / tick colour
+    (``muted``) and axis text colour (``plot_fg``) are the chosen colour.
+
+    "Theme default" (or an unset custom colour) returns the palette as is. A
+    colour that would be hard to see on this plot background falls back to
+    the theme colours, with ``note`` saying so."""
+    colour = {"Black": "#000000", "White": "#FFFFFF",
+              "Custom…": custom}.get(choice)
+    if not colour:
+        return pal, ""
+    if contrast(colour, pal["plot_bg"]) < MIN_AXIS_CONTRAST:
+        return pal, (f"{choice.rstrip('…').lower()} axes would be hard to "
+                     f"see on this background: using the theme colour")
+    return dict(pal, muted=colour, plot_fg=colour), ""
+
+
 def mpl_rc(pal, family=None) -> dict:
     """matplotlib rcParams for a palette (use with ``matplotlib.rc_context``)."""
     fam = family or MPL_FAMILY
