@@ -69,6 +69,31 @@ class DetailsDialog(tk.Toplevel):
                        "text is saved in the workbook."
                   ).grid(row=r + 1, column=1, columnspan=2, sticky="w")
 
+        ttk.Label(body, text="Methods").grid(
+            row=r + 2, column=0, sticky="nw", pady=(8, 3), padx=(0, 10))
+        mh = ttk.Frame(body)
+        mh.grid(row=r + 2, column=1, columnspan=2, sticky="nsew", pady=(8, 3))
+        body.rowconfigure(r + 2, weight=1)
+        self.methods = tk.Text(mh, wrap="word", height=9, width=60, undo=True,
+                               relief="flat", borderwidth=1,
+                               font="TkDefaultFont")
+        msb = ttk.Scrollbar(mh, command=self.methods.yview)
+        self.methods.configure(yscrollcommand=msb.set)
+        msb.pack(side="right", fill="y")
+        self.methods.pack(side="left", fill="both", expand=True)
+        self.generated = app.methods_generated()
+        self.methods.insert("1.0", details.get("methods") or self.generated)
+        mrow = ttk.Frame(body)
+        mrow.grid(row=r + 3, column=1, columnspan=2, sticky="ew")
+        ttk.Label(mrow, style="Muted.TLabel", wraplength=330, justify="left",
+                  text="Written from the loaded files (instrument, pass "
+                       "energies, step, dwell, neutraliser, sputtering, "
+                       "calibration). Edit it to use your own wording."
+                  ).pack(side="left", fill="x", expand=True)
+        ttk.Button(mrow, text="Regenerate",
+                   command=self._regenerate).pack(side="right")
+
+        r += 2
         ttk.Label(body, text="Letterhead logo").grid(
             row=r + 2, column=0, sticky="w", pady=(10, 3), padx=(0, 10))
         self.logo_lbl = ttk.Label(body, style="Muted.TLabel")
@@ -88,9 +113,15 @@ class DetailsDialog(tk.Toplevel):
         ttk.Button(bar, text="OK",
                    command=self._ok).pack(side="right", padx=(0, 6))
         self.bind("<Escape>", lambda e: self.destroy())
-        _finish(self, app, 620, 560)
-        self.summary.configure(bg=app.palette["entry"], fg=app.palette["fg"],
-                               insertbackground=app.palette["fg"])
+        _finish(self, app, 640, 760)
+        for box in (self.summary, self.methods):
+            box.configure(bg=app.palette["entry"], fg=app.palette["fg"],
+                          insertbackground=app.palette["fg"])
+
+    def _regenerate(self):
+        self.generated = self.app.methods_generated()
+        self.methods.delete("1.0", "end")
+        self.methods.insert("1.0", self.generated)
 
     def _show_logo(self):
         self.logo_lbl.config(text=os.path.basename(self.logo)
@@ -111,6 +142,9 @@ class DetailsDialog(tk.Toplevel):
     def _ok(self):
         details = {k: v.get().strip() for k, v in self.vars.items()}
         details["summary"] = self.summary.get("1.0", "end").rstrip()
+        text = self.methods.get("1.0", "end").strip()
+        # unchanged generated text stays automatic (it follows the data)
+        details["methods"] = "" if text == self.generated.strip() else text
         self.on_ok(details, self.logo)
         self.destroy()
 

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>/*__CSS__*/</style>
+</head>
+<body>
+<div id="boot" class="boot" role="status">Loading the data&hellip;</div>
+<div id="app" hidden>
+  <header class="top">
+    <div class="ident">
+      <h1 id="title"></h1>
+      <p id="subtitle" class="muted"></p>
+    </div>
+    <div class="actions">
+      <label class="field">Theme
+        <select id="theme">
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <button type="button" id="print">Print</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side" aria-label="Samples and spectra">
+      <div class="side-tools">
+        <input id="filter" type="search" placeholder="Filter samples and spectra"
+               aria-label="Filter samples and spectra" autocomplete="off">
+        <button type="button" id="untick" title="Untick every spectrum">Clear</button>
+      </div>
+      <div id="tree" class="tree" role="tree"></div>
+      <p id="tickcount" class="muted small"></p>
+    </aside>
+    <main>
+      <nav class="tabs" role="tablist" id="tabs"></nav>
+      <section id="tab-plot" class="tab" role="tabpanel">
+        <div class="controls" id="controls">
+          <label class="field">View
+            <select id="mode"><option value="stack">Stack</option><option value="overlay">Overlay</option></select>
+          </label>
+          <label class="field">Normalise
+            <select id="norm"><option value="none">None</option><option value="max">Max = 1</option><option value="area">Area = 1</option></select>
+          </label>
+          <label class="field" id="offsetField">Offset
+            <input type="range" id="offset" min="0" max="3" step="0.05" value="0.6">
+          </label>
+          <label class="field">Energy
+            <select id="scale"><option value="Binding">Binding</option><option value="Kinetic">Kinetic</option></select>
+          </label>
+          <button type="button" id="resetzoom" title="Undo zooming on every panel">Reset zoom</button>
+          <button type="button" id="csv" title="Download the ticked spectra as CSV">Download CSV</button>
+        </div>
+        <div class="controls levelbar" id="levelbar" hidden>
+          <label class="field"><input type="checkbox" id="levelOn"> One depth level at a time</label>
+          <input type="range" id="level" min="0" max="0" step="1" aria-label="Depth level">
+          <span id="levelText" class="muted"></span>
+        </div>
+        <p id="notes" class="muted small"></p>
+        <div id="panels" class="panels"></div>
+        <p id="empty" class="empty">Tick spectra in the list to plot them. Spectra with the same element name share a panel.
+          Drag on a plot to zoom, double-click to reset.</p>
+      </section>
+      <section id="tab-figures" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-meta" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-notes" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-methods" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-holder" class="tab" role="tabpanel" hidden></section>
+    </main>
+  </div>
+  <footer class="foot muted small" id="foot"></footer>
+</div>
+<script id="xps-data" type="application/octet-stream">__DATA__</script>
+<script>/*__JS__*/</script>
+</body>
+</html>

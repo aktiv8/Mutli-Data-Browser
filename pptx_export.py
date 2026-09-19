@@ -301,16 +301,17 @@ def _title_slide(deck, details, logo):
 def _summary_slides(deck, details, n0):
     n = n0
     paras = paragraphs(details.get("summary"))
+    methods = paragraphs(details.get("methods"))
     cal = (details.get("calibration") or "").strip()
-    if cal:
+    if cal and cal not in (details.get("methods") or ""):
         paras.append("Energy calibration: " + cal)
-    pages = chunk_paragraphs(paras)
-    for i, page in enumerate(pages):
-        n += 1
-        slide = deck.content_slide("Summary" + (" (continued)" if i else ""),
-                                   n)
-        deck.text(slide, MARGIN, 1.3, BODY_W, BOTTOM - 1.3, page, size=16,
-                  space_after=10)
+    for title, block in (("Summary", paras), ("Methods", methods)):
+        for i, page in enumerate(chunk_paragraphs(block)):
+            n += 1
+            slide = deck.content_slide(
+                title + (" (continued)" if i else ""), n)
+            deck.text(slide, MARGIN, 1.3, BODY_W, BOTTOM - 1.3, page,
+                      size=16 if title == "Summary" else 14, space_after=10)
     return n
 
 

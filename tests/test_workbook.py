@@ -49,7 +49,8 @@ class Tmp(unittest.TestCase):
         wb = wbk.Workbook(
             details={"title": "MoS2 study", "customer": "ACME",
                      "reference": "J-42", "operator": "DM",
-                     "date": "2026-01-02", "summary": "Line one\nLíne two ✓"},
+                     "date": "2026-01-02", "summary": "Line one\nLíne two ✓",
+                     "methods": "Our own methods text."},
             state={"view_mode": "Heatmap", "cursors": {"C 1s": 285.0},
                    "ticked": [wbk.region_ref("f1", 0, region("C 1s"))]},
             figures=[{"id": "g1", "name": "Fig A", "caption": "Depth",

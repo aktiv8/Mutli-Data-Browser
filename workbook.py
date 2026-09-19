@@ -38,7 +38,7 @@ FORMAT_VERSION = 1
 EXT = ".xpscontainer"
 
 DETAIL_FIELDS = ("title", "customer", "reference", "operator", "date",
-                 "summary")
+                 "summary", "methods")      # methods: the user's own text, or ""
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 _LOGO_EXTS = {".png", ".jpg", ".jpeg"}
 

@@ -77,9 +77,12 @@ import plotstyle
 import themes
 import viewdata
 import metasummary
+import methods
 import workbook as wbk
 import annotations
 import calibration
+import handover
+import htmlbrowser
 import xpslines
 import report
 import pptx_export
@@ -592,6 +595,10 @@ class Workspace:
                         command=self.save_report)
         wbm.add_command(label="Export PowerPoint…",
                         command=self.export_powerpoint)
+        wbm.add_command(label="Hand-over package (ZIP)…",
+                        command=self.export_handover)
+        wbm.add_command(label="Interactive data browser (HTML)…",
+                        command=self.export_html_browser)
         bar.add_cascade(label="Workbook", menu=wbm)
         tm = tk.Menu(bar, tearoff=0)
         self.themes.register_menu(tm)
@@ -2668,19 +2675,9 @@ class Workspace:
                                      for s, rows in p.samples_metadata()]}
         return snap
 
-    def save_workbook(self, as_new=False):
-        """Write the workbook. Returns True on success."""
-        path = self.wb_path
-        if as_new or not path:
-            stem = re.sub(r"[^\w.\- ]+", "_",
-                          self.details.get("title") or "experiment").strip()
-            path = filedialog.asksaveasfilename(
-                title="Save experiment workbook",
-                defaultextension=wbk.EXT, initialfile=(stem or "experiment")
-                + wbk.EXT,
-                filetypes=[("Experiment workbook", "*" + wbk.EXT)])
-            if not path:
-                return False
+    def _make_book(self):
+        """``(Workbook, preview PNG bytes or None, bytes of data files)`` for
+        the current session (nothing is written or changed)."""
         entries = []
         for p in self.docs:
             entries.append(wbk.FileEntry(
@@ -2688,11 +2685,6 @@ class Workspace:
                 path=p.path, original_path=self.file_origin.get(id(p), p.path)))
         total = sum(os.path.getsize(e.path) for e in entries
                     if os.path.isfile(e.path))
-        if total > 500 * 1024 * 1024 and not messagebox.askokcancel(
-                "Large workbook",
-                f"The data files add up to {total / 1048576:.0f} MB and will "
-                f"be copied into the workbook. Continue?"):
-            return False
         preview = None
         if HAVE_MPL and self.fig is not None:
             try:
@@ -2708,6 +2700,27 @@ class Workspace:
             annotations=self.ann.to_json(),
             holder={"calibration": self.calib} if self.calib else {},
             created=self.wb_created, extra=dict(self.wb_extra))
+        return book, preview, total
+
+    def save_workbook(self, as_new=False):
+        """Write the workbook. Returns True on success."""
+        path = self.wb_path
+        if as_new or not path:
+            stem = re.sub(r"[^\w.\- ]+", "_",
+                          self.details.get("title") or "experiment").strip()
+            path = filedialog.asksaveasfilename(
+                title="Save experiment workbook",
+                defaultextension=wbk.EXT, initialfile=(stem or "experiment")
+                + wbk.EXT,
+                filetypes=[("Experiment workbook", "*" + wbk.EXT)])
+            if not path:
+                return False
+        book, preview, total = self._make_book()
+        if total > 500 * 1024 * 1024 and not messagebox.askokcancel(
+                "Large workbook",
+                f"The data files add up to {total / 1048576:.0f} MB and will "
+                f"be copied into the workbook. Continue?"):
+            return False
         self.root.config(cursor="watch")
         self.root.update_idletasks()
         try:
@@ -2847,6 +2860,20 @@ class Workspace:
             return 1
         return len(self._render_figure_pages(fig, consume, number=number))
 
+    def methods_generated(self):
+        """The methods text written from the loaded files' metadata."""
+        rows = [md for p in self.docs for md in p.metadata_rows()]
+        return methods.generate(rows, self.calibration_statement())
+
+    def methods_text(self):
+        """What the report says: the user's own text, else the generated."""
+        return methods.effective(self.details.get("methods", ""),
+                                 self.methods_generated())
+
+    def _report_details(self):
+        return dict(self.details, calibration=self.calibration_statement(),
+                    methods=self.methods_text())
+
     def _build_report(self, path, sections):
         figures = self.figures or ([{
             "name": "Current view", "caption": "",
@@ -2854,7 +2881,7 @@ class Workspace:
         if not HAVE_MPL:
             sections = tuple(s for s in sections if s != "figures")
         return report.build_report(
-            path, dict(self.details, calibration=self.calibration_statement()),
+            path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs, figures,
             self._report_figure_pages, sections)
 
@@ -2864,6 +2891,168 @@ class Workspace:
                                                      "files first.")
             return False
         return True
+
+    def _figure_pngs(self, fig, dpi=200):
+        """PNG bytes of every page of a saved figure (report style)."""
+        def consume(page):
+            buf = io.BytesIO()
+            page.savefig(buf, format="png", dpi=dpi)
+            return buf.getvalue()
+        return self._render_figure_pages(fig, consume, number=1, dpi=dpi)
+
+    def _display_for_export(self, r):
+        return (self._display(r) if self.cfg.get("apply_corrections", True)
+                else r)
+
+    def browser_payload(self):
+        """The data of the offline HTML browser: every spectrum as exported,
+        the saved figures rendered to PNG, the methods and the holder photo."""
+        figures = []
+        if HAVE_MPL:
+            figures = [{"name": f.get("name", ""),
+                        "caption": f.get("caption", ""),
+                        "pages": self._figure_pngs(f, dpi=130)}
+                       for f in self.figures]
+        return htmlbrowser.build_payload(
+            self.docs, self._display_for_export, self._report_details(),
+            self.methods_text(), self.calibration_statement(), figures,
+            self.calib)
+
+    def export_html_browser(self):
+        if not self._report_ready():
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save interactive data browser", defaultextension=".html",
+            initialfile=htmlbrowser.default_name(self.details),
+            filetypes=[("HTML page", "*.html")])
+        if not path:
+            return
+        self.root.config(cursor="watch")
+        self.status.config(text="Building the data browser…")
+        self.root.update_idletasks()
+        try:
+            size = htmlbrowser.write_html(path, self.browser_payload())
+        except htmlbrowser.ViewerError as exc:
+            messagebox.showerror("Data browser", str(exc))
+            return
+        except Exception as exc:
+            messagebox.showerror("Data browser failed", str(exc))
+            return
+        finally:
+            self.root.config(cursor="")
+            self.status.config(text="")
+        if messagebox.askyesno(
+                "Data browser saved",
+                f"Saved ({size / 1048576:.1f} MB) to\n{path}\n\nIt is one "
+                f"file that opens in any modern browser, offline.\n\nOpen "
+                f"it now?"):
+            open_external(path)
+
+    def handover_parts(self, sections, workbook_tmp=None):
+        """The files of a hand-over package for the chosen sections, plus a
+        list of notes about anything that had to be left out."""
+        parts, notes = [], []
+        details = self._report_details()
+        if "report" in sections:
+            if not HAVE_MPL:
+                notes.append("report: matplotlib is not installed")
+            else:
+                tmp = self._pdf_tmp("handover_report.pdf")
+                try:
+                    self._build_report(tmp, report.SECTIONS)
+                    with open(tmp, "rb") as fh:
+                        parts.append(handover.Part(
+                            "report.pdf", "the experiment report",
+                            data=fh.read()))
+                except (report.ReportError, OSError) as exc:
+                    notes.append(f"report: {exc}")
+        if "methods" in sections:
+            parts.append(handover.Part(
+                "methods.txt", "the methods text",
+                data=(details["methods"] + "\n").encode("utf-8")))
+        if "spectra" in sections:
+            sp, sn = handover.spectra_parts(self.docs,
+                                            self._display_for_export)
+            parts += sp
+            notes += sn
+        if "metadata" in sections:
+            parts += handover.metadata_parts(self.docs)
+        if "figures" in sections and HAVE_MPL:
+            figs = self.figures or ([{
+                "name": "Current view", "caption": "",
+                "state": self.capture_state()}] if self._groups() else [])
+            pages = [self._figure_pngs(f) for f in figs]
+            parts += handover.figure_parts(figs, pages)
+        if "browser" in sections:
+            try:
+                stem = handover.safe_stem(details.get("title"), "experiment")
+                with tempfile.TemporaryDirectory(prefix="xpsc_ho_") as tmp:
+                    page = os.path.join(tmp, "browser.html")
+                    htmlbrowser.write_html(page, self.browser_payload())
+                    with open(page, "rb") as fh:
+                        parts.append(handover.Part(
+                            f"{stem} - data browser.html",
+                            "interactive data browser (open in any web "
+                            "browser, works offline)", data=fh.read()))
+            except htmlbrowser.ViewerError as exc:
+                notes.append(f"data browser: {exc}")
+        if "workbook" in sections and workbook_tmp:
+            book, preview, _total = self._make_book()
+            wbk.save(workbook_tmp, book, preview)
+            stem = handover.safe_stem(details.get("title"), "experiment")
+            parts.append(handover.Part(
+                f"workbook/{stem}{wbk.EXT}",
+                "the experiment workbook (open it with ESCApe Explorer)",
+                path=workbook_tmp))
+        return parts, notes
+
+    def export_handover(self):
+        if not self._report_ready():
+            return
+
+        def go(sections):
+            stem = handover.safe_stem(self.details.get("title"), "experiment")
+            path = filedialog.asksaveasfilename(
+                title="Save hand-over package", defaultextension=".zip",
+                initialfile=f"{stem} - handover.zip",
+                filetypes=[("ZIP archive", "*.zip")])
+            if not path:
+                return
+            self.root.config(cursor="watch")
+            self.status.config(text="Building the hand-over package…")
+            self.root.update_idletasks()
+            try:
+                with tempfile.TemporaryDirectory(prefix="xpsc_ho_") as tmp:
+                    parts, notes = self.handover_parts(
+                        sections, os.path.join(tmp, "workbook.xpscontainer"))
+                    rows = self._report_file_rows()
+                    members = handover.write_zip(
+                        path, f"{stem} - handover", parts,
+                        self._report_details(), rows,
+                        self.calibration_statement())
+            except handover.HandoverError as exc:
+                messagebox.showerror("Hand-over package", str(exc))
+                return
+            except Exception as exc:
+                messagebox.showerror("Hand-over package failed", str(exc))
+                return
+            finally:
+                self.root.config(cursor="")
+                self.status.config(text="")
+            text = f"{len(members)} files written to\n{path}"
+            if notes:
+                text += "\n\nLeft out:\n  " + "\n  ".join(notes)
+            messagebox.showinfo("Hand-over package", text)
+
+        workbook_ui.SectionsDialog(
+            self.root, self, "Hand-over package",
+            [("report", "Experiment report (PDF)"),
+             ("methods", "Methods text"),
+             ("spectra", "Spectra: VAMAS and CSV, one per sample"),
+             ("metadata", "Acquisition metadata (CSV)"),
+             ("figures", "Figures (PNG)"),
+             ("browser", "Interactive data browser (HTML, works offline)"),
+             ("workbook", "The workbook (.xpscontainer)")], go)
 
     def _deck_images(self, number, fig):
         """PNG bytes of each page of a saved figure, sized for a slide."""
@@ -2882,7 +3071,7 @@ class Workspace:
         if not HAVE_MPL:
             sections = tuple(s for s in sections if s != "figures")
         return pptx_export.build_deck(
-            path, dict(self.details, calibration=self.calibration_statement()),
+            path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs, figures,
             self._deck_images, sections)
 

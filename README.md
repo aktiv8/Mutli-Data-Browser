@@ -34,6 +34,9 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
 | `report.py` | the experiment report PDF |
 | `pptx_export.py` | the PowerPoint export (python-pptx) |
+| `methods.py` | the methods text, written from what the files record |
+| `handover.py` | the hand-over ZIP (report, spectra, figures, metadata, README, checksums) |
+| `htmlbrowser.py`, `viewer/` | the offline HTML data browser (payload builder and the page: template, CSS, JavaScript) |
 | `annotations.py`, `calibration.py`, `xpslines.py`, `assets/xps_lines.json` | your edits (names, notes, metadata, BE shifts, peak markers), calibration maths and the element-line table |
 | `importplan.py` | choosing between `.avg` / `.vgd` copies of the same data |
 | `viewdata.py`, `metasummary.py` | plot-view and metadata-tidying helpers |
@@ -45,7 +48,7 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `launch.py` | one-step launcher (creates a venv, installs deps, starts the app) |
 | `requirements.txt` | Python packages (matplotlib, Pillow, reportlab, PyMuPDF, python-pptx) |
 | `run.bat` / `run.sh` | double-click launchers for Windows / macOS + Linux |
-| `tests/` | unit tests (`python -m unittest discover tests`) |
+| `tests/` | unit tests (`python -m unittest discover tests`; the browser's JavaScript is also tested when Node.js is installed) |
 
 Keep all of these in the same folder.
 
@@ -263,6 +266,36 @@ high-resolution picture with an editable caption and speaker notes describing
 the look and the spectra shown. Choose the sections to include in the dialog.
 It needs `python-pptx` (installed by the launcher). Slides are built with
 plain PowerPoint text and tables, so you can restyle them freely.
+
+**Methods text.** *Workbook → Details…* has a **Methods** box holding a
+paragraph written from what your files actually record: instrument and
+source, pass energies (surveys and high-resolution scans kept apart), step
+sizes and dwell times, lens mode, charge neutraliser, sputtering, depth
+profiles, the dates, and your binding-energy calibration statement. A setting
+a file does not record is left out, never guessed. Edit the text to use your
+own wording (*Regenerate* brings the automatic text back; text you leave
+untouched keeps following the data). It appears on the report cover, on a
+*Methods* slide, in `methods.txt` and in the data browser.
+
+**Hand-over package** (Workbook menu → *Hand-over package (ZIP)…*) puts an
+experiment in one ZIP for a customer or collaborator: the report PDF, the
+methods, **one VAMAS and one CSV file per sample** (display names and energy
+shifts applied), the metadata as CSV, every saved figure as a PNG, optionally
+the interactive data browser and the workbook itself, a `README.txt` listing
+it all, and `SHA256SUMS.txt` (`sha256sum -c SHA256SUMS.txt` checks the
+contents). Tick what to include in the dialog.
+
+**Interactive data browser** (Workbook menu → *Interactive data browser
+(HTML)…*) writes **one self-contained `.html` file** that anyone can open in a
+modern browser, offline, with nothing to install. It holds every spectrum and
+lets the reader filter the sample list, tick spectra to plot them (stacked or
+overlaid, normalised, binding or kinetic energy, drag to zoom, hover for
+values), step through depth levels one at a time, read the acquisition
+metadata, notes and methods, look at your saved figures with their captions,
+see the holder photo with the analysis positions (click a marker to select
+that sample) and download the ticked spectra as CSV. It has light, dark and
+print styles. The data are compressed inside the file (a few MB at most for a
+large experiment); it uses no libraries and makes no network requests.
 
 ## Plot style
 

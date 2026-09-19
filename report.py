@@ -106,8 +106,14 @@ def cover_story(details, logo, file_rows):
         for para in paras:
             story += [Paragraph(para, body), Spacer(1, 3 * mm)]
 
+    methods = (details.get("methods") or "").strip()
+    if methods:
+        story.append(Paragraph("Methods", styles["Heading2"]))
+        for para in _paragraphs(methods):
+            story += [Paragraph(para, body), Spacer(1, 3 * mm)]
+
     cal = (details.get("calibration") or "").strip()
-    if cal:
+    if cal and cal not in methods:      # the methods text usually states it
         story += [Paragraph("Energy calibration", styles["Heading2"]),
                   Paragraph(xml_escape(cal), body), Spacer(1, 3 * mm)]
 
