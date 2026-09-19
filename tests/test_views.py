@@ -11,7 +11,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import escape_explorer as ee  # noqa: E402
+import spectradeck as ee  # noqa: E402
 import themes  # noqa: E402
 import viewdata  # noqa: E402
 from readers import Region  # noqa: E402

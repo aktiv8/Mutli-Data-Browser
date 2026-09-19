@@ -1,5 +1,5 @@
 """Drawing of spectra: the pure matplotlib functions behind the stack, heat
-map and 3-D waterfall panels (no Tk). ``escape_explorer`` re-exports them."""
+map and 3-D waterfall panels (no Tk). ``spectradeck`` re-exports them."""
 
 from __future__ import annotations
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ESCApe Explorer
+eXPoSe SpectraDeck
 ===============
 A single-window GUI to browse, plot and export XPS spectra from many
 instruments (Kratos ESCApe/Vision, VAMAS from any vendor, Thermo Avantage,
@@ -80,6 +80,7 @@ import metasummary
 import methods
 import workbook as wbk
 import annotations
+import appinfo
 import calibration
 import handover
 import htmlbrowser
@@ -104,12 +105,23 @@ from exporters import (export_csv, export_vamas, export_metadata_csv,
 # ==========================================================================
 #  GUI
 # ==========================================================================
-CALIB_PATH = os.path.join(os.path.expanduser("~"), ".escape_explorer_calib.json")
+_HOME = os.path.expanduser("~")
+CALIB_PATH = os.path.join(_HOME, ".spectradeck_calib.json")
+# files written under the application's former name (ESCApe Explorer): read
+# when the new file does not exist yet, so nobody loses their settings
+LEGACY_CALIB_PATH = os.path.join(_HOME, ".escape_explorer_calib.json")
+LEGACY_CONFIG_PATH = os.path.join(_HOME, ".escape_explorer_config.json")
+
+
+def _existing(path, legacy):
+    """The file to read: the current one if it exists, else the file of the
+    former name."""
+    return path if os.path.exists(path) else legacy
 
 
 def load_calibration():
     try:
-        with open(CALIB_PATH) as fh:
+        with open(_existing(CALIB_PATH, LEGACY_CALIB_PATH)) as fh:
             return json.load(fh)
     except Exception:
         return None
@@ -124,14 +136,14 @@ def save_calibration(c):
         return False
 
 
-CONFIG_PATH = os.path.join(os.path.expanduser("~"),
-                           ".escape_explorer_config.json")
+CONFIG_PATH = os.path.join(_HOME, ".spectradeck_config.json")
 
 
 def load_config():
-    """User settings (theme, layout, view options); missing file -> {}."""
+    """User settings (theme, layout, view options); missing file -> {}. The
+    file of the former name is used until the first save under the new one."""
     try:
-        with open(CONFIG_PATH) as fh:
+        with open(_existing(CONFIG_PATH, LEGACY_CONFIG_PATH)) as fh:
             cfg = json.load(fh)
         return cfg if isinstance(cfg, dict) else {}
     except Exception:
@@ -442,7 +454,7 @@ class Workspace:
 
     def __init__(self, root):
         self.root = root
-        root.title("ESCApe Explorer")
+        root.title(appinfo.NAME)
         self.cfg = load_config()
         h = min(780, max(560, root.winfo_screenheight() - 140))
         w = min(1400, max(1000, root.winfo_screenwidth() - 40))
@@ -2616,7 +2628,7 @@ class Workspace:
         return self._wb_active() and self._signature() != self._wb_sig
 
     def _update_title(self):
-        title = "ESCApe Explorer"
+        title = appinfo.NAME
         if self._wb_active():
             name = (os.path.basename(self.wb_path) if self.wb_path
                     else "Unsaved workbook")
@@ -3002,7 +3014,7 @@ class Workspace:
             stem = handover.safe_stem(details.get("title"), "experiment")
             parts.append(handover.Part(
                 f"workbook/{stem}{wbk.EXT}",
-                "the experiment workbook (open it with ESCApe Explorer)",
+                "the experiment workbook (open it with " + appinfo.NAME + ")",
                 path=workbook_tmp))
         return parts, notes
 
@@ -3219,7 +3231,7 @@ class Workspace:
 
     def _pdf_tmp(self, name):
         if self._pdf_dir is None or not os.path.isdir(self._pdf_dir):
-            self._pdf_dir = tempfile.mkdtemp(prefix="escape_explorer_pdf_")
+            self._pdf_dir = tempfile.mkdtemp(prefix="spectradeck_pdf_")
         return os.path.join(self._pdf_dir, name)
 
     def _show_preview(self):

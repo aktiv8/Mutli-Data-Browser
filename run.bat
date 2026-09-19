@@ -1,5 +1,5 @@
 @echo off
-REM ESCApe Explorer launcher for Windows.
+REM eXPoSe SpectraDeck launcher for Windows.
 REM Double-click this file, or run it from a command prompt.
 
 cd /d "%~dp0"

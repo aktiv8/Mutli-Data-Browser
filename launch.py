@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-launch.py — one-step launcher for ESCApe Explorer.
+launch.py — one-step launcher for eXPoSe SpectraDeck.
 
 Run this with any Python 3.8+ interpreter:
 
@@ -10,7 +10,7 @@ Run this with any Python 3.8+ interpreter:
 It will, on first run:
   1. create an isolated virtual environment in ./.venv
   2. install the required packages (matplotlib, Pillow) into it
-  3. launch escape_explorer.py using that environment
+  3. launch spectradeck.py using that environment
 
 On later runs it skips straight to step 3 (unless requirements change),
 so startup is fast. Nothing is installed into your system Python.
@@ -32,7 +32,7 @@ import venv
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 VENV_DIR = os.path.join(HERE, ".venv")
-APP = os.path.join(HERE, "escape_explorer.py")
+APP = os.path.join(HERE, "spectradeck.py")
 REQS = os.path.join(HERE, "requirements.txt")
 STAMP = os.path.join(VENV_DIR, ".requirements.sha1")
 
@@ -139,12 +139,12 @@ def ensure_environment(force=False):
 
 def launch_app():
     if not os.path.exists(APP):
-        log(f"Cannot find escape_explorer.py next to launch.py ({APP}).")
-        log("Keep launch.py, escape_explorer.py and requirements.txt in the "
+        log(f"Cannot find spectradeck.py next to launch.py ({APP}).")
+        log("Keep launch.py, spectradeck.py and requirements.txt in the "
             "same folder.")
         sys.exit(1)
     py = venv_python()
-    log("Launching ESCApe Explorer ...")
+    log("Launching eXPoSe SpectraDeck ...")
     # Replace this process with the app where possible (clean exit codes).
     if os.name == "nt":
         sys.exit(subprocess.call([py, APP]))

@@ -1,5 +1,5 @@
 'use strict';
-/* ESCApe Explorer - offline data browser.
+/* eXPoSe SpectraDeck - offline data browser.
    No libraries, no network. The first half is pure logic (decoding, axes,
    ticks, normalising, grouping, CSV) and is unit-tested under Node; the
    second half builds the page and only runs where there is a document. */

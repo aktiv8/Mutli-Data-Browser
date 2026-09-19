@@ -12,7 +12,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-import escape_explorer as ee  # noqa: E402
+import spectradeck as ee  # noqa: E402
 from readers import Region  # noqa: E402
 
 
@@ -60,6 +60,7 @@ class TestConfig(unittest.TestCase):
     def test_round_trip_and_bad_file(self):
         with tempfile.TemporaryDirectory() as d:
             ee.CONFIG_PATH = os.path.join(d, "c.json")
+            ee.LEGACY_CONFIG_PATH = os.path.join(d, "old.json")
             self.assertEqual(ee.load_config(), {})               # missing file
             self.assertTrue(ee.save_config({"theme": "Dark", "n": 3}))
             self.assertEqual(ee.load_config()["theme"], "Dark")
@@ -69,6 +70,28 @@ class TestConfig(unittest.TestCase):
             with open(ee.CONFIG_PATH, "w") as fh:
                 json.dump([1, 2], fh)
             self.assertEqual(ee.load_config(), {})               # wrong type
+
+    def test_settings_of_the_former_name_are_picked_up(self):
+        with tempfile.TemporaryDirectory() as d:
+            ee.CONFIG_PATH = os.path.join(d, "new.json")
+            ee.LEGACY_CONFIG_PATH = os.path.join(d, "old.json")
+            ee.CALIB_PATH = os.path.join(d, "newc.json")
+            ee.LEGACY_CALIB_PATH = os.path.join(d, "oldc.json")
+            with open(ee.LEGACY_CONFIG_PATH, "w") as fh:
+                json.dump({"theme": "Dark"}, fh)
+            with open(ee.LEGACY_CALIB_PATH, "w") as fh:
+                json.dump({"mm_per_px": 0.5}, fh)
+            self.assertEqual(ee.load_config(), {"theme": "Dark"})
+            self.assertEqual(ee.load_calibration(), {"mm_per_px": 0.5})
+            # once saved under the new name, the old file is no longer read
+            ee.save_config({"theme": "Light"})
+            self.assertEqual(ee.load_config(), {"theme": "Light"})
+            ee.save_calibration({"mm_per_px": 0.9})
+            self.assertEqual(ee.load_calibration(), {"mm_per_px": 0.9})
+            # a damaged new file is empty, it does not fall back
+            with open(ee.CONFIG_PATH, "w") as fh:
+                fh.write("{")
+            self.assertEqual(ee.load_config(), {})
 
 
 if __name__ == "__main__":

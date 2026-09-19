@@ -29,9 +29,10 @@ import tempfile
 import zipfile
 from dataclasses import dataclass
 
+import appinfo
 import exporters
 
-TOOL = "ESCApe Explorer"
+TOOL = appinfo.NAME
 
 
 class HandoverError(Exception):

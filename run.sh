@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ESCApe Explorer launcher for macOS and Linux.
+# eXPoSe SpectraDeck launcher for macOS and Linux.
 # Make it executable once:  chmod +x run.sh
 # Then run:                  ./run.sh
 

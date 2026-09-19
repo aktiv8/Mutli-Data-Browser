@@ -27,6 +27,7 @@ import os
 import re
 
 import annotations as an
+import appinfo
 import holder
 import themes
 import viewdata
@@ -201,7 +202,7 @@ def build_payload(docs, display=None, details=None, methods_text="",
         "v": FORMAT_VERSION,
         "generated": (generated or datetime.datetime.now()
                       ).replace(microsecond=0).isoformat(),
-        "tool": "ESCApe Explorer",
+        "tool": appinfo.NAME,
         "details": {k: str(details.get(k, "") or "") for k in DETAIL_KEYS},
         "methods": methods_text or "", "calibration": calibration or "",
         "files": files, "samples": samples, "figures": figs,

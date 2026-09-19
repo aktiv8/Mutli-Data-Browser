@@ -1,6 +1,6 @@
 """Dialogs for experiment workbooks and the AVG/VGD import prompt.
 
-Kept out of ``escape_explorer.py``; each dialog talks to the app only through
+Kept out of ``spectradeck.py``; each dialog talks to the app only through
 a few attributes / methods (see the docstrings).
 """
 

@@ -207,7 +207,7 @@ PAGE_MARGIN_MM = 15
 TEXT_WIDTH_MM = 210 - 2 * PAGE_MARGIN_MM          # portrait A4
 
 
-def _metadata_story(parser, samples, title="ESCApe Acquisition Metadata",
+def _metadata_story(parser, samples, title="Acquisition Metadata",
                     level=1, fname=None):
     """Flowables for one file's metadata report (portrait A4, 180 mm wide).
 

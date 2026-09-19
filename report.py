@@ -17,6 +17,8 @@ import os
 import tempfile
 from xml.sax.saxutils import escape as xml_escape
 
+import appinfo
+
 SECTIONS = ("cover", "metadata", "figures")
 
 
@@ -215,7 +217,7 @@ def build_report(path, details, logo, file_rows, docs, figures,
                 (36, page.rect.height - 16),
                 f"{title} - report page {i} of {total}",
                 fontsize=7.5, fontname="helv", color=(0.35, 0.35, 0.35))
-        out.set_metadata({"title": title, "creator": "ESCApe Explorer"})
+        out.set_metadata({"title": title, "creator": appinfo.NAME})
         out.save(path, garbage=3, deflate=True)
         out.close()
     return total

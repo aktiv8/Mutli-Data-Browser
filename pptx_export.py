@@ -13,6 +13,7 @@ import datetime
 import io
 import os
 
+import appinfo
 import metasummary
 
 SECTIONS = ("title", "files", "metadata", "figures")
@@ -511,6 +512,6 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
                         "one section that has content.")
     cp = deck.prs.core_properties
     cp.title = title
-    cp.author = (details.get("operator") or "").strip() or "ESCApe Explorer"
+    cp.author = (details.get("operator") or "").strip() or appinfo.NAME
     deck.prs.save(path)
     return len(deck.prs.slides)

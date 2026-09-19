@@ -33,6 +33,8 @@ import tempfile
 import zipfile
 from dataclasses import dataclass, field
 
+import appinfo
+
 FORMAT = "xpscontainer"
 FORMAT_VERSION = 1
 EXT = ".xpscontainer"
@@ -176,7 +178,7 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> None:
     manifest.update({
         "format": FORMAT, "format_version": FORMAT_VERSION,
         "created": wb.created, "modified": wb.modified,
-        "created_with": "ESCApe Explorer",
+        "created_with": appinfo.NAME,
         "files": [{"id": f.id, "member": f"data/{f.id}/{safe_name(f.name)}",
                    "original_name": f.name, "original_path": f.original_path,
                    "size": f.size, "sha256": f.sha256} for f in wb.files],
@@ -250,7 +252,7 @@ def load(path, extract_dir) -> Workbook:
             raise WorkbookError(
                 f"This workbook was saved by a newer version of the app "
                 f"(format {version}; this one reads up to {FORMAT_VERSION}). "
-                f"Please update ESCApe Explorer.")
+                f"Please update {appinfo.NAME}.")
 
         known = {"format", "format_version", "created", "modified",
                  "created_with", "files", "logo"}

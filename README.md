@@ -1,4 +1,4 @@
-# ESCApe Explorer
+# eXPoSe SpectraDeck
 
 A browser, viewer and exporter for XPS spectra from many instruments. Open one
 or several files at once, tick the spectra you want, and they are plotted
@@ -28,7 +28,7 @@ energy* (not charge-corrected) whenever the photon energy is known.
 
 | File | Purpose |
 |------|---------|
-| `escape_explorer.py` | the application window and dialogs |
+| `spectradeck.py` | the application window and dialogs |
 | `readers/` | one reader per format plus the registry that picks one (`readers/__init__.py`) |
 | `exporters.py` | CSV, VAMAS and metadata (CSV/PDF) writers |
 | `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
@@ -346,9 +346,10 @@ written into each VAMAS block as comment lines.
   `assets/fonts/OFL.txt`), registered for this app only. If it can't be loaded
   the app quietly falls back to the system font.
 * Settings (theme, panel sizes, view options, plot style and your presets) are
-  saved in `~/.escape_explorer_config.json`. The holder-photo calibration
+  saved in `~/.spectradeck_config.json`. The holder-photo calibration
   lives in each workbook; the last one used is kept in
-  `~/.escape_explorer_calib.json` to start new workbooks with.
+  `~/.spectradeck_calib.json` to start new workbooks with. (Files saved under the
+  former name, `~/.escape_explorer_*.json`, are picked up automatically.)
 * Binding energy is *photon energy − kinetic energy* and is **not
   charge-corrected**, so peaks may be shifted by a few eV on charging samples.
 * The `.experiment`, `.vgd` and `.kal` readers are reverse-engineered. The
