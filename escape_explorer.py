@@ -72,6 +72,8 @@ from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
                      load_file, reader_for, supported_patterns,
                      UnsupportedFormat)
 import fonts
+import holder
+import plotstyle
 import themes
 import viewdata
 import metasummary
@@ -83,11 +85,14 @@ import report
 import pptx_export
 import importplan
 import workbook_ui
+import plotstyle_ui
 from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
                     ramp)
 from plots import (interp_intensity, trace_label, nice_step, dodge,
                    normalise_name, norm_factor, add_ke_axis, draw_stack,
                    draw_heatmap, draw_waterfall3d)  # noqa: F401
+from plots import (draw_holder_markers as plots_draw_markers,
+                   place_marker_labels)
 from pdf_preview import PdfPreview, HAVE_PDF, open_external
 from exporters import (export_csv, export_vamas, export_metadata_csv,
                        export_metadata_pdf)
@@ -139,19 +144,7 @@ def save_config(cfg):
         return False
 
 
-def stage_to_pixel(x_mm, y_mm, img_w, img_h, c):
-    """Map a stage coordinate (mm) to an image pixel using a calibration:
-    {centre_x_mm, centre_y_mm, mm_per_px, flip_x, flip_y, rotation_deg}."""
-    dx = (x_mm - c["centre_x_mm"]) / c["mm_per_px"]
-    dy = (y_mm - c["centre_y_mm"]) / c["mm_per_px"]
-    if c.get("flip_x"):
-        dx = -dx
-    if c.get("flip_y"):
-        dy = -dy
-    th = math.radians(c.get("rotation_deg", 0.0))
-    rx = dx * math.cos(th) - dy * math.sin(th)
-    ry = dx * math.sin(th) + dy * math.cos(th)
-    return img_w / 2.0 + rx, img_h / 2.0 + ry
+stage_to_pixel = holder.stage_to_pixel   # old name, kept for callers
 
 
 def colour_slots(docs):
@@ -264,60 +257,132 @@ def _grid_dims(n):
 
 
 class CalibrationPanel(ttk.LabelFrame):
-    """Inline camera-to-stage calibration form (lives in the Images tab)."""
+    """Camera-to-stage calibration for the holder photo. Every change is
+    applied to the photo at once (``on_change(calibration)``): flip the axes,
+    nudge the markers with the arrows, rotate or spread them, or type exact
+    values. ``on_close`` is called by Done."""
 
-    def __init__(self, master, on_save, on_close, current=None):
+    def __init__(self, master, on_change, on_close, current=None, tip=None):
         super().__init__(master, text="Camera calibration", padding=8)
-        self.on_save = on_save
-        self.on_close = on_close
-        c = current or {"centre_x_mm": 0.0, "centre_y_mm": 0.0,
-                        "mm_per_px": 0.02, "flip_x": False, "flip_y": False,
-                        "rotation_deg": 0.0}
-        ttk.Label(self, wraplength=230, justify="left", font=("", 8),
-                  text="Maps stage coordinates (mm) onto the holder photo. "
-                       "Centre X/Y = stage position at the photo centre; "
-                       "mm per pixel = image width in mm ÷ pixel width. "
-                       "Flip/rotate until the markers land on the samples."
-                  ).grid(row=0, column=0, columnspan=2, sticky="w",
+        self.on_change = on_change
+        self.calib = dict(current or holder.DEFAULT)
+        tip = tip or (lambda w, t: None)
+        ttk.Label(self, wraplength=250, justify="left", style="Muted.TLabel",
+                  text="Line the markers up with the samples on the photo. "
+                       "The arrows move the markers, the other buttons turn "
+                       "or spread them."
+                  ).grid(row=0, column=0, columnspan=4, sticky="w",
                          pady=(0, 6))
+        self.step = tk.StringVar(value="10")
+        self.angle = tk.StringVar(value="1")
+        pad = ttk.Frame(self)
+        pad.grid(row=1, column=0, columnspan=2, rowspan=3, sticky="w")
+        for text, col, row, dx, dy in (("▲", 1, 0, 0, -1),
+                                       ("◀", 0, 1, -1, 0),
+                                       ("▶", 2, 1, 1, 0),
+                                       ("▼", 1, 2, 0, 1)):
+            b = ttk.Button(pad, text=text, width=3, style="Tool.TButton",
+                           command=lambda dx=dx, dy=dy: self._nudge(dx, dy))
+            b.grid(row=row, column=col)
+            tip(b, "Move every marker on the photo.")
+        ttk.Label(self, text="Step (px)").grid(row=1, column=2, sticky="e",
+                                               padx=(8, 4))
+        ttk.Spinbox(self, textvariable=self.step, width=5, from_=1, to=500,
+                    increment=1).grid(row=1, column=3, sticky="w")
+        ttk.Label(self, text="Angle (°)").grid(row=2, column=2,
+                                                    sticky="e", padx=(8, 4))
+        ttk.Spinbox(self, textvariable=self.angle, width=5, from_=0.1,
+                    to=90, increment=0.5).grid(row=2, column=3, sticky="w")
+        row = ttk.Frame(self)
+        row.grid(row=4, column=0, columnspan=4, sticky="w", pady=(6, 2))
+        for text, cmd, hint in (
+                ("⟲", lambda: self._turn(-1),
+                 "Rotate the markers anticlockwise."),
+                ("⟳", lambda: self._turn(1),
+                 "Rotate the markers clockwise."),
+                ("−", lambda: self._spread(1 / 1.03),
+                 "Bring the markers closer together."),
+                ("+", lambda: self._spread(1.03),
+                 "Spread the markers further apart.")):
+            b = ttk.Button(row, text=text, width=3, style="Tool.TButton",
+                           command=cmd)
+            b.pack(side="left", padx=(0, 2))
+            tip(b, hint)
+        self.flip_x = tk.BooleanVar(value=self.calib["flip_x"])
+        self.flip_y = tk.BooleanVar(value=self.calib["flip_y"])
+        for col, (text, var, axis) in enumerate((("Flip X", self.flip_x, "x"),
+                                                 ("Flip Y", self.flip_y,
+                                                  "y"))):
+            ttk.Checkbutton(self, text=text, variable=var,
+                            command=lambda a=axis: self._flip(a)).grid(
+                row=5, column=2 * col, columnspan=2, sticky="w")
         self.vars = {}
-        r = 1
-        for label, key in [("Centre X (mm)", "centre_x_mm"),
+        r = 6
+        for label, key in (("Centre X (mm)", "centre_x_mm"),
                            ("Centre Y (mm)", "centre_y_mm"),
                            ("mm per pixel", "mm_per_px"),
-                           ("Rotation (deg)", "rotation_deg")]:
-            ttk.Label(self, text=label).grid(row=r, column=0, sticky="e",
-                                             padx=(0, 6), pady=2)
-            v = tk.StringVar(value=str(c.get(key, 0.0)))
-            ttk.Entry(self, textvariable=v, width=10).grid(row=r, column=1,
-                                                           sticky="w")
+                           ("Rotation (°)", "rotation_deg")):
+            ttk.Label(self, text=label).grid(row=r, column=0, columnspan=2,
+                                             sticky="e", padx=(0, 6), pady=2)
+            v = tk.StringVar()
+            e = ttk.Entry(self, textvariable=v, width=11)
+            e.grid(row=r, column=2, columnspan=2, sticky="w")
+            e.bind("<Return>", lambda ev: self._typed())
+            e.bind("<FocusOut>", lambda ev: self._typed())
             self.vars[key] = v
             r += 1
-        self.flip_x = tk.BooleanVar(value=c.get("flip_x", False))
-        self.flip_y = tk.BooleanVar(value=c.get("flip_y", False))
-        ttk.Checkbutton(self, text="Flip X", variable=self.flip_x).grid(
-            row=r, column=0, sticky="w")
-        ttk.Checkbutton(self, text="Flip Y", variable=self.flip_y).grid(
-            row=r, column=1, sticky="w")
-        r += 1
-        btns = ttk.Frame(self)
-        btns.grid(row=r, column=0, columnspan=2, pady=(8, 0))
-        ttk.Button(btns, text="Apply", command=self._save).pack(side="left",
-                                                               padx=4)
-        ttk.Button(btns, text="Close", command=on_close).pack(side="left")
+        ttk.Button(self, text="Done", command=on_close).grid(
+            row=r, column=0, columnspan=4, sticky="e", pady=(8, 0))
+        self._show()
 
-    def _save(self):
+    def _show(self):
+        for key, v in self.vars.items():
+            v.set(f"{self.calib[key]:.5g}")
+        self.flip_x.set(self.calib["flip_x"])
+        self.flip_y.set(self.calib["flip_y"])
+
+    @staticmethod
+    def _number(var, default):
         try:
-            calib = {k: float(v.get()) for k, v in self.vars.items()}
-            calib["flip_x"] = self.flip_x.get()
-            calib["flip_y"] = self.flip_y.get()
-            if calib["mm_per_px"] == 0:
-                raise ValueError("mm per pixel cannot be zero.")
-        except ValueError as exc:
-            messagebox.showerror("Invalid calibration", str(exc))
+            x = float(var.get())
+            return x if math.isfinite(x) and x > 0 else default
+        except ValueError:
+            return default
+
+    def _apply(self, calib):
+        self.calib = calib
+        self._show()
+        self.on_change(dict(calib))
+
+    def _nudge(self, dx, dy):
+        n = self._number(self.step, 10.0)
+        self._apply(holder.nudged(self.calib, dx * n, dy * n))
+
+    def _turn(self, sign):
+        self._apply(holder.rotated(self.calib,
+                                   sign * self._number(self.angle, 1.0)))
+
+    def _spread(self, factor):
+        self._apply(holder.scaled(self.calib, factor))
+
+    def _flip(self, axis):
+        self._apply(holder.flipped(self.calib, axis))
+
+    def _typed(self):
+        try:
+            new = dict(self.calib, **{k: float(v.get())
+                                      for k, v in self.vars.items()})
+        except ValueError:
+            self._show()
             return
-        save_calibration(calib)
-        self.on_save(calib)
+        clean = holder.sanitise(new)
+        if clean is None:
+            self._show()
+            return
+        if clean != self.calib:
+            self._apply(clean)
+        else:
+            self._show()
 
 
 class Tooltip:
@@ -387,6 +452,9 @@ class Workspace:
         if HAVE_MPL:
             themes.MPL_FAMILY = fonts.register_matplotlib()
         self.themes = ThemeManager(root)
+        self.plot_style = plotstyle.sanitise(self.cfg.get("plot_style"))
+        self.plot_presets = plotstyle.clean_presets(
+            self.cfg.get("plot_presets"))
         ax_choice = self.cfg.get("axis_colour", "Theme default")
         self.axis_choice = (ax_choice if ax_choice in themes.AXIS_CHOICES
                             else "Theme default")
@@ -408,7 +476,7 @@ class Workspace:
         self.trace_start = 0        # first visible trace of long stacks
         self._scale_guard = False
         self.cursors = {}           # group key -> "At cursor" energy
-        self.calib = load_calibration()
+        self.calib = holder.sanitise(load_calibration())
         self._open = {}             # id(node) -> expanded?
         self._render_job = None
         self._axmap = {}
@@ -417,6 +485,8 @@ class Workspace:
         self._thumb_imgs = []
         self._view_photo = None
         self._cur_image = None
+        self._photo_cache = None    # (id(blob), decoded holder photo)
+        self._calib_job = None
         self.swatches = SwatchCache(self.palette)
         self.blank_img = self.swatches.blank
         self.trace_color = {}       # id(region) -> colour used on the plot
@@ -553,6 +623,7 @@ class Workspace:
                                    variable=self.theme_var,
                                    command=lambda n=name: self.set_theme(n))
         viewm.add_cascade(label="Colour theme", menu=themem)
+        viewm.add_command(label="Plot style…", command=self.edit_plot_style)
         bar.add_cascade(label="View", menu=viewm)
         self.view_menu = viewm
         self.menubar = bar
@@ -674,9 +745,29 @@ class Workspace:
         return themes.with_axis_colour(pal, self.axis_choice,
                                        self.axis_custom)
 
+    def _rc(self, pal):
+        """matplotlib rcParams for a palette plus the user's plot style."""
+        return mpl_rc(pal, style=self.plot_style)
+
     def _apply_mpl_theme(self):
         if HAVE_MPL:
-            matplotlib.rcParams.update(mpl_rc(self._plot_palette()[0]))
+            matplotlib.rcParams.update(self._rc(self._plot_palette()[0]))
+
+    def set_plot_style(self, style, save=True):
+        """Adopt a new plot style (validated) and redraw."""
+        self.plot_style = plotstyle.sanitise(style)
+        if save:
+            self.cfg["plot_style"] = plotstyle.changed(self.plot_style)
+        self._apply_mpl_theme()
+        self._schedule_render()
+        self.wb_touch()
+
+    def set_plot_presets(self, presets):
+        self.plot_presets = plotstyle.clean_presets(presets)
+        self.cfg["plot_presets"] = dict(self.plot_presets)
+
+    def edit_plot_style(self):
+        plotstyle_ui.PlotStyleDialog(self.root, self)
 
     def set_theme(self, name, save=True):
         """Switch the colour theme live (widgets, tick boxes, plots)."""
@@ -699,6 +790,10 @@ class Workspace:
         self._redraw_viewer()
         if save:
             self.cfg["theme"] = name
+
+    def tooltip(self, widget, text):
+        """Hover hint coloured for the current theme."""
+        return Tooltip(widget, text, lambda: self.palette)
 
     def _menu(self, parent):
         """A popup menu coloured for the current theme."""
@@ -805,6 +900,8 @@ class Workspace:
         cfg["offset"] = float(self.offset_var.get())
         cfg["panels_per_page"] = self.panels_var.get()
         cfg["traces_per_panel"] = self.traces_var.get()
+        cfg["plot_style"] = plotstyle.changed(self.plot_style)
+        cfg["plot_presets"] = dict(self.plot_presets)
         save_config(cfg)
         self.root.quit()
 
@@ -972,6 +1069,12 @@ class Workspace:
         ab.bind("<<ComboboxSelected>>", lambda e: self._on_axis_changed())
         tip(ab, "Colour of the axis lines, ticks and labels. Black or white "
                 "are ignored where they would be hard to see.")
+        sty = ttk.Button(ctl3, text="Style…", style="Tool.TButton",
+                         command=self.edit_plot_style)
+        sty.pack(side="left", padx=(12, 0))
+        tip(sty, "Fonts, line widths, ticks, grid, legend, titles, axis "
+                 "ranges and image size. Applies to the screen, PDFs, "
+                 "slides and saved images.")
 
         # canvas + toolbar + contextual footer (bottom widgets are packed in
         # _layout_bottom so they can be shown and hidden in order)
@@ -2183,6 +2286,7 @@ class Workspace:
                 notes.append(axis_note)
         cmap_name = self.colscale_var.get()
         reverse = bool(self.colrev_var.get())
+        style = self.plot_style
         for i, (key, rs) in enumerate(chunk):
             s = min(start, len(rs) - limit) if limit and len(rs) > limit else 0
             vis = rs[s:s + limit] if limit and len(rs) > limit else rs
@@ -2223,11 +2327,11 @@ class Workspace:
                                  subtitle, first_col=(i % cols == 0),
                                  bottom_row=(i + cols >= len(chunk)),
                                  top_row=top_row, muted=pal["muted"],
-                                 scale=scale, ke_top=ke_top)
+                                 scale=scale, ke_top=ke_top, style=style)
                 else:
                     ax = fig.add_subplot(rows, cols, i + 1, projection="3d")
                     draw_waterfall3d(ax, disp, zvis, norm, colours, title,
-                                     subtitle, pal, scale)
+                                     subtitle, pal, scale, style=style)
                 axmap[ax] = key
                 axinfo[ax] = (viewdata.photon_energy(disp), view.lower(),
                               len(disp), zvis.label)
@@ -2249,11 +2353,11 @@ class Workspace:
                        bottom_row=(i + cols >= len(chunk)),
                        accent=pal["accent"], muted=pal["muted"],
                        scale=scale, ke_top=ke_top, top_row=top_row,
-                       markers=marks)
+                       markers=marks, style=style)
             axmap[ax] = key
             axhv[ax] = viewdata.photon_energy(disp)
             axinfo[ax] = (axhv[ax], "stack", len(disp), "")
-            if len(vis) > 1:
+            if len(vis) > 1 and plotstyle.end_labels(style):
                 stacked_axes.append(ax)
         if fig is self.fig:
             self._axhv = axhv
@@ -2263,7 +2367,7 @@ class Workspace:
         else:
             fig.tight_layout()
         # make room for the end-of-trace labels to the right of stacked axes
-        gutter = 78 / 72.0 / fig.get_figwidth()
+        gutter = plotstyle.label_gutter_points(style) / 72.0 / fig.get_figwidth()
         for ax in stacked_axes:
             b = ax.get_position()
             ax.set_position([b.x0, b.y0, max(0.05, b.width - gutter), b.height])
@@ -2368,7 +2472,7 @@ class Workspace:
                                      paper=paper)[0]
             fig = Figure(figsize=(width, height), dpi=dpi)
             try:
-                with matplotlib.rc_context(mpl_rc(pal)):
+                with matplotlib.rc_context(self._rc(pal)):
                     self._draw_page(fig, chunk, self._traces_limit(),
                                     self.trace_start, pal=base)
                     fig.savefig(path, dpi=dpi,
@@ -2412,6 +2516,7 @@ class Workspace:
             "traces_per_panel": self.traces_var.get(),
             "panel_start": int(self.panel_start),
             "trace_start": int(self.trace_start),
+            "plot_style": dict(self.plot_style),
             "cursors": {k: float(v) for k, v in self.cursors.items()},
             "ticked": ticked,
         }
@@ -2440,6 +2545,8 @@ class Workspace:
                          ("colour_reverse", self.colrev_var)):
             if isinstance(st.get(key), bool):
                 var.set(st[key])
+        if isinstance(st.get("plot_style"), dict):
+            self.plot_style = plotstyle.sanitise(st["plot_style"])
         tr = str(st.get("traces_per_panel", "")).strip()
         if tr == "All" or (tr.isdigit() and int(tr) > 0):
             self.traces_var.set(tr)
@@ -2495,7 +2602,7 @@ class Workspace:
                        for p in self.docs)
         return json.dumps({"d": self.details, "l": self.logo,
                            "f": self.figures, "s": st, "files": files,
-                           "a": self.ann.to_json()},
+                           "a": self.ann.to_json(), "c": self.calib},
                           sort_keys=True, default=str)
 
     def _wb_dirty(self):
@@ -2539,6 +2646,7 @@ class Workspace:
         self.wb_path, self.wb_extra, self.wb_created = None, {}, ""
         self._fid_used = set()
         self.ann = annotations.Annotations()
+        self.calib = holder.sanitise(load_calibration())
 
     def new_workbook(self):
         if not self._confirm_discard():
@@ -2598,6 +2706,7 @@ class Workspace:
             figures=copy.deepcopy(self.figures), files=entries,
             logo=self.logo, metadata=self._metadata_snapshot(),
             annotations=self.ann.to_json(),
+            holder={"calibration": self.calib} if self.calib else {},
             created=self.wb_created, extra=dict(self.wb_extra))
         self.root.config(cursor="watch")
         self.root.update_idletasks()
@@ -2641,6 +2750,8 @@ class Workspace:
         self.wb_dir = folder
         self._fid_used = {f.id for f in book.files}
         self.ann = annotations.Annotations.from_json(book.annotations)
+        self.calib = (holder.sanitise(book.holder.get("calibration"))
+                      or self.calib)
         problems = list(book.warnings)
         for f in book.files:
             problems += self._add_file(f.path, file_id=f.id,
@@ -2712,7 +2823,7 @@ class Workspace:
             paper = self._plot_palette(PRINT, paper=True)[0]
             caption = textwrap.fill((fig.get("caption") or "").strip(), 150,
                                     replace_whitespace=False)
-            with matplotlib.rc_context(mpl_rc(paper)):
+            with matplotlib.rc_context(self._rc(paper)):
                 for pg in range(pages):
                     page = Figure(figsize=size, dpi=dpi)
                     self._draw_page(page, groups[pg * per:(pg + 1) * per],
@@ -2890,7 +3001,7 @@ class Workspace:
         limit = self._traces_limit() if windowed else None
         size = (11.7, 8.3) if landscape else (8.3, 11.7)
         paper = self._plot_palette(PRINT, paper=True)[0]
-        with matplotlib.rc_context(mpl_rc(paper)), PdfPages(path) as pdf:
+        with matplotlib.rc_context(self._rc(paper)), PdfPages(path) as pdf:
             for p in range((len(groups) + per_page - 1) // per_page):
                 fig = Figure(figsize=size, dpi=150)
                 self._draw_page(fig, groups[p * per_page:(p + 1) * per_page],
@@ -3278,37 +3389,70 @@ class Workspace:
         except Exception as exc:
             ttk.Label(parent, padding=20, text=f"Could not render:\n{exc}").pack()
 
-    def _render_photo_overlay(self, parser, blob, positions):
-        """Photo with analysis markers placed via the saved calibration."""
-        parent = self.viewer
+    def _photo_image(self, parser, blob):
+        """The decoded holder photo (RGB), cached so live calibration changes
+        do not decode the JPEG again."""
+        key = id(blob)
+        if self._photo_cache and self._photo_cache[0] == key:
+            return self._photo_cache[1]
         jpeg = parser.extract_jpeg(blob)
         if jpeg is None or not HAVE_PIL:
+            return None
+        img = Image.open(io.BytesIO(jpeg)).convert("RGB")
+        self._photo_cache = (key, img)
+        return img
+
+    def _render_photo_overlay(self, parser, blob, positions):
+        """Photo with analysis markers placed via the calibration. Clicking a
+        marker selects that sample in the tree."""
+        parent = self.viewer
+        img = self._photo_image(parser, blob)
+        if img is None:
             self._render_plain_photo(parser, blob)
             return
-        import io
-        img = Image.open(io.BytesIO(jpeg)).convert("RGB")
         w, h = img.size
-        hot_samples = self._highlight_samples(parser)
+        points = holder.marker_points(positions, w, h, self.calib)
         fig = Figure(figsize=(7.2, 4.6), dpi=100)
         ax = fig.add_subplot(111)
         ax.imshow(img, extent=[0, w, h, 0])   # top-left origin
-        for sample, (x_mm, y_mm) in positions.items():
-            px, py = stage_to_pixel(x_mm, y_mm, w, h, self.calib)
-            hot = sample in hot_samples
-            ax.scatter([px], [py], s=160 if hot else 90, facecolors="none",
-                       edgecolors="#ff2d2d" if hot else "#19e0ff",
-                       linewidths=2.2 if hot else 1.6, zorder=3)
-            ax.annotate(sample, (px, py), textcoords="offset points",
-                        xytext=(7, -7), fontsize=8,
-                        color="#ff2d2d" if hot else "#19e0ff",
-                        fontweight="bold" if hot else "normal")
+        hot = self._highlight_samples(parser)
+        marks = plots_draw_markers(ax, points, hot)
         ax.set_xlim(0, w)
         ax.set_ylim(h, 0)
         ax.set_axis_off()
         fig.tight_layout()
         canvas = FigureCanvasTkAgg(fig, master=parent)
         canvas.get_tk_widget().pack(fill="both", expand=True)
+        place_marker_labels(ax, marks, hot)
         canvas.draw()
+        canvas.mpl_connect(
+            "button_press_event",
+            lambda ev: self._pick_marker(ev, ax, points, parser))
+
+    def _pick_marker(self, event, ax, points, parser):
+        """Select the sample whose marker is under a click (within 16 px)."""
+        if event.inaxes is not ax or event.x is None:
+            return
+        shown = {s: tuple(ax.transData.transform(p))
+                 for s, p in points.items()}
+        hit = holder.nearest(shown, event.x, event.y, 16)
+        if hit is not None:
+            # the redraw that follows replaces this canvas: do it after the
+            # click has been handled
+            self.root.after_idle(lambda: self._select_sample(parser, hit))
+
+    def _select_sample(self, parser, sample):
+        """Select (and reveal) the tree row of a sample."""
+        for iid, (p, node) in self.node_map.items():
+            if (p is parser and node.type_name == "sample"
+                    and (node.label == sample
+                         or (not sample and node.label == "(unnamed)"))):
+                self.tree.selection_set(iid)
+                self.tree.focus(iid)
+                self.tree.see(iid)
+                return
+        self.status.config(text=f"Sample '{sample}' is not in the file tree "
+                                f"(is the filter hiding it?)")
 
     def _toggle_overlay(self):
         if self.overlay_var.get() and not self.calib:
@@ -3327,17 +3471,29 @@ class Workspace:
             return
         for w in self.calib_holder.winfo_children():
             w.destroy()
-        CalibrationPanel(self.calib_holder, self._calib_saved,
-                         self._hide_calib, current=self.calib).pack(
-            fill="x", padx=6, pady=4)
+        CalibrationPanel(self.calib_holder, self._calib_changed,
+                         self._hide_calib, current=self.calib,
+                         tip=self.tooltip).pack(fill="x", padx=6, pady=4)
         self.calib_holder.pack(side="bottom", fill="x", before=self.viewer)
+        self.themes.recolor_tk(self.calib_holder)
+        if not self.calib:                     # first use: show the markers
+            self._calib_changed(dict(holder.DEFAULT))
 
     def _hide_calib(self):
         self.calib_holder.pack_forget()
+        if self.calib:                # the last calibration seeds new workbooks
+            save_calibration(self.calib)
 
-    def _calib_saved(self, calib):
-        self.calib = calib
+    def _calib_changed(self, calib):
+        """A live change from the calibration panel."""
+        self.calib = holder.sanitise(calib) or self.calib
         self.overlay_var.set(True)
+        if self._calib_job is None:
+            self._calib_job = self.root.after_idle(self._calib_redraw)
+        self.wb_touch()
+
+    def _calib_redraw(self):
+        self._calib_job = None
         self._redraw_viewer()
 
     # -- stage map tab --------------------------------------------------
@@ -3358,27 +3514,35 @@ class Workspace:
                       text="Select or tick a spectrum to see where its "
                            "sample sat on the holder.").pack()
             return
-        hot_samples = self._highlight_samples(parser)
+        pal = self.palette
         fig = Figure(figsize=(5.4, 3.6), dpi=100)
+        fig.set_facecolor(pal["plot_bg"])
         ax = fig.add_subplot(111)
-        for sample, (x, y) in positions.items():
-            hot = sample in hot_samples
-            ax.scatter([x], [y], s=120 if hot else 70,
-                       c="#d33" if hot else "#3a6ea5",
-                       edgecolors="black", zorder=3)
-            ax.annotate(sample, (x, y), textcoords="offset points",
-                        xytext=(6, 5), fontsize=8,
-                        fontweight="bold" if hot else "normal")
-        ax.set_xlabel("Stage X (mm)")
-        ax.set_ylabel("Stage Y (mm)")
+        ax.set_facecolor(pal["plot_bg"])
+        hot = self._highlight_samples(parser)
+        marks = plots_draw_markers(ax, positions, hot, filled=True,
+                                   cold="#3A6EA5", hot_colour="#D33333",
+                                   halo=pal["plot_bg"])
+        ax.set_xlabel("Stage X (mm)", color=pal["plot_fg"])
+        ax.set_ylabel("Stage Y (mm)", color=pal["plot_fg"])
         ax.set_title("Analysis positions — "
-                     + os.path.basename(parser.path or ""), fontsize=9)
-        ax.grid(True, ls=":", alpha=0.5)
+                     + os.path.basename(parser.path or ""), fontsize=9,
+                     color=pal["plot_fg"])
+        ax.tick_params(colors=pal["muted"])
+        for sp in ax.spines.values():
+            sp.set_color(pal["muted"])
+        ax.grid(True, ls=":", alpha=0.5, color=pal["plot_grid"])
         ax.set_aspect("equal", adjustable="datalim")
+        ax.margins(0.15)
         fig.tight_layout()
         canvas = FigureCanvasTkAgg(fig, master=parent)
         canvas.get_tk_widget().pack(fill="both", expand=True)
+        place_marker_labels(ax, marks, hot)
         canvas.draw()
+        canvas.mpl_connect(
+            "button_press_event",
+            lambda ev: self._pick_marker(
+                ev, ax, {s: tuple(p) for s, p in positions.items()}, parser))
 
     # -- export ---------------------------------------------------------
     def _write_export(self, regions, fmt, include_tf=True):

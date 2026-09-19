@@ -38,6 +38,8 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `importplan.py` | choosing between `.avg` / `.vgd` copies of the same data |
 | `viewdata.py`, `metasummary.py` | plot-view and metadata-tidying helpers |
 | `themes.py` | design tokens and colour themes |
+| `plotstyle.py`, `plotstyle_ui.py` | the plot style (fonts, lines, ticks, grid, legend, titles, ranges, image size), its presets and its dialog |
+| `holder.py` | holder-photo geometry: stage position → photo pixel, calibration nudges, marker picking |
 | `fonts.py`, `assets/fonts/` | bundled IBM Plex Sans (SIL Open Font License) |
 | `pdf_preview.py` | in-app PDF preview (PyMuPDF) |
 | `launch.py` | one-step launcher (creates a venv, installs deps, starts the app) |
@@ -149,8 +151,14 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
 5. **Selecting** a row (rather than ticking it) fills the **Details** panel
    (sample, acquisition and region, copyable) and the **Images** / **Stage map**
    tabs, which only appear when the loaded files have images or stage positions. *Overlay
-   positions* on a photo needs a one-time **Calibrate…** step (image centre in
-   mm, mm per pixel, flip/rotation), saved in your home folder. Select several
+   positions* on a photo needs a **Calibrate…** step. The calibration panel
+   works live: tick *Flip X / Flip Y*, nudge the markers with the arrows,
+   rotate or spread them, or type exact values (image centre in mm, mm per
+   pixel, rotation) and watch the markers move onto the samples. The
+   calibration is saved **in the workbook** (the last one used also seeds new
+   workbooks). Markers carry a halo so their names stay readable over any
+   photo; **click a marker** (on the photo or on the Stage map) to select that
+   sample in the tree. Select several
    rows (or a whole sample or file) and Details is tidied: what is the same for
    all of them (photon energy, lens mode, …) is stated once, and settings that
    differ are grouped by value — e.g. *Pass energy: 40 · Mo 3d, S 2p, C 1s /
@@ -256,6 +264,24 @@ the look and the spectra shown. Choose the sections to include in the dialog.
 It needs `python-pptx` (installed by the launcher). Slides are built with
 plain PowerPoint text and tables, so you can restyle them freely.
 
+## Plot style
+
+**View → Plot style…** (or the *Style…* button under the plot controls) opens
+one dialog for how plots *look*: font and sizes, line width / style, markers,
+fill under traces, frame (open or box), tick direction / length / minor ticks,
+grid, panel titles and axis labels (or your own text), y units, energy and
+intensity ranges, trace labels (at the end of each trace, a legend box or
+none) and the size and resolution of saved images. Changes apply at once and
+reach the screen, **PDFs**, **slides** and **Save plot image…** (PNG / SVG /
+PDF). An energy range applies only to panels it reaches, so one C 1s window
+can sit on a page that also shows O 1s.
+
+Pick a **preset** (*Journal (compact)*, *Presentation (large)*, *Data points*,
+*Filled peaks*, …) or save your own with *Save as preset…*. The current style is
+remembered between sessions, saved in the workbook and stored with **each saved
+figure**, so a figure keeps its look in the report even after you change the
+live plot.
+
 ## Stacked / waterfall / heatmap plots
 
 There is no separate plotting window: tick several spectra — e.g. depth-profile
@@ -286,9 +312,10 @@ written into each VAMAS block as comment lines.
 * The interface font is **IBM Plex Sans** (SIL Open Font License, see
   `assets/fonts/OFL.txt`), registered for this app only. If it can't be loaded
   the app quietly falls back to the system font.
-* Settings (theme, panel sizes, view options) are saved in
-  `~/.escape_explorer_config.json`; the camera calibration in
-  `~/.escape_explorer_calib.json`.
+* Settings (theme, panel sizes, view options, plot style and your presets) are
+  saved in `~/.escape_explorer_config.json`. The holder-photo calibration
+  lives in each workbook; the last one used is kept in
+  `~/.escape_explorer_calib.json` to start new workbooks with.
 * Binding energy is *photon energy − kinetic energy* and is **not
   charge-corrected**, so peaks may be shifted by a few eV on charging samples.
 * The `.experiment`, `.vgd` and `.kal` readers are reverse-engineered. The

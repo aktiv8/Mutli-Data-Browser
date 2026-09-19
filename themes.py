@@ -231,8 +231,10 @@ def with_axis_colour(pal, choice, custom=None):
     return dict(pal, muted=colour, plot_fg=colour), ""
 
 
-def mpl_rc(pal, family=None) -> dict:
-    """matplotlib rcParams for a palette (use with ``matplotlib.rc_context``)."""
+def mpl_rc(pal, family=None, style=None) -> dict:
+    """matplotlib rcParams for a palette (use with ``matplotlib.rc_context``).
+    ``style`` (a ``plotstyle`` dict) layers the user's fonts, sizes, ticks,
+    grid and frame over the theme's colours."""
     fam = family or MPL_FAMILY
     rc = {
         "figure.facecolor": pal["plot_bg"], "savefig.facecolor": pal["plot_bg"],
@@ -252,6 +254,9 @@ def mpl_rc(pal, family=None) -> dict:
     }
     if fam:
         rc["font.family"] = [fam, "DejaVu Sans"]
+    if style is not None:
+        import plotstyle
+        rc.update(plotstyle.rc_overrides(style, fam))
     try:
         from cycler import cycler
         rc["axes.prop_cycle"] = cycler(color=list(pal["cycle"]))

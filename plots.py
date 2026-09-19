@@ -7,6 +7,7 @@ import math
 import os
 import re
 
+import plotstyle
 import themes
 import viewdata
 
@@ -94,7 +95,7 @@ def norm_factor(r, mode, cursor=None):
     return 1.0
 
 
-def add_ke_axis(ax, hv, muted, label=True):
+def add_ke_axis(ax, hv, muted, label=True, size=8):
     """Mirror a binding-energy axis along the top as kinetic energy
     (KE = hν − BE)."""
     def flip(x):
@@ -102,9 +103,9 @@ def add_ke_axis(ax, hv, muted, label=True):
     sec = ax.secondary_xaxis("top", functions=(flip, flip))
     sec.spines["top"].set_visible(True)
     sec.spines["top"].set_color(muted)
-    sec.tick_params(labelsize=8)
+    sec.tick_params(labelsize=size)
     if label:
-        sec.set_xlabel("Kinetic Energy (eV)", fontsize=8, color=muted)
+        sec.set_xlabel("Kinetic Energy (eV)", fontsize=size, color=muted)
     return sec
 
 
@@ -112,12 +113,17 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
                title="", subtitle="", selected=(), multi_file=False,
                first_col=True, bottom_row=True, accent="#0F6B8C",
                muted="#56636E", scale="Binding", ke_top=False,
-               top_row=False, markers=()):
+               top_row=False, markers=(), style=None):
     """Draw one panel: a single spectrum plain, several stacked by y offset.
 
     Stacked panels drop the (meaningless) y ticks for a scale bar and label
     each trace at its right-hand end, in the trace colour, with labels nudged
-    apart. ``selected`` holds ``id(region)`` of spectra to draw heavier."""
+    apart. ``selected`` holds ``id(region)`` of spectra to draw heavier.
+    ``style`` is a plot style (see ``plotstyle``)."""
+    st = plotstyle.resolve(style)
+    small = plotstyle.note_size(st)
+    end_lbl = st["labels"] == "End labels"
+    boxed = st["labels"] == "Legend"
     normed = [[y / norm_factor(r, norm, cursor) for y in r.counts]
               for r in regs]
     n = len(regs)
@@ -135,15 +141,18 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
         yoff = [y + i * step for y in v]
         col = colours[i] if colours else None
         sel = id(r) in selected
-        ax.plot(axes_x[i].x, yoff, color=col,
-                lw=1.9 if sel else (0.8 if n > 12 else 1.1),
-                zorder=3 if sel else 2)
-        if stacked and i % label_every == 0:
+        lbl = trace_label(r, multi_file, show_name)
+        ax.plot(axes_x[i].x, yoff, color=col, zorder=3 if sel else 2,
+                label=lbl if boxed else "_nolegend_",
+                **plotstyle.line_kwargs(st, n, sel))
+        if st["fill_under"]:
+            ax.fill_between(axes_x[i].x, i * step + min(v), yoff, color=col,
+                            alpha=st["fill_alpha"], lw=0, zorder=1)
+        if stacked and end_lbl and i % label_every == 0:
             xs = axes_x[i].x
             j = (min if binding else max)(range(len(xs)), key=xs.__getitem__)
             lo, hi = max(0, j - 2), min(len(yoff), j + 3)
-            ends.append((sum(yoff[lo:hi]) / (hi - lo),
-                         trace_label(r, multi_file, show_name), col))
+            ends.append((sum(yoff[lo:hi]) / (hi - lo), lbl, col))
     if norm == "At cursor" and cursor is not None:
         cx = (r0.photon_energy - cursor
               if a0.label == "Kinetic Energy" else cursor)
@@ -151,36 +160,39 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
     ax.margins(x=0.02, y=0.06)
     ax.relim()
     ax.autoscale_view()
+    plotstyle.apply_ranges(ax, st, x=False)
     y0, y1 = ax.get_ylim()
     yspan = (y1 - y0) or 1.0
     yaxis_tf = ax.get_yaxis_transform()          # x: axes fraction, y: data
     if stacked:
         ax.set_yticks([])
-        ax.spines["left"].set_visible(False)
+        ax.spines["left"].set_visible(st["frame"] == "Box")
         # scale bar to the left of the axes replaces the y axis
         bar = nice_step(yspan * 0.22)
         base = y0 + yspan * 0.06
         ax.plot([-0.018, -0.018], [base, base + bar], transform=yaxis_tf,
                 color=muted, lw=1.6, solid_capstyle="butt", clip_on=False)
-        unit = "" if norm != "None" else f" {r0.count_units}"
+        unit = plotstyle.y_unit(st, r0.count_units)
+        unit = "" if norm != "None" or not unit else f" {unit}"
         ax.text(-0.03, base + bar / 2,
                 (f"{bar:,.0f}" if bar >= 1 else f"{bar:g}") + unit,
                 transform=yaxis_tf, rotation=90, ha="right", va="center",
-                fontsize=8, color=muted, clip_on=False)
+                fontsize=small, color=muted, clip_on=False)
         pos = dodge([e[0] for e in ends], 0.062 * yspan)
         for (_y, text, col), yy in zip(ends, pos):
             t = ax.text(1.012, yy, text, transform=yaxis_tf, color=col,
-                        fontsize=8, va="center", ha="left", clip_on=False)
+                        fontsize=small, va="center", ha="left",
+                        clip_on=False)
             t.set_in_layout(False)      # the page reserves the gutter itself
-    ax.set_title(title, loc="left")
-    if subtitle:
-        ax.set_title(subtitle, loc="right", fontsize=8, fontweight="normal",
-                     color=muted)
+    _titles(ax, title, subtitle, muted, st)
     if bottom_row:
-        ax.set_xlabel(f"{a0.label.capitalize()} ({a0.units})")
+        ax.set_xlabel(st["xlabel"]
+                      or f"{a0.label.capitalize()} ({a0.units})")
     if first_col and not stacked:
-        ax.set_ylabel(f"{r0.count_label} ({r0.count_units})" if norm == "None"
-                      else f"{r0.count_label} (normalised)")
+        ax.set_ylabel(st["ylabel"] or (
+            plotstyle.with_unit(r0.count_label,
+                                plotstyle.y_unit(st, r0.count_units))
+            if norm == "None" else f"{r0.count_label} (normalised)"))
     if markers:                        # element labels: (binding energy, text)
         lo, hi = ax.get_xlim()
         xtf = ax.get_xaxis_transform()       # x in data, y as axes fraction
@@ -192,31 +204,41 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
             ax.plot([x, x], [0, 1], transform=xtf, color=muted, lw=0.7,
                     ls=":", zorder=1, scalex=False, scaley=False)
             ax.text(x, 0.99, text, transform=xtf, rotation=90, va="top",
-                    ha="center", fontsize=7, color=muted,
+                    ha="center", fontsize=plotstyle.note_size(st, -1),
+                    color=muted,
                     bbox=dict(fc=ax.get_facecolor(), ec="none", pad=0.6,
                               alpha=0.85))
     if binding:
         ax.invert_xaxis()
+    plotstyle.apply_ranges(ax, st, y=False)
+    plotstyle.finish_axes(ax, st, y_ticks=not stacked)
+    if boxed:
+        ax.legend(loc=st["legend_loc"], fontsize=small,
+                  frameon=bool(st["legend_frame"]), labelcolor="linecolor")
     if ke_top and binding and top_row and viewdata.photon_energy(regs):
-        add_ke_axis(ax, viewdata.photon_energy(regs), muted)
+        add_ke_axis(ax, viewdata.photon_energy(regs), muted, size=small)
 
 
-def _titles(ax, title, subtitle, muted):
+def _titles(ax, title, subtitle, muted, st=None):
+    st = plotstyle.resolve(st)
+    title, subtitle = plotstyle.panel_titles(st, title, subtitle)
     ax.set_title(title, loc="left")
     if subtitle:
-        ax.set_title(subtitle, loc="right", fontsize=8, fontweight="normal",
-                     color=muted)
+        ax.set_title(subtitle, loc="right", fontsize=plotstyle.note_size(st),
+                     fontweight="normal", color=muted)
 
 
 def draw_heatmap(fig, ax, regs, zi, norm="None", cmap=None, title="",
                  subtitle="", first_col=True, bottom_row=True, top_row=False,
-                 muted="#56636E", scale="Binding", ke_top=False):
+                 muted="#56636E", scale="Binding", ke_top=False, style=None):
     """One panel as a heat map: energy across, ``zi`` (etch time / level,
     acquisition time or trace order, ascending downwards) down, intensity as
     colour. ``regs`` must already be in z order (see viewdata.z_sorted)."""
     import numpy as np
     from matplotlib.colors import LinearSegmentedColormap
     from matplotlib.ticker import MaxNLocator
+    st = plotstyle.resolve(style)
+    small = plotstyle.note_size(st)
     axes_x = [viewdata.energy_axis(r, scale) for r in regs]
     a0, r0 = axes_x[0], regs[0]
     ys = [[y / norm_factor(r, norm) for y in r.counts] for r in regs]
@@ -238,26 +260,30 @@ def draw_heatmap(fig, ax, regs, zi, norm="None", cmap=None, title="",
     elif zi.mode in ("Trace order", "Etch level"):
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_ylabel(zi.label)
-    _titles(ax, title, subtitle, muted)
+    _titles(ax, title, subtitle, muted, st)
     if bottom_row:
-        ax.set_xlabel(f"{a0.label.capitalize()} ({a0.units})")
+        ax.set_xlabel(st["xlabel"]
+                      or f"{a0.label.capitalize()} ({a0.units})")
+    plotstyle.apply_ranges(ax, st, y=False)
+    plotstyle.finish_axes(ax, st, y_ticks=False)
     cb = fig.colorbar(mesh, ax=ax, pad=0.02, fraction=0.05, aspect=24)
     cb.outline.set_visible(False)
-    cb.ax.tick_params(labelsize=7, length=2)
-    cb.set_label("Normalised" if norm != "None"
-                 else f"{r0.count_label} ({r0.count_units})", fontsize=8)
+    cb.ax.tick_params(labelsize=plotstyle.note_size(st, -1), length=2)
+    cb.set_label("Normalised" if norm != "None" else plotstyle.with_unit(
+        r0.count_label, plotstyle.y_unit(st, r0.count_units)), fontsize=small)
     if ke_top and a0.invert and top_row and viewdata.photon_energy(regs):
-        add_ke_axis(ax, viewdata.photon_energy(regs), muted)
+        add_ke_axis(ax, viewdata.photon_energy(regs), muted, size=small)
     return mesh
 
 
 def draw_waterfall3d(ax, regs, zi, norm="None", colours=None, title="",
-                     subtitle="", pal=None, scale="Binding"):
+                     subtitle="", pal=None, scale="Binding", style=None):
     """One panel as a 3-D waterfall: energy (x), trace z (y), intensity
     (vertical). ``ax`` must be a 3-D axes; ``regs`` in z order."""
     from matplotlib.collections import PolyCollection
     from matplotlib.colors import to_rgba
     pal = pal or themes.PALETTES[themes.DEFAULT]
+    st = plotstyle.resolve(style)
     axes_x = [viewdata.energy_axis(r, scale) for r in regs]
     a0, r0 = axes_x[0], regs[0]
     ys = [[y / norm_factor(r, norm) for y in r.counts] for r in regs]
@@ -270,22 +296,28 @@ def draw_waterfall3d(ax, regs, zi, norm="None", colours=None, title="",
             PolyCollection([verts], facecolors=[to_rgba(col or "#888", 0.10)],
                            edgecolors="none"), zs=z, zdir="y")
         ax.plot(a.x, [z] * len(a.x), v, color=col,
-                lw=0.8 if n > 12 else 1.1)
+                **plotstyle.line_kwargs(st, n))
     xs = [x for a in axes_x for x in a.x]
     ax.set_xlim(min(xs), max(xs))
+    win = plotstyle.x_window(st, min(xs), max(xs))
+    if win:
+        ax.set_xlim(*win)
     zlo, zhi = min(zi.values), max(zi.values)
     pad = 0.5 if zhi == zlo else 0.0
     ax.set_ylim(zlo - pad, zhi + pad)
     ax.set_zlim(floor, max(max(v) for v in ys if v))
     if a0.invert:
         ax.invert_xaxis()
-    _titles(ax, title, subtitle, pal["muted"])
-    ax.set_xlabel(f"{a0.label.capitalize()} ({a0.units})", labelpad=2)
+    _titles(ax, title, subtitle, pal["muted"], st)
+    ax.set_xlabel(st["xlabel"] or f"{a0.label.capitalize()} ({a0.units})",
+                  labelpad=2)
     ax.set_ylabel(zi.label, labelpad=2)
     ax.text2D(0.0, 0.9, "Normalised" if norm != "None"
-              else f"{r0.count_label} ({r0.count_units})",
-              transform=ax.transAxes, fontsize=8, color=pal["muted"])
-    ax.tick_params(labelsize=7, pad=0)
+              else plotstyle.with_unit(
+                  r0.count_label, plotstyle.y_unit(st, r0.count_units)),
+              transform=ax.transAxes, fontsize=plotstyle.note_size(st),
+              color=pal["muted"])
+    ax.tick_params(labelsize=plotstyle.note_size(st, -1), pad=0)
     ax.view_init(elev=24, azim=-58)
     try:                                   # fill the panel (matplotlib >= 3.3)
         ax.set_box_aspect((1.5, 1.0, 0.75), zoom=1.1)
@@ -300,3 +332,79 @@ def draw_waterfall3d(ax, regs, zi, norm="None", colours=None, title="",
         except Exception:
             pass
     ax.tick_params(colors=pal["muted"])
+
+
+def draw_holder_markers(ax, points, hot=(), filled=False, cold="#19E0FF",
+                        hot_colour="#FF4D4D", halo="#0B1116", size=9):
+    """Analysis-position markers with the sample name beside each.
+
+    ``points`` is ``{sample: (x, y)}`` in data coordinates. Markers and labels
+    carry a halo (a stroke in ``halo``) so they stay readable over a photo
+    of any brightness. Samples in ``hot`` (the ones selected or ticked) are
+    larger, bold and in ``hot_colour``. Returns ``{sample: artists}``."""
+    import matplotlib.patheffects as pe
+    out = {}
+    for name, (x, y) in points.items():
+        is_hot = name in hot
+        col = hot_colour if is_hot else cold
+        s = 170 if is_hot else 95
+        lw = 2.2 if is_hot else 1.6
+        ring = ax.scatter([x], [y], s=s, facecolors="none", edgecolors=halo,
+                          linewidths=lw + 2.6, zorder=3)
+        dot = ax.scatter([x], [y], s=s, zorder=4, linewidths=lw,
+                         facecolors=col if filled else "none",
+                         edgecolors=col)
+        text = ax.annotate(
+            name or "(unnamed)", (x, y), textcoords="offset points",
+            xytext=(9, -9), fontsize=size + (1 if is_hot else 0),
+            color=col, fontweight="bold" if is_hot else "normal", zorder=5,
+            path_effects=[pe.withStroke(linewidth=3.2, foreground=halo)])
+        out[name] = (ring, dot, text)
+    return out
+
+
+_LABEL_SPOTS = ((9, -9, "left", "top"), (9, 9, "left", "bottom"),
+                (-9, -9, "right", "top"), (-9, 9, "right", "bottom"),
+                (0, -14, "center", "top"), (0, 14, "center", "bottom"),
+                (16, 0, "left", "center"), (-16, 0, "right", "center"))
+
+
+def place_marker_labels(ax, artists, hot=(), radius=9):
+    """Give each marker label the first spot round its marker where it covers
+    neither another label nor another marker (selected samples choose first).
+    Call once the axes limits and layout are final; ``artists`` is what
+    ``draw_holder_markers`` returned."""
+    from matplotlib.transforms import Bbox
+    fig = ax.figure
+    try:
+        renderer = fig.canvas.get_renderer()
+    except AttributeError:                  # a canvas that only saves files
+        try:
+            renderer = fig._get_renderer()
+        except Exception:
+            return
+    dots = {}
+    for name, (_ring, dot, _text) in artists.items():
+        x, y = ax.transData.transform(dot.get_offsets()[0])
+        dots[name] = Bbox.from_bounds(x - radius, y - radius, 2 * radius,
+                                      2 * radius)
+    placed = []
+    for name in sorted(artists, key=lambda n: n not in hot):
+        text = artists[name][2]
+        others = [b for n, b in dots.items() if n != name] + placed
+        chosen = None
+        for dx, dy, ha, va in _LABEL_SPOTS:
+            text.xyann = (dx, dy)
+            text.set_ha(ha)
+            text.set_va(va)
+            bb = text.get_window_extent(renderer)
+            if not any(bb.overlaps(o) for o in others):
+                chosen = bb
+                break
+        if chosen is None:                       # crowded: the first spot
+            dx, dy, ha, va = _LABEL_SPOTS[0]
+            text.xyann = (dx, dy)
+            text.set_ha(ha)
+            text.set_va(va)
+            chosen = text.get_window_extent(renderer)
+        placed.append(chosen)

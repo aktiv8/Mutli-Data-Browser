@@ -10,6 +10,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+import plotstyle
 import workbook as wbk
 
 
@@ -667,9 +668,11 @@ class ImageOptionsDialog(tk.Toplevel):
                      values=["Paper (white)", "Current theme"]).grid(
             row=0, column=1, sticky="w", pady=3)
         self.vars = {}
+        w0, h0, dpi0 = plotstyle.export_size(app.plot_style)
         for r, (key, label, init) in enumerate((
-                ("w", "Width (inches)", "8"), ("h", "Height (inches)", "5"),
-                ("dpi", "Resolution (dpi)", "300")), start=1):
+                ("w", "Width (inches)", f"{w0:g}"),
+                ("h", "Height (inches)", f"{h0:g}"),
+                ("dpi", "Resolution (dpi)", str(dpi0))), start=1):
             ttk.Label(body, text=label).grid(row=r, column=0, sticky="w",
                                              pady=3, padx=(0, 12))
             self.vars[key] = tk.StringVar(value=init)
@@ -677,7 +680,8 @@ class ImageOptionsDialog(tk.Toplevel):
                 row=r, column=1, sticky="w", pady=3)
         ttk.Label(body, style="Muted.TLabel", wraplength=300,
                   text="Saves the panels currently shown (PNG, SVG or PDF, "
-                       "chosen next).").grid(row=4, column=0, columnspan=2,
+                       "chosen next). Fonts, lines and ticks follow the plot "
+                       "style; its image size is the starting point here.").grid(row=4, column=0, columnspan=2,
                                              sticky="w", pady=(6, 0))
         bar = ttk.Frame(body)
         bar.grid(row=5, column=0, columnspan=2, sticky="e", pady=(12, 0))
