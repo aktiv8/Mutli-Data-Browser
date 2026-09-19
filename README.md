@@ -324,6 +324,20 @@ Switch **View** to *Waterfall 3D* or *Heatmap* to see a whole depth or time
 series at once; use *Group by → Element, per sample* to keep each sample's
 series on its own panel.
 
+## Sputter settings, depth and fluence
+
+**Tools → Sputter settings…** holds the ion gun settings of each depth profile:
+ion and charge state, energy, current (pA–mA), raster size and etch rate. They
+are prefilled from the file where it states them (a Kratos depth profile
+records the beam, e.g. *5 keV Ar+*; PHI and Avantage files are read where they
+carry ion-gun properties) and you fill in the rest — **nothing is guessed**,
+and a bare number whose unit is unknown is left for you. With them the *Z axis*
+of a waterfall or heat map can be **Depth (nm)** (etch rate × etch time) or
+**Fluence** (ions/cm² = current × time ÷ (charge × e × raster area)). Asking for
+one that cannot be worked out says what to enter, e.g. *"enter the etch rate in
+Tools ▸ Sputter settings"*. The settings are kept in the workbook per sample,
+appear in the metadata (per level: depth and fluence) and in the methods text.
+
 ## Depth profiles
 
 Sputter depth profiles are detected automatically (from the Kratos file's

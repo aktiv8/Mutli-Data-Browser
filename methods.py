@@ -187,7 +187,42 @@ def _depth_sentence(rows):
         s += f" on {len(per)} samples"
     if times and times[-1] > 0:
         s += f", to a cumulative etch time of {_num_text(times[-1])} s"
-    return s + "."
+    s += "."
+    return (s + " " + _beam_sentence(rows)).strip()
+
+
+def _beam_sentence(rows):
+    """The ion beam of a depth profile, from the sputter settings the user
+    entered (or the file stated): only what is known."""
+    ions = _unique(rows, "Sputter ion")
+    energy, _n = values_text([r.get("Sputter energy (eV)") for r in rows],
+                             "eV")
+    current = _unique(rows, "Sputter current")
+    raster = _unique(rows, "Raster (mm)")
+    rate = _unique(rows, "Etch rate")
+    if not (ions or energy or current or raster or rate):
+        return ""
+    beam = " ".join(x for x in (energy, join_and(ions)) if x) or "ion"
+    s = f"Etching used a {beam} beam"
+    if current:
+        s += f" at {join_and(current)}"
+    if raster:
+        s += f", rastered over {join_and(raster)} mm"
+    if rate:
+        s += f", with an etch rate of {join_and(rate)}"
+    s += "."
+    fl = [v for v in (_num(r.get("Fluence (ions/cm²)")) for r in rows)
+          if v is not None]
+    dp = [v for v in (_num(r.get("Depth (nm)")) for r in rows)
+          if v is not None]
+    tail = []
+    if fl:
+        tail.append(f"an ion fluence of {max(fl):.3g} ions/cm²")
+    if dp:
+        tail.append(f"a depth of {max(dp):.3g} nm")
+    if tail:
+        s += " The deepest level corresponds to " + join_and(tail) + "."
+    return s
 
 
 def _data_sentence(rows):

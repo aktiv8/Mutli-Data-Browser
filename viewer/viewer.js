@@ -464,7 +464,8 @@
       $('level').value = String(S.levelIdx);
       $('level').disabled = !S.levelOn;
       var l = S.levels[S.levelIdx], any = specs.filter(function (s) { return s.reg.level === l; })[0];
-      $('levelText').textContent = S.levelOn ? 'Level ' + l + (any && any.reg.etch !== null && any.reg.etch !== undefined ? ' (' + +any.reg.etch.toPrecision(6) + ' s)' : '') + '  ·  ' + (S.levelIdx + 1) + ' of ' + S.levels.length : S.levels.length + ' levels shown';
+      var depth = any && any.reg.meta && any.reg.meta['Depth (nm)'] ? ', ' + any.reg.meta['Depth (nm)'] + ' nm' : '';
+      $('levelText').textContent = S.levelOn ? 'Level ' + l + (any && any.reg.etch !== null && any.reg.etch !== undefined ? ' (' + +any.reg.etch.toPrecision(6) + ' s' + depth + ')' : '') + '  ·  ' + (S.levelIdx + 1) + ' of ' + S.levels.length : S.levels.length + ' levels shown';
     }
     var notes = [];
     if (S.scale === 'Kinetic' && specs.some(function (s) { return s.reg.binding && !s.reg.hv; })) {

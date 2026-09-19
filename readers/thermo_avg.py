@@ -299,6 +299,8 @@ class ThermoDataSpaceFile(SpectrumFile):
                 f"{p['DS_SOURCE_FLOODGUNPROPID_DESCRIPTION']}, "
                 f"{p.get('DS_SOURCE_FLOODGUNPROPID_CURRENT', 0):g} µA")
         self.instrument = {k: v for k, v in instr.items() if v}
+        import sputter
+        self.sputter_hint = sputter.from_properties(p)
         if extra_kind == "levels":
             times = sorted({r.etch_time for r in regions
                             if r.etch_time is not None})

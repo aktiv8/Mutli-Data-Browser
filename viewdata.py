@@ -10,9 +10,12 @@ import re
 from datetime import datetime
 from typing import NamedTuple
 
+import sputter
+
 ENERGY_SCALES = ("Binding", "Kinetic")
 Z_MODES = ("Auto", "Etch time", "Etch level", "Acquisition time",
-           "Trace order")
+           "Trace order", "Depth", "Fluence")
+SPUTTER_MODES = ("Depth", "Fluence")     # need the sputter settings
 
 
 # -- energy axis ---------------------------------------------------------------
@@ -96,12 +99,25 @@ def _distinct(values) -> bool:
     return len({round(v, 9) for v in values}) > 1
 
 
-def _z_candidates(regions, date_of):
-    """{mode: (values, label)} for every mode the regions can support."""
+def _z_candidates(regions, date_of, sputter_for=None):
+    """{mode: (values, label)} for every mode the regions can support.
+    ``sputter_for(region)`` gives a region's sputter settings (or None); with
+    them the etch time becomes a depth or an ion fluence."""
     out = {}
     times = [r.etch_time for r in regions]
-    if all(t is not None for t in times) and _distinct(times):
+    timed = all(t is not None for t in times)
+    if timed and _distinct(times):
         out["Etch time"] = ([float(t) for t in times], "Etch time (s)")
+    if timed and sputter_for is not None:
+        # judged on their own values: two samples at the same etch time but
+        # with different rates still differ in depth
+        sets = [sputter_for(r) for r in regions]
+        depth = [sputter.depth_nm(s, t) for s, t in zip(sets, times)]
+        if all(d is not None for d in depth) and _distinct(depth):
+            out["Depth"] = (depth, "Depth (nm)")
+        dose = [sputter.fluence(s, t) for s, t in zip(sets, times)]
+        if all(d is not None for d in dose) and _distinct(dose):
+            out["Fluence"] = (dose, "Fluence (ions/cm\u00b2)")
     levels = [r.etch_level for r in regions]
     if all(v is not None for v in levels) and _distinct(levels):
         out["Etch level"] = ([float(v) for v in levels], "Etch level")
@@ -124,7 +140,8 @@ def _z_candidates(regions, date_of):
     return out
 
 
-def resolve_z(regions, mode="Auto", date_of=None) -> ZInfo:
+def resolve_z(regions, mode="Auto", date_of=None,
+              sputter_for=None) -> ZInfo:
     """The z value of each region for the requested mode.
 
     "Auto" (or a mode this data cannot support) falls back through etch
@@ -132,7 +149,7 @@ def resolve_z(regions, mode="Auto", date_of=None) -> ZInfo:
     has at least two distinct values; etch times that are all 0 (not recorded
     in the file) therefore count as absent. ``date_of(region)`` supplies the
     acquisition date string (readers differ in where they keep it)."""
-    cands = _z_candidates(regions, date_of)
+    cands = _z_candidates(regions, date_of, sputter_for)
     order = ("Etch time", "Etch level", "Acquisition time", "Trace order")
     if mode in cands and mode != "Auto":
         pick = mode
@@ -142,14 +159,14 @@ def resolve_z(regions, mode="Auto", date_of=None) -> ZInfo:
     return ZInfo(values, label, pick)
 
 
-def z_sorted(regions, mode="Auto", date_of=None):
+def z_sorted(regions, mode="Auto", date_of=None, sputter_for=None):
     """Regions ordered by z for plotting: ``(order, ZInfo)`` where ``order``
     indexes ``regions`` and ``ZInfo.values`` is already in that order.
 
     Heat maps and waterfalls need strictly increasing z, so if two traces
     share a value (e.g. the same level of two samples) the trace order is
     used instead."""
-    info = resolve_z(regions, mode, date_of)
+    info = resolve_z(regions, mode, date_of, sputter_for)
     order = sorted(range(len(regions)), key=lambda i: info.values[i])
     vals = [info.values[i] for i in order]
     if any(b <= a for a, b in zip(vals, vals[1:])):
@@ -157,6 +174,25 @@ def z_sorted(regions, mode="Auto", date_of=None):
         order = list(range(len(regions)))
         vals = list(info.values)
     return order, ZInfo(vals, info.label, info.mode)
+
+
+def z_unavailable(want, used, regions, sputter_for=None) -> str:
+    """The note for a z axis that could not be used ('' when it was). For
+    Depth and Fluence it says what to enter."""
+    if want == "Auto" or used == want:
+        return ""
+    if want in SPUTTER_MODES:
+        times = [r.etch_time for r in regions]
+        if not all(t is not None for t in times):
+            return (f"'{want}' needs etch times, which these spectra do not "
+                    f"have: showing {used.lower()}")
+        sets = [sputter_for(r) if sputter_for else None for r in regions]
+        need = next((sputter.missing(want, s) for s in sets
+                     if sputter.missing(want, s)), "")
+        if need:
+            return (f"'{want}': {need} in Tools \u25b8 Sputter settings "
+                    f"(showing {used.lower()})")
+    return f"'{want}' not usable here: showing {used.lower()}"
 
 
 # -- heat map ---------------------------------------------------------------------

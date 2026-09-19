@@ -18,6 +18,8 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass, field
 
+import sputter as sputter_mod
+
 VERSION = 1
 
 
@@ -45,6 +47,7 @@ class Annotations:
     calibration_statement: str = ""                      # optional override
     markers: dict = field(default_factory=dict)          # region key -> [...]
     experiment_notes: str = ""
+    sputter: dict = field(default_factory=dict)          # sample key -> settings
     extra: dict = field(default_factory=dict)            # unknown keys kept
 
     # -- names -----------------------------------------------------------------
@@ -106,6 +109,12 @@ class Annotations:
         shift = self.shift_for(fid, region.sample, region.name)
         if shift:
             out["BE shift (eV)"] = f"{shift:+.3f}"
+        if region.etch_level is not None:
+            sset = self.sputter.get(sample_key(fid, region.sample))
+            if sset:
+                for k, v in sputter_mod.metadata_rows(
+                        sset, region.etch_time).items():
+                    out[k] = v
         note = self.notes_for(fid, region.sample, region.name)
         if note:
             out["Notes"] = note
@@ -154,12 +163,26 @@ class Annotations:
     def clear_markers(self, fid, sample, name):
         self.markers.pop(region_key(fid, sample, name), None)
 
+    # -- sputter settings (per sample) ---------------------------------------------
+    def sputter_for(self, fid, sample):
+        """The sample's sputter settings (complete dict), or None."""
+        s = self.sputter.get(sample_key(fid, sample))
+        return sputter_mod.sanitise(s) if s else None
+
+    def set_sputter(self, fid, sample, settings):
+        key = sample_key(fid, sample)
+        if settings is None or sputter_mod.is_empty(settings):
+            self.sputter.pop(key, None)
+        else:
+            self.sputter[key] = sputter_mod.sanitise(settings)
+
     # -- state ---------------------------------------------------------------------
     def is_empty(self):
         return not (self.sample_names or self.region_names
                     or self.sample_notes or self.region_notes or self.md_edits
                     or self.shifts or self.calibration or self.markers
-                    or self.calibration_statement or self.experiment_notes)
+                    or self.calibration_statement or self.experiment_notes
+                    or self.sputter)
 
     def copy(self):
         return copy.deepcopy(self)
@@ -168,7 +191,8 @@ class Annotations:
         d = {"version": VERSION}
         for name in ("sample_names", "region_names", "sample_notes",
                      "region_notes", "md_edits", "shifts", "calibration",
-                     "calibration_statement", "markers", "experiment_notes"):
+                     "calibration_statement", "markers", "experiment_notes",
+                     "sputter"):
             d[name] = copy.deepcopy(getattr(self, name))
         d.update(self.extra)
         return d
@@ -181,7 +205,8 @@ class Annotations:
             return a
         known = {"version", "sample_names", "region_names", "sample_notes",
                  "region_notes", "md_edits", "shifts", "calibration",
-                 "calibration_statement", "markers", "experiment_notes"}
+                 "calibration_statement", "markers", "experiment_notes",
+                 "sputter"}
         for name in ("sample_names", "region_names", "sample_notes",
                      "region_notes"):
             v = data.get(name)
@@ -215,6 +240,11 @@ class Annotations:
                         pass
                 if good:
                     a.markers[str(k)] = good
+        v = data.get("sputter")
+        if isinstance(v, dict):
+            a.sputter = {str(k): sputter_mod.sanitise(x) for k, x in v.items()
+                         if isinstance(x, dict)
+                         and not sputter_mod.is_empty(x)}
         for name in ("calibration_statement", "experiment_notes"):
             if isinstance(data.get(name), str):
                 setattr(a, name, data[name])

@@ -204,6 +204,7 @@ class SpectrumFile:
         self.summary = {}
         self.warnings: list = []       # non-fatal notes shown after loading
         self._sample_pos = {}
+        self.sputter_hint = {}         # ion gun settings the file states
         # set by the app: user edits kept beside the data (annotations.py)
         self.annotations = None
         self.file_id = ""
@@ -234,6 +235,16 @@ class SpectrumFile:
         """Distinct analysis positions as (label, x_mm, y_mm) per sample."""
         return [(s, xy[0], xy[1])
                 for s, xy in getattr(self, "_sample_pos", {}).items()]
+
+    def sputter_prefill(self):
+        """Sputter settings the file states (ion, energy, and whatever else it
+        records), as a partial ``sputter`` settings dict; {} when it says
+        nothing. Never invents a value."""
+        import sputter
+        return sputter.merge_prefill(
+            self.sputter_hint,
+            sputter.from_text(self.instrument.get("Ion gun / sputtering",
+                                                  "")))
 
     def sample_positions(self):
         """One representative position per sample: {sample: (x, y)}."""

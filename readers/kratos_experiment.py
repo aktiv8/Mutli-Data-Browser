@@ -485,6 +485,14 @@ class EscapeParser(SpectrumFile):
             r.etch_level = lvl
             r.etch_time = cumulative[lvl] if lvl < len(cumulative) else None
 
+        # the etch settings name the beam, e.g. "5 keV Ar+"
+        import sputter
+        m = re.search(rb"(\d+(?:\.\d+)?)\s?keV\s+([A-Za-z][A-Za-z0-9]*\+)",
+                      raw)
+        if m:
+            self.sputter_hint = sputter.from_text(
+                f"{m.group(1).decode()} keV {m.group(2).decode()}")
+
         self.depth_profile = {
             "is_profile": True,
             "n_levels": n_levels,

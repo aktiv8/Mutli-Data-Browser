@@ -118,5 +118,10 @@ class PhiSpeFile(SpectrumFile):
                 f"{kv.get('sputtercurrent', '')}").strip()
         if desc:
             instr["Sample description"] = desc
+        import sputter
+        self.sputter_hint = sputter.from_text(" ".join(
+            str(kv.get(k, "")) for k in ("sputterion", "sputterenergy",
+                                         "sputtercurrent", "sputterraster",
+                                         "sputterrastersize")))
         self.instrument = {k: v for k, v in instr.items() if v}
         return self._finish()

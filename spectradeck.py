@@ -90,6 +90,7 @@ import pptx_export
 import importplan
 import workbook_ui
 import plotstyle_ui
+import sputter_ui
 from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
                     ramp)
 from plots import (interp_intensity, trace_label, nice_step, dodge,
@@ -618,6 +619,8 @@ class Workspace:
                        command=self.open_calibrate)
         tm.add_command(label="Identify peaks…",
                        command=self.open_identify)
+        tm.add_command(label="Sputter settings…",
+                       command=self.open_sputter)
         tm.add_command(label="Rename…   (F2)", command=self.rename_selected)
         tm.add_command(label="Notes…", command=self.notes_selected)
         bar.add_cascade(label="Tools", menu=tm)
@@ -1744,6 +1747,56 @@ class Workspace:
         return calibration.statement(self.ann.calibration,
                                      self.ann.calibration_statement)
 
+    # -- sputter settings (depth and fluence axes) ---------------------------------
+    def _sputter_for(self, r):
+        """Sputter settings of a region's sample (or None)."""
+        p = self.region_parser.get(id(r))
+        if p is None:
+            return None
+        return self.ann.sputter_for(self.file_ids.get(id(p), ""), r.sample)
+
+    def sputter_samples(self):
+        """The depth-profile samples whose settings can be edited:
+        ``[{label, parser, fid, sample, file, t_max}]``."""
+        out = []
+        for p in self.docs:
+            fid = self.file_ids.get(id(p), "")
+            seen = {}
+            for r in p.regions:
+                if r.etch_level is None:
+                    continue
+                d = seen.setdefault(r.sample, {"levels": set(), "t": 0.0})
+                d["levels"].add(r.etch_level)
+                if r.etch_time:
+                    d["t"] = max(d["t"], float(r.etch_time))
+            for sample, d in seen.items():
+                name = self.ann.sample_label(fid, sample) or "(unnamed)"
+                out.append({
+                    "label": f"{name} \u2013 {os.path.basename(p.path or '')}"
+                             f" ({len(d['levels'])} levels)",
+                    "parser": p, "fid": fid, "sample": sample,
+                    "file": id(p), "t_max": d["t"] or None})
+        return out
+
+    def sputter_get(self, item):
+        return self.ann.sputter_for(item["fid"], item["sample"]) or {}
+
+    def sputter_set(self, item, settings):
+        self.ann.set_sputter(item["fid"], item["sample"], settings)
+        self._ann_changed(relabel=False)
+
+    def sputter_prefill(self, item):
+        return item["parser"].sputter_prefill()
+
+    def open_sputter(self):
+        if not self.sputter_samples():
+            messagebox.showinfo(
+                "Sputter settings",
+                "Sputter settings belong to depth profiles: open a file "
+                "whose spectra are levels of a depth profile.")
+            return
+        sputter_ui.SputterDialog(self.root, self)
+
     # -- element identification ------------------------------------------------
     def element_lines(self):
         if self._xps_lines is None:
@@ -2087,7 +2140,8 @@ class Workspace:
             out = []
             for k, rs in groups:
                 order, _z = viewdata.z_sorted(rs, self.z_var.get(),
-                                              self._date_of)
+                                              self._date_of,
+                                              self._sputter_for)
                 out.append((k, [rs[i] for i in order]))
             return out
         if self.reverse.get():
@@ -2330,13 +2384,14 @@ class Workspace:
                 # groups arrive z-sorted (_groups), so this order is the
                 # identity and ``vis`` lines up with the z values
                 _order, zi = viewdata.z_sorted(rs, self.z_var.get(),
-                                               self._date_of)
+                                               self._date_of,
+                                               self._sputter_for)
                 zvis = viewdata.ZInfo(zi.values[s:s + len(vis)], zi.label,
                                       zi.mode)
-                want = self.z_var.get()
-                if want != "Auto" and zi.mode != want:
-                    notes.append(f"'{want}' not usable for {key}: showing "
-                                 f"{zi.mode.lower()}")
+                why = viewdata.z_unavailable(self.z_var.get(), zi.mode, rs,
+                                             self._sputter_for)
+                if why:
+                    notes.append(f"{key}: {why}")
                 if view == "Heatmap":
                     ax = fig.add_subplot(rows, cols, i + 1)
                     axhv[ax] = viewdata.photon_energy(disp)
