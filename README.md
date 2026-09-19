@@ -1,19 +1,42 @@
 # ESCApe Explorer
 
-A browser, viewer and exporter for Kratos ESCApe `.experiment` files. It shows
-the experiment hierarchy (samples → spectral regions → conditions), plots each
-spectrum on a calibrated binding-energy axis, displays the holder camera
-image(s), and exports selected regions to **CSV** or **VAMAS (ISO 14976)**.
+A browser, viewer and exporter for XPS spectra from many instruments. Open one
+or several files at once, tick the spectra you want, and they are plotted
+immediately — spectra of the same element are **stacked with a y offset** on a
+shared panel. Metadata, camera images and a stage map sit alongside; spectra
+can be exported to **CSV** or **VAMAS (ISO 14976)**, and PDF output can be
+previewed before it is saved.
+
+## Supported files
+
+| Format | Extension | Notes |
+|--------|-----------|-------|
+| **VAMAS (ISO 14976)** | `.vms` `.vamas` | From any vendor (Kratos/CasaXPS, PHI, SPECS, Thermo, …). Field-by-field parser; handles `NORM`/`MAP`/`SDPSV` modes, regular and irregular scans, several corresponding variables (intensity + transmission) and vendor comment blocks. |
+| **Thermo Avantage text dump** | `.avg` (`.avx` text dumps) | Multi-position scans give one region per position; image/map files load as the summed spectrum; header-only dumps (`#empty#`) show as "no data". |
+| **Thermo Avantage binary** | `.vgd` (`.avx` binary) | Reverse-engineered OLE2 container (no extra library). Matches the `.avg` of the same data exactly. |
+| **PHI / ULVAC-PHI MultiPak** | `.spe` | Intensities are counts per second, as stored. |
+| **Scienta Omicron SES** | `.txt` | Detector/angle columns are summed to one spectrum. |
+| **Kratos Vision** | `.kal` | Includes the transmission function. Files that don't record the X-ray source stay on a kinetic-energy axis (a warning says so). |
+| **Kratos ESCApe** | `.experiment` | Undocumented binary container; best-effort reverse engineering. |
+
+Files are recognised by **content**, not only by extension, so renamed files
+still open. Every loaded format can be exported to CSV or VAMAS, which makes the
+app a converter (e.g. Thermo `.avg` → VAMAS). Binding energy is *hν − kinetic
+energy* (not charge-corrected) whenever the photon energy is known.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `escape_explorer.py` | the application |
+| `escape_explorer.py` | the application window and dialogs |
+| `readers/` | one reader per format plus the registry that picks one (`readers/__init__.py`) |
+| `exporters.py` | CSV, VAMAS and metadata (CSV/PDF) writers |
+| `themes.py` | colour themes |
+| `pdf_preview.py` | in-app PDF preview (PyMuPDF) |
 | `launch.py` | one-step launcher (creates a venv, installs deps, starts the app) |
-| `requirements.txt` | the Python packages it needs (matplotlib, Pillow, reportlab) |
-| `run.bat` | double-click launcher for Windows |
-| `run.sh` | launcher for macOS / Linux |
+| `requirements.txt` | Python packages (matplotlib, Pillow, reportlab, PyMuPDF) |
+| `run.bat` / `run.sh` | double-click launchers for Windows / macOS + Linux |
+| `tests/` | unit tests (`python -m unittest discover tests`) |
 
 Keep all of these in the same folder.
 
@@ -33,8 +56,9 @@ chmod +x run.sh        # first time only
 ```
 
 On the first launch it builds an isolated environment in `./.venv` and installs
-matplotlib and Pillow (an internet connection is needed once). Later launches
-start immediately. Nothing is installed into your system Python.
+the packages in `requirements.txt` (an internet connection is needed once).
+Later launches start immediately. Nothing is installed into your system Python.
+The launcher re-installs automatically if `requirements.txt` changes.
 
 ## Manual launch (optional)
 
@@ -42,8 +66,6 @@ start immediately. Nothing is installed into your system Python.
 python launch.py            # Windows
 python3 launch.py           # macOS / Linux
 ```
-
-Flags:
 
 | Flag | Effect |
 |------|--------|
@@ -53,72 +75,75 @@ Flags:
 
 ## Using the app
 
-1. **File → Open .experiment…** and choose a file.
-2. The **Browser** window shows a tree with columns (detail, points, pass
-   energy, etch time) and a **Filter** box; its shape adapts to the file
-   (samples show their stage position; depth profiles nest as Sample → region
-   → per-level entries with each level's etch time, and selecting a region
-   folder takes every level under it). **Right-click** any item for a context
-   menu: plot everything under it, export from there down (CSV/VAMAS), or
-   create a stacked plot. A second **Display** window opens
-   with three panels that update live as you click items:
-   * **Spectra** (top-left) — the selected spectrum. Select several at once
-     (Ctrl/Shift-click, or click a sample to take all its regions) and they
-     tile automatically in a near-square grid, up to 4×4 (16) per page with
-     Prev/Next paging beyond that. **Save spectra to PDF** writes the current
-     selection (paginated) to a PDF you can keep or print.
-   * **Metadata** (right) — acquisition details for the selection: sample,
-     date acquired, instrument, source/anode, power, pass energy, etc.
-   * **Images** (bottom strip) — the holder camera snapshots as selectable
-     thumbnails; click one to open it full size. The image window offers two
-     ways to see where each sample sat:
-     - **Stage map (beside)** — a schematic X–Y plot in mm next to the photo,
-       with the current spectrum selection highlighted; always available.
-     - **Overlay positions on photo** — draws the markers directly on the
-       photograph. This needs a one-time **Calibrate…** step where you enter
-       your camera’s image centre (mm), mm-per-pixel, and any X/Y flip or
-       rotation. The calibration is saved (in your home folder) and reused
-       automatically; adjust it until the markers land on the right samples.
-3. **File → Export spectra…** to pick regions (grouped by sample, with
-   All/None) and export them as CSV or VAMAS. VAMAS output is CasaXPS-
-   compatible: a kinetic-energy abscissa with two corresponding variables,
-   **Intensity** and the interpolated spectrometer **Transmission** function
-   (this can be toggled off in the export dialog).
-4. **File → Export metadata → CSV / PDF** (or the **Metadata…** button) to save
-   the per-sample acquisition metadata — system/instrument, X-ray source and
-   anode, source power, pass energy, step size, dwell time, lens mode,
-   aperture, charge-neutraliser and ion-gun status, BE range, points and
-   quality. CSV gives one row per region; PDF is a formatted report with one
-   section per sample.
+One workspace window: the **file tree** on the left, a large **plot** in the
+middle, and an **info column** on the right (Metadata table above an
+Images / Stage map notebook). Drag any splitter; sizes are remembered.
+
+1. **Open ▾** (or File menu) → *Spectra file(s)…* to load several files of any
+   supported format, or *Folder…* to load every recognised file in a folder.
+   Each file is a top-level node in the tree.
+2. Every node that holds spectra has a **tick box** (click it, or press
+   **Space**). Ticking a sample, region folder or whole file ticks everything
+   under it; a partly-ticked parent shows a bar. **Filter** narrows the tree
+   (ticks are kept). Right-click a row to tick/untick a subtree, export from
+   there down, or remove a file.
+3. **Ticked spectra are plotted at once.** Spectra sharing an element name
+   (every *C 1s*, across samples and across files) are drawn on **one panel,
+   stacked with a y offset**; other elements get their own panels. Plot controls:
+   * **Group by** — *Element name*, or *Energy range* (spectra whose x-ranges
+     overlap by at least half share a panel).
+   * **Normalise** — *None*, *Max = 1*, *Area = 1*, or *At cursor* (click a panel
+     to set an energy; every spectrum in it is scaled to match there).
+   * **Stack offset** — the gap between stacked traces (0 overlays them);
+     **Reverse** flips the stacking order.
+4. **How many, and scrolling.**
+   * **Panels per page** — Auto, 1, 2, 4, 6, 9, 12 or 16. Scroll the panels with
+     the mouse wheel, the scrollbar beside the plot, PageUp/PageDown, Home/End or
+     the Prev/Next buttons.
+   * **Traces per panel** — All, or a number (3–100, or type your own). For a long
+     stack (say a 200-level depth profile) each panel then shows a window of
+     that many traces; slide it with **Shift + wheel** or the *Traces* slider
+     under the plot.
+5. **Selecting** a row (rather than ticking it) fills the **Metadata** table
+   (copy with Ctrl+C) and the **Images** / **Stage map** tabs. *Overlay
+   positions* on a photo needs a one-time **Calibrate…** step (image centre in
+   mm, mm per pixel, flip/rotation), saved in your home folder.
+6. **Colour themes** — *Light* (the original look), *Dark*, *Midnight*,
+   *Solarized Light*, *High contrast*. Change them from the **Theme** box or
+   View → Colour theme; the choice is remembered. The native Windows menu bar
+   and message boxes can't be recoloured. PDFs always print on white.
+7. **Layout** — the **◧ Tree** and **Info ◨** buttons collapse the side panels,
+   and **Focus plot** (F11) hides both so the plot fills the window.
+8. **PDF ▾** — *Preview spectra…* and *Preview metadata…* show the PDF inside the
+   app (page navigation, zoom, **Save as…**, *Open in viewer*). The spectra
+   preview lets you change panels per page, portrait/landscape and whether to
+   use only the traces currently in view; **Save as…** writes exactly what you
+   see. Without PyMuPDF the PDF opens in your default viewer instead.
+9. **Export ▾** — *Ticked spectra → CSV / VAMAS* writes exactly what is ticked.
+   *Choose regions / levels…* opens the export dialog (pre-set to your ticks) for
+   picking regions or depth-profile levels. VAMAS output is CasaXPS-compatible:
+   a kinetic-energy abscissa with **Intensity** and the spectrometer
+   **Transmission** function as corresponding variables (toggle it off in the
+   dialog). *Metadata → CSV / PDF* saves per-sample acquisition metadata; with
+   several files open, select a row of the file you want first.
 
 ## Stacked / waterfall plots
 
-Select several spectra — e.g. depth-profile levels 0, 10, 57, 99, 150, 209, or
-any individual regions — then click **Stacked plot…** (or right-click →
-*Create stacked plot*). The window stacks the traces with an adjustable
-vertical offset and lets you normalise them: *None*, *Max = 1*, *Area = 1*, or
-*At cursor* — in the last mode you click anywhere on the plot to set an energy,
-and every spectrum is scaled to match at that point (a dashed line marks it),
-which is ideal for comparing peak-shape changes through a depth profile. Traces
-are labelled by level/etch time (or sample/region), the binding-energy axis is
-inverted, and **Save PDF…** writes the figure out.
+There is no separate stacking window: tick several spectra — e.g. depth-profile
+levels, or the same region across samples and files — and they stack on one
+panel. Combine with *Normalise → At cursor* to compare peak-shape changes.
 
 ## Depth profiles
 
-Sputter depth profiles are detected automatically. For these files the export
-dialog replaces the long per-region list with:
+Sputter depth profiles are detected automatically (from the Kratos file's
+instrument record, or from a repeated region in a VAMAS file with an etch-time
+variable). Ticking a region folder puts every level on one panel. The export
+dialog then offers **region-type checkboxes** and **level selection** (*All*,
+*First N*, *Every Nth*, or a *range*).
 
-* **region-type checkboxes** (e.g. Survey, O 1s, Mo 3d) — choose which
-  regions to include across all levels;
-* **level selection** — *All levels*, *First N*, *Every Nth*, or a *level
-  range* (so you can, for example, match a CasaXPS export of the first 61
-  levels, or thin a 200-level profile to every 10th).
-
-The app reads the per-etch duration from the instrument record, computes the
-**sequential etch time** for every level (level 0 = surface at t = 0, then the
-cumulative sputter time), and reports the **total etch time**. The etch level
-and etch time appear in the metadata CSV/PDF, in the Display metadata panel,
-and are written into each VAMAS block as comment lines.
+Level 0 is the surface at t = 0, then the cumulative sputter time; etch level
+and etch time appear in the metadata CSV/PDF and the Metadata table, and are
+written into each VAMAS block as comment lines.
 
 ## Notes
 
@@ -126,20 +151,17 @@ and are written into each VAMAS block as comment lines.
   `sudo apt-get install python3-tk` (Debian/Ubuntu),
   `sudo dnf install python3-tkinter` (Fedora). The launcher will tell you if
   it’s missing.
-* The VAMAS exporter writes the spectrometer transmission function as a
-  second corresponding variable, interpolated (and extrapolated at the ends)
-  from the instrument's calibration onto each spectrum's kinetic-energy grid.
-  This matches CasaXPS output exactly — intensities are identical and
-  transmission agrees to floating-point precision — so files round-trip
-  through CasaXPS. Untick the option in the export dialog for an
-  intensity-only file.
-* Binding energy is computed as *photon energy − kinetic energy* and is **not
+* Settings (theme, panel sizes, view options) are saved in
+  `~/.escape_explorer_config.json`; the camera calibration in
+  `~/.escape_explorer_calib.json`.
+* Binding energy is *photon energy − kinetic energy* and is **not
   charge-corrected**, so peaks may be shifted by a few eV on charging samples.
-* Acquisition metadata (pass energy, dwell, step, source, etc.) is read from
-  the file's binary structure. The common fields are reliable, but treat them
-  as best-effort reverse engineering and cross-check anything critical against
-  ESCApe. Fields that aren't present in a file (e.g. ion-gun settings when no
-  ion gun was used) are reported as such rather than guessed.
+* The `.experiment`, `.vgd` and `.kal` readers are reverse-engineered. The
+  `.vgd` and `.kal` readers were checked against the `.avg` / VAMAS exports of
+  the same data (identical energies and counts); cross-check anything critical
+  against the vendor software.
 * If a `.experiment` file was transferred as text rather than binary it can be
-  silently corrupted; the app detects this and refuses to export noise rather
-  than producing meaningless numbers.
+  silently corrupted; the app detects this and refuses to export noise.
+* Testing on your own data: set `XPS_CORPUS` to a folder of spectra files and
+  run `python -m unittest tests.test_corpus` to check that every recognised file
+  loads.

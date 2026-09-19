@@ -36,7 +36,7 @@ APP = os.path.join(HERE, "escape_explorer.py")
 REQS = os.path.join(HERE, "requirements.txt")
 STAMP = os.path.join(VENV_DIR, ".requirements.sha1")
 
-REQUIRED = ["matplotlib>=3.5", "pillow>=9.0", "reportlab>=3.6"]
+REQUIRED = ["matplotlib>=3.5", "pillow>=9.0", "reportlab>=3.6", "pymupdf>=1.24"]
 
 
 def log(msg):
@@ -97,7 +97,7 @@ def pip_install():
     log("Upgrading pip ...")
     subprocess.run([py, "-m", "pip", "install", "--upgrade", "pip"],
                    check=False)
-    log("Installing dependencies (matplotlib, Pillow) ...")
+    log("Installing dependencies (matplotlib, Pillow, reportlab, PyMuPDF) ...")
     if os.path.exists(REQS):
         cmd = [py, "-m", "pip", "install", "-r", REQS]
     else:

@@ -2,35 +2,31 @@
 """
 ESCApe Explorer
 ===============
-A GUI browser, viewer and exporter for Kratos ESCApe ``.experiment`` files.
+A single-window GUI to browse, plot and export XPS spectra from many
+instruments (Kratos ESCApe/Vision, VAMAS from any vendor, Thermo Avantage,
+PHI MultiPak, Scienta SES).
 
-Features
---------
-* **Browser window** (main): a tree view of the experiment hierarchy
-  (sample -> spectral regions / images) with acquisition conditions.
-* **Display window** (separate, live): updates in real time as you select a
-  node in the browser — plots spectra, shows the camera image, or lists the
-  full metadata for the selected item.
-* **Export**: pick exactly which regions/images to export, in **CSV** or
-  **VAMAS (ISO 14976)** format, via a checkbox dialog.
-* **Corruption detection**: the loader detects files damaged by a UTF-8
-  text round-trip (which silently destroys the binary spectra and images)
-  and tells you clearly rather than exporting noise.
+* **File tree with tick boxes**: tick spectra to plot them; spectra of the same
+  element are stacked with a y offset on one panel.
+* **Readers** (``readers/``): one module per format, chosen by content.
+* **Themes** (``themes.py``), **PDF preview** (``pdf_preview.py``) and
+  **exporters** (``exporters.py``: CSV, VAMAS, metadata CSV/PDF).
 
 Dependencies
 ------------
 * ``tkinter``  (standard library)
-* ``matplotlib``  (optional — for spectrum plots)        pip install matplotlib
-* ``Pillow``      (optional — for camera images)         pip install pillow
+* ``matplotlib``  (spectrum plots)                  pip install matplotlib
+* ``Pillow``      (camera images)                   pip install pillow
+* ``reportlab``   (formatted metadata PDF)          pip install reportlab
+* ``pymupdf``     (in-app PDF preview)              pip install pymupdf
 
-The app runs without matplotlib/Pillow; those panes simply show a notice.
+The app runs without the optional packages; the affected panes show a notice.
 
-Note on this format
--------------------
-``.experiment`` is an undocumented proprietary container. The experiment
-*structure* and *acquisition settings* are parsed reliably; the numeric
-spectrum decoder is best-effort reverse engineering and should be validated
-against a known-good ESCApe or VAMAS export.
+Note on reverse-engineered formats
+----------------------------------
+``.experiment`` (Kratos ESCApe), ``.vgd`` (Thermo) and ``.kal`` (Kratos Vision)
+are undocumented; their readers are best-effort and were validated against
+exports of the same data. See the README.
 """
 
 from __future__ import annotations
@@ -38,12 +34,10 @@ from __future__ import annotations
 import os
 import re
 import csv
+import shutil
+import tempfile
 import json
 import math
-import struct
-import datetime
-from dataclasses import dataclass, field
-from typing import Optional
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -67,1098 +61,15 @@ except Exception:
     HAVE_PIL = False
 
 
-# ==========================================================================
-#  PARSER
-# ==========================================================================
-@dataclass
-class Region:
-    name: str
-    index: int
-    offset: int
-    technique: str = "XPS"
-    conditions: dict = field(default_factory=dict)
-    energy: Optional[list] = None
-    counts: Optional[list] = None
-    energy_label: str = "Binding Energy"
-    energy_units: str = "eV"
-    count_label: str = "Intensity"
-    count_units: str = "counts"
-    decodable: bool = False
-    note: str = ""
-    sample: str = ""
-    # acquisition metadata
-    photon_energy: Optional[float] = None
-    pass_energy: Optional[float] = None
-    dwell: Optional[float] = None
-    step: Optional[float] = None
-    lens_mode: str = ""
-    aperture: str = ""
-    anode: str = ""
-    tf_ke: Optional[list] = None       # transmission-function kinetic energies
-    tf_values: Optional[list] = None   # transmission-function values
-    etch_level: Optional[int] = None   # depth-profile level (0 = surface)
-    etch_time: Optional[float] = None  # cumulative etch time (s) at this level
-    pos_x: Optional[float] = None      # stage analysis position X (mm)
-    pos_y: Optional[float] = None      # stage analysis position Y (mm)
 
-    @property
-    def n_points(self) -> int:
-        return len(self.counts) if self.counts else 0
-
-    @property
-    def kinetic_energy(self):
-        """Kinetic-energy axis (eV), or None if not decoded."""
-        if self.photon_energy is None or not self.energy:
-            return None
-        return [self.photon_energy - be for be in self.energy]
-
-    def transmission(self):
-        """Per-point transmission function, linearly interpolated from the
-        instrument's calibration pairs onto this spectrum's KE axis.
-        Returns None if no transmission function is available."""
-        if not self.tf_ke or not self.tf_values:
-            return None
-        ke = self.kinetic_energy
-        if ke is None:
-            return None
-        xs, ys = self.tf_ke, self.tf_values
-        out = []
-        for x in ke:
-            if x <= xs[0]:
-                # linear extrapolation using the first segment
-                if len(xs) > 1 and xs[1] != xs[0]:
-                    f = (x - xs[0]) / (xs[1] - xs[0])
-                    out.append(ys[0] + f * (ys[1] - ys[0]))
-                else:
-                    out.append(ys[0])
-            elif x >= xs[-1]:
-                # linear extrapolation using the last segment
-                if len(xs) > 1 and xs[-1] != xs[-2]:
-                    f = (x - xs[-2]) / (xs[-1] - xs[-2])
-                    out.append(ys[-2] + f * (ys[-1] - ys[-2]))
-                else:
-                    out.append(ys[-1])
-            else:
-                lo = 0
-                for i in range(len(xs) - 1):
-                    if xs[i] <= x <= xs[i + 1]:
-                        lo = i
-                        break
-                x0, x1 = xs[lo], xs[lo + 1]
-                y0, y1 = ys[lo], ys[lo + 1]
-                f = (x - x0) / (x1 - x0) if x1 != x0 else 0.0
-                out.append(y0 + f * (y1 - y0))
-        return out
-
-
-@dataclass
-class ImageBlob:
-    name: str
-    offset: int
-    data: bytes
-    is_jpeg_intact: bool
-    note: str = ""
-
-
-@dataclass
-class TreeNode:
-    label: str
-    type_name: str = ""
-    offset: int = 0
-    children: list = field(default_factory=list)
-    region: Optional[Region] = None
-    image: Optional[ImageBlob] = None
-    cols: tuple = ()          # extra column values for the browser tree
-
-
-class EscapeParser:
-    UTF8_REPL = b"\xef\xbf\xbd"
-    SPECTRUM_MARKER = b"DataTypes.EscaSpectrum"
-    RESULT_MARKER = b"ProcessData.ProcessResult"
-    IMAGE_MARKER = b"DataTypes.HolderContentSnapshotData"
-    SAMPLE_MARKER = b"ProcessData.SampleAnalysis"
-    SETTINGS_MARKER = b"NICPU.Acquisition.Spectrum.SpectroscopySettings"
-    LOCATION_MARKER = b"SampleHandling.InstrumentAnalysisLocation"
-    PASS_ENERGIES = (2, 5, 10, 20, 40, 80, 160, 224, 280)
-
-    def __init__(self):
-        self.path = None
-        self.raw = b""
-        self.strings: list = []
-        self.regions: list = []
-        self.images: list = []
-        self.samples: list = []        # list[(offset, name)]
-        self.tree: Optional[TreeNode] = None
-        self.instrument = {}           # system-wide metadata
-        self.depth_profile = {"is_profile": False, "n_levels": 0,
-                              "regions_per_level": 0, "etch_per_level": 0.0,
-                              "total_etch_time": 0.0, "cumulative": [],
-                              "etch_source": ""}
-        self.corruption = {"corrupted": False, "message": ""}
-        self.summary = {}
-
-    # -- public ---------------------------------------------------------
-    def load(self, path: str):
-        with open(path, "rb") as fh:
-            self.raw = fh.read()
-        self.path = path
-        self._check_corruption()
-        self._scan_strings()
-        self._parse_samples()
-        self._parse_instrument()
-        self._parse_regions()
-        self._parse_positions()
-        self._parse_depth_profile()
-        self._parse_images()
-        self._build_tree()
-        self._build_summary()
-        return self
-
-    # -- corruption -----------------------------------------------------
-    def _check_corruption(self):
-        raw, n = self.raw, len(self.raw)
-        repl = raw.count(self.UTF8_REPL)
-        frac = (3 * repl) / n if n else 0.0
-        no_ff = b"\xff" not in raw
-        no_nul = b"\x00" not in raw
-        corrupted = repl > 50 and (no_ff or no_nul)
-        msg = ""
-        if corrupted:
-            msg = (
-                "This file has been damaged by a UTF-8 text round-trip: "
-                f"{repl:,} replacement characters cover about {frac * 100:.0f}% "
-                "of the file. The numeric spectra and the camera image cannot "
-                "be recovered from it — the original bytes are irreversibly "
-                "lost. The experiment structure and acquisition settings are "
-                "still readable.\n\nTo recover the data, re-export the "
-                ".experiment file from ESCApe and transfer it in binary mode "
-                "(for example, put it in a .zip first)."
-            )
-        self.corruption = {"corrupted": corrupted, "repl_count": repl,
-                           "repl_fraction": frac, "message": msg}
-
-    # -- strings --------------------------------------------------------
-    def _scan_strings(self):
-        raw, i, out, n = self.raw, 0, [], len(self.raw)
-        while i < n - 1:
-            ln = raw[i]
-            if 4 <= ln <= 120:
-                chunk = raw[i + 1: i + 1 + ln]
-                if len(chunk) == ln and all(32 <= b < 127 for b in chunk):
-                    out.append((i, chunk.decode("ascii")))
-                    i += 1 + ln
-                    continue
-            i += 1
-        self.strings = out
-
-    def _strings_between(self, lo, hi):
-        return [(o, s) for (o, s) in self.strings if lo <= o < hi]
-
-    def _find_all(self, marker):
-        offs, start = [], 0
-        while True:
-            p = self.raw.find(marker, start)
-            if p == -1:
-                break
-            offs.append(p)
-            start = p + 1
-        return offs
-
-    # -- regions --------------------------------------------------------
-    def _parse_regions(self):
-        spec = self._find_all(self.SPECTRUM_MARKER)
-        res = self._find_all(self.RESULT_MARKER)
-        regions = []
-        for idx, off in enumerate(spec):
-            nxt = min([o for o in spec + res if o > off] + [len(self.raw)])
-            regions.append(self._build_region(idx, off, nxt, res))
-        self.regions = regions
-
-    def _parse_samples(self):
-        """Find each SampleAnalysis block and its sample identifier."""
-        samples = []
-        host_like = re.compile(r"^[0-9A-Z]+(-[0-9A-Z]+)+$")
-        ignore = {"Analysis", "Spectroscopy", "Slot", "Hybrid", "Tilt"}
-        for k, off in enumerate(self._find_all(self.SAMPLE_MARKER)):
-            near = self._strings_between(off, off + 220)
-            name = None
-            for _, s in near:
-                if ("." in s or "\\" in s or s in ignore or len(s) > 16
-                        or host_like.match(s) or not any(c.isalnum() for c in s)):
-                    continue
-                name = s
-                break
-            samples.append((off, name or f"Sample {k + 1}"))
-        self.samples = samples
-
-    def _sample_for(self, offset: int) -> str:
-        owners = [(o, n) for (o, n) in self.samples if o < offset]
-        return owners[-1][1] if owners else (self.samples[0][1]
-                                             if self.samples else "Sample")
-
-    def _date_for(self, offset: int) -> str:
-        dates = getattr(self, "dates", [])
-        if not dates:
-            return ""
-        return min(dates, key=lambda od: abs(od[0] - offset))[1]
-
-    # -- instrument-level metadata --------------------------------------
-    @staticmethod
-    def _anode_from_hv(hv):
-        if hv is None:
-            return ""
-        table = [(1486.6, "Al K-alpha (monochromated)"),
-                 (1253.6, "Mg K-alpha"),
-                 (2984.3, "Ag L-alpha"),
-                 (1740.0, "Si K-alpha")]
-        for e, n in table:
-            if abs(hv - e) < 3:
-                return n
-        return f"{hv:.1f} eV source"
-
-    def _parse_instrument(self):
-        raw = self.raw
-        instrument = next((m.group().decode() for m in
-                           [re.search(rb"MI-[A-Z0-9\-]+", raw)] if m), "")
-        host = next((s for _, s in self.strings
-                     if re.match(r"^[A-Za-z0-9\-]+$", s) and "-" in s
-                     and not s.startswith("MI-")
-                     and len(s) <= 14), "")
-        neutraliser = b"AxisChargeNeutraliser" in raw
-        ion_gun = any(t in raw for t in
-                      (b"Sputter", b"IonGun", b"Ion Gun", b"Minibeam",
-                       b"MiniBeam", b"GasCluster", b"Etch"))
-        # acquisition dates (dd/mm/yyyy) with their byte offsets
-        self.dates = [(m.start(), m.group().decode())
-                      for m in re.finditer(rb"[0-3]?\d/[01]?\d/20\d\d", raw)]
-        # source / lens / aperture: read from the first settings block
-        source = lens = aperture = ""
-        ss = self._find_all(self.SETTINGS_MARKER)
-        if ss:
-            tokens = self._settings_tokens(ss[0])
-            aperture = tokens[0] if len(tokens) > 0 else ""
-            lens = tokens[1] if len(tokens) > 1 else ""
-            source = next((s for _, s in self._strings_between(
-                ss[0], ss[0] + 120) if "monochrom" in s.lower()
-                or "achromat" in s.lower()), "")
-        self.instrument = {
-            "Instrument": instrument or "(unknown)",
-            "Acquisition computer": host or "(unknown)",
-            "X-ray source": source or "(unknown)",
-            "Lens mode": lens,
-            "Aperture": aperture,
-            "Charge neutraliser": "Yes" if neutraliser else "No",
-            "Ion gun / sputtering": "Used" if ion_gun else "Not used",
-        }
-
-    def _settings_tokens(self, ss_off, span=60):
-        """Short strings right after a SpectroscopySettings marker."""
-        e = ss_off + len(self.SETTINGS_MARKER)
-        out, j = [], e
-        while j < e + span:
-            n = self.raw[j]
-            if 3 <= n <= 24:
-                c = self.raw[j + 1: j + 1 + n]
-                if len(c) == n and all(32 <= b < 127 for b in c):
-                    out.append(c.decode())
-                    j += 1 + n
-                    continue
-            j += 1
-        return out
-
-    def _pass_energy_for(self, es_off):
-        ss = [o for o in self._find_all(self.SETTINGS_MARKER) if o < es_off]
-        if not ss:
-            return None
-        e = ss[-1] + len(self.SETTINGS_MARKER)
-        for k in range(0, 56):
-            try:
-                v = struct.unpack_from("<d", self.raw, e + k)[0]
-            except struct.error:
-                break
-            if v in self.PASS_ENERGIES:
-                return v
-        return None
-
-    def _settings_for(self, es_off):
-        ss = [o for o in self._find_all(self.SETTINGS_MARKER) if o < es_off]
-        if not ss:
-            return "", ""
-        toks = self._settings_tokens(ss[-1])
-        ap = toks[0] if len(toks) > 0 else ""
-        lens = toks[1] if len(toks) > 1 else ""
-        return ap, lens
-
-    def _build_region(self, idx, off, end, result_offsets):
-        starts = [o for o in result_offsets if o < off]
-        block_start = starts[-1] if starts else max(0, off - 400)
-        hs = self._strings_between(block_start, off)
-        reg = Region(name=self._guess_region_name(hs), index=idx, offset=off,
-                     conditions=self._extract_conditions(hs))
-        reg.sample = self._sample_for(off)
-        reg.pass_energy = self._pass_energy_for(off)
-        reg.aperture, reg.lens_mode = self._settings_for(off)
-        self._decode_spectrum(reg, off, end)
-        if reg.pass_energy is not None:
-            reg.conditions.setdefault("Pass energy", f"{reg.pass_energy:g} eV")
-        if reg.dwell is not None:
-            reg.conditions.setdefault("Dwell time", f"{reg.dwell:.3g} s")
-        return reg
-
-    @staticmethod
-    def _guess_region_name(hs):
-        cands = [s for _, s in hs]
-        pat = re.compile(r"^[A-Z][a-z]?\s?\d[spdf]\d?$|^[A-Z][a-z]? [A-Z]{2,3}$")
-        for s in cands:
-            if pat.match(s):
-                return s
-        for s in cands:
-            if s.lower() in ("wide", "survey"):
-                return s
-        ignore = {"Spectroscopy", "Analysis"}
-        for s in reversed(cands):
-            if s not in ignore and "." not in s and "\\" not in s and len(s) <= 12:
-                return s
-        return "Region"
-
-    @staticmethod
-    def _extract_conditions(hs):
-        cond, texts = {}, [s for _, s in hs]
-        for i, s in enumerate(texts):
-            if s == "X-ray Power" and i + 1 < len(texts):
-                cond["X-ray Power"] = texts[i + 1]
-            if s == "Quality" and i + 1 < len(texts):
-                cond["Quality"] = texts[i + 1]
-        return cond
-
-    def _decode_spectrum(self, reg, off, end):
-        """Populate reg.energy / reg.counts in place.
-
-        Uses the real EscaSpectrum layout (photon energy + kinetic-energy
-        range, then an int32 point count followed by N float64 ordinates).
-        Falls back to a heuristic float scan if the structure isn't found.
-        """
-        if self.corruption["corrupted"]:
-            reg.decodable = False
-            reg.note = ("Numeric data not available — the binary payload is "
-                        "corrupted (UTF-8 round-trip damage).")
-            return
-
-        if self._decode_structured(reg, off, end):
-            return
-
-        # Fallback: heuristic scan (last resort; energy axis is just an index)
-        payload = self.raw[off + len(self.SPECTRUM_MARKER): end]
-        for fmt, size in (("<d", 8), ("<f", 4)):
-            arr = self._scan_float_array(payload, fmt, size)
-            if arr is not None:
-                reg.energy = list(range(len(arr)))
-                reg.counts = arr
-                reg.energy_label, reg.energy_units = "Point", "index"
-                reg.decodable = True
-                reg.note = ("Structured header not found; spectrum recovered "
-                            "heuristically with an index axis (no energy "
-                            "calibration). Verify against a known-good export.")
-                return
-        reg.decodable = False
-        reg.note = "Spectrum payload present but could not be decoded."
-
-    def _decode_structured(self, reg, off, end):
-        """Decode one EscaSpectrum block using the known layout. -> bool."""
-        try:
-            d = lambda o: struct.unpack_from("<d", self.raw, o)[0]
-            i32 = lambda o: struct.unpack_from("<i", self.raw, o)[0]
-
-            # Energy-axis doubles follow the "Uninitialized" tag.
-            u = self.raw.find(b"Uninitialized", off, end)
-            if u == -1:
-                return False
-            ue = u + len(b"Uninitialized")
-            hv = d(ue)            # photon energy (e.g. 1486.69 eV, Al Ka)
-            ke_a = d(ue + 8)      # kinetic-energy start
-            ke_b = d(ue + 16)     # kinetic-energy end
-            dwell = d(ue + 24)    # dwell time per step (seconds)
-            if not (50.0 < hv < 6000.0 and 0.0 <= ke_a < hv + 50
-                    and 0.0 <= ke_b < hv + 50):
-                return False
-
-            # Transmission function, then the point count + ordinates.
-            tf = self.raw.find(self.TF_MARKER, off, end)
-            if tf == -1:
-                return False
-            vend = tf + len(self.TF_MARKER)
-            npairs = i32(vend + 4)
-            if not (0 <= npairs < 100000):
-                return False
-            # Each pair is (kinetic energy, transmission), 2 x float64.
-            tf_ke, tf_val = [], []
-            for k in range(npairs):
-                tf_ke.append(d(vend + 8 + k * 16))
-                tf_val.append(d(vend + 8 + 8 + k * 16))
-            tf_end = vend + 8 + npairs * 16
-            n = i32(tf_end)
-            if not (1 < n < 5_000_000):
-                return False
-            cstart = tf_end + 4
-            avail = (end - cstart) // 8
-            n = min(n, avail)
-            if n < 2:
-                return False
-            counts = list(struct.unpack_from(f"<{n}d", self.raw, cstart))
-
-            # Binding-energy axis: BE = photon energy - kinetic energy.
-            ke = [ke_a + (ke_b - ke_a) * j / (n - 1) for j in range(n)]
-            energy = [hv - k for k in ke]
-
-            reg.energy = energy
-            reg.counts = counts
-            reg.energy_label, reg.energy_units = "Binding Energy", "eV"
-            reg.count_label, reg.count_units = "Intensity", "counts"
-            reg.decodable = True
-            step = (ke_b - ke_a) / (n - 1)
-            reg.photon_energy = hv
-            reg.anode = self._anode_from_hv(hv)
-            reg.dwell = dwell if (dwell == dwell and 0 < dwell < 1e4) else None
-            reg.step = abs(step)
-            reg.tf_ke = tf_ke
-            reg.tf_values = tf_val
-            reg.conditions.setdefault("Photon energy", f"{hv:.2f} eV")
-            reg.conditions.setdefault("Anode", reg.anode)
-            reg.conditions.setdefault(
-                "BE range", f"{energy[0]:.1f} - {energy[-1]:.1f} eV")
-            reg.conditions.setdefault("Step", f"{abs(step):.3f} eV")
-            reg.conditions.setdefault("Points", str(n))
-            reg.note = ("Decoded from the EscaSpectrum structure. Binding "
-                        "energy = photon energy − kinetic energy; not "
-                        "charge-corrected.")
-            return True
-        except (struct.error, IndexError, ZeroDivisionError):
-            return False
-
-    TF_MARKER = b"TransFunc.Core.VisionTf"
-
-    @staticmethod
-    def _scan_float_array(payload, fmt, size):
-        n, best = len(payload), []
-        for phase in range(size):
-            cur = []
-            for i in range(phase, n - size, size):
-                try:
-                    v = struct.unpack(fmt, payload[i: i + size])[0]
-                except struct.error:
-                    v = float("nan")
-                if (v == v) and (0.0 <= v < 1e9):
-                    cur.append(v)
-                else:
-                    if len(cur) > len(best):
-                        best = cur
-                    cur = []
-            if len(cur) > len(best):
-                best = cur
-        if len(best) >= 64 and len(set(round(x, 3) for x in best)) > 10:
-            return best
-        return None
-
-    # -- images ---------------------------------------------------------
-    # -- depth profile --------------------------------------------------
-    GRAPH_MARKER = b"DataTypes.NonUniformGraphData"
-
-    def _decode_duration_graph(self, off):
-        """Decode (etch number, duration) pairs from a NonUniformGraphData
-        block. Returns the list of per-etch durations (best effort)."""
-        e = off + len(self.GRAPH_MARKER)
-        base = self.raw.find(struct.pack("<d", 1.0), e, e + 220)
-        if base < 0:
-            return []
-        d = lambda o: struct.unpack_from("<d", self.raw, o)[0]
-        result = []
-        for stride in (17, 16):
-            ys, k = [], 0
-            while True:
-                ox = base + k * stride
-                if ox + 16 > len(self.raw):
-                    break
-                try:
-                    x = d(ox); y = d(ox + 8)
-                except struct.error:
-                    break
-                if x != x or abs(x - (k + 1)) > 0.01:
-                    break
-                ys.append(y)
-                k += 1
-            if len(ys) >= 2:
-                result = ys
-                break
-        return result
-
-    def _parse_depth_profile(self):
-        raw = self.raw
-        is_profile = (b"DepthProfileData" in raw or b"Depth Profile" in raw
-                      or b"Mb6EtchSettings" in raw)
-        if not is_profile or not self.regions:
-            return
-
-        names = [r.name for r in self.regions]
-        rpl = next((i for i in range(1, len(names))
-                    if names[i] == names[0]), len(names))
-        if rpl < 1 or len(names) % rpl != 0:
-            rpl = 1
-        n_levels = len(self.regions) // rpl
-
-        durs = []
-        for off in self._find_all(self.GRAPH_MARKER):
-            labels = [s for _, s in self._strings_between(off, off + 60)]
-            if any("Duration" in s for s in labels):
-                durs += self._decode_duration_graph(off)
-
-        n_etches = max(0, n_levels - 1)
-        per_etch, source = [], ""
-        if durs:
-            import statistics
-            med = statistics.median(durs)
-            constant = all(abs(x - med) <= 0.01 * med + 1e-9 for x in durs)
-            if constant:
-                per_etch = [med] * n_etches
-                source = f"constant {med:g} s/etch (from instrument record)"
-            else:
-                per_etch = list(durs)
-                if len(per_etch) < n_etches:
-                    per_etch += [per_etch[-1]] * (n_etches - len(per_etch))
-                per_etch = per_etch[:n_etches]
-                source = "per-etch durations (from instrument record)"
-        else:
-            per_etch = [0.0] * n_etches
-            source = "etch time not recorded in file"
-
-        cumulative = [0.0]
-        for dd in per_etch:
-            cumulative.append(cumulative[-1] + dd)
-
-        for idx, r in enumerate(self.regions):
-            lvl = idx // rpl
-            r.etch_level = lvl
-            r.etch_time = cumulative[lvl] if lvl < len(cumulative) else None
-
-        self.depth_profile = {
-            "is_profile": True,
-            "n_levels": n_levels,
-            "regions_per_level": rpl,
-            "etch_per_level": (per_etch[0] if per_etch else 0.0),
-            "total_etch_time": cumulative[-1] if cumulative else 0.0,
-            "cumulative": cumulative,
-            "etch_source": source,
-            "n_etches": n_etches,
-        }
-
-    # -- analysis positions --------------------------------------------
-    def _parse_positions(self):
-        """Extract stage analysis positions (mm) from InstrumentAnalysisLocation
-        blocks. Each stores two consecutive float64 (metres). The first block
-        for each sample gives that sample's analysis position (later blocks are
-        auto-Z / alignment points)."""
-        d = lambda o: struct.unpack_from("<d", self.raw, o)[0]
-        rep = {}
-        loc = []
-        if self.corruption["corrupted"]:
-            self._locations, self._sample_pos = [], {}
-            return
-        for off in self._find_all(self.LOCATION_MARKER):
-            e = off + len(self.LOCATION_MARKER)
-            xy = None
-            for k in range(40, 150):
-                try:
-                    x = d(e + k); y = d(e + k + 8)
-                except struct.error:
-                    break
-                if (x == x and y == y and abs(x) < 0.06 and abs(y) < 0.06
-                        and (abs(x) + abs(y)) > 1e-5):
-                    xy = (x * 1000.0, y * 1000.0)
-                    break
-            if xy is None:
-                continue
-            owner = self._sample_for(off)
-            loc.append((off, owner, xy[0], xy[1]))
-            rep.setdefault(owner, xy)      # first block per sample wins
-        self._locations = loc
-        self._sample_pos = rep
-        for r in self.regions:
-            if r.sample in rep:
-                r.pos_x, r.pos_y = rep[r.sample]
-
-    def analysis_positions(self):
-        """Distinct analysis positions as (label, x_mm, y_mm) per sample."""
-        return [(s, xy[0], xy[1])
-                for s, xy in getattr(self, "_sample_pos", {}).items()]
-
-    def sample_positions(self):
-        """One representative position per sample: {sample: (x, y)}."""
-        return dict(getattr(self, "_sample_pos", {}))
-
-    def _parse_images(self):
-        imgs = []
-        for off in self._find_all(self.IMAGE_MARKER):
-            blob = self.raw[off:]
-            intact = (b"\xff\xd8" in blob) and not self.corruption["corrupted"]
-            note = "" if intact else ("Camera image present but not recoverable "
-                                      "from this file (JPEG markers destroyed).")
-            imgs.append(ImageBlob("Holder snapshot", off, blob, intact, note))
-        self.images = imgs
-
-    def extract_jpeg(self, blob):
-        if not blob.is_jpeg_intact:
-            return None
-        d = blob.data
-        s = d.find(b"\xff\xd8")
-        if s == -1:
-            return None
-        e = d.find(b"\xff\xd9", s)
-        return d[s:(e + 2) if e != -1 else len(d)]
-
-    # -- tree -----------------------------------------------------------
-    @staticmethod
-    def _be_str(r):
-        if r.decodable and r.energy:
-            return f"{r.energy[0]:.0f}-{r.energy[-1]:.0f} eV"
-        return "no data"
-
-    @staticmethod
-    def _pe_str(r):
-        return f"{r.pass_energy:g}" if r.pass_energy else ""
-
-    def _build_tree(self):
-        base = os.path.basename(self.path) if self.path else "Experiment"
-        root = TreeNode(f"Experiment: {base}", "experiment")
-        is_profile = self.depth_profile.get("is_profile")
-        pos = self.sample_positions()
-
-        order, groups = [], {}
-        for r in self.regions:
-            if r.sample not in groups:
-                groups[r.sample] = []
-                order.append(r.sample)
-            groups[r.sample].append(r)
-        if not order:
-            order = [s for _, s in self.samples] or ["Sample"]
-            groups = {s: [] for s in order}
-
-        for sample_name in order:
-            pstr = ""
-            if sample_name in pos:
-                pstr = f"({pos[sample_name][0]:.1f}, {pos[sample_name][1]:.1f} mm)"
-            sample_node = TreeNode(f"Sample: {sample_name}", "sample",
-                                   cols=(pstr, "", "", ""))
-
-            if is_profile:
-                # Sample -> Region type -> per-level leaves
-                byname, rorder = {}, []
-                for r in groups[sample_name]:
-                    if r.name not in byname:
-                        byname[r.name] = []
-                        rorder.append(r.name)
-                    byname[r.name].append(r)
-                for rname in rorder:
-                    rl = byname[rname]
-                    folder = TreeNode(rname, "regionfolder",
-                                      cols=(f"{len(rl)} levels", "",
-                                            self._pe_str(rl[0]), ""))
-                    for r in rl:
-                        et = (f"{r.etch_time:g} s" if r.etch_time is not None
-                              else "")
-                        folder.children.append(TreeNode(
-                            f"Level {r.etch_level}", "EscaSpectrum", r.offset,
-                            region=r,
-                            cols=(self._be_str(r), str(r.n_points),
-                                  self._pe_str(r), et)))
-                    sample_node.children.append(folder)
-            else:
-                for r in groups[sample_name]:
-                    tag = "" if r.decodable else "  [no data]"
-                    sample_node.children.append(TreeNode(
-                        f"{r.name}{tag}", "EscaSpectrum", r.offset, region=r,
-                        cols=(self._be_str(r), str(r.n_points),
-                              self._pe_str(r), "")))
-            root.children.append(sample_node)
-
-        if self.images:
-            imgs = TreeNode(f"Images ({len(self.images)})",
-                            "HolderSnapshotFolder")
-            for n, im in enumerate(self.images, 1):
-                lbl = im.name if len(self.images) == 1 else f"{im.name} {n}"
-                imgs.children.append(
-                    TreeNode(lbl, "HolderContentSnapshot", im.offset, image=im))
-            root.children.append(imgs)
-
-        self.tree = root
-
-    def _build_summary(self):
-        self.summary = {
-            "file": self.path, "size": len(self.raw),
-            "n_regions": len(self.regions),
-            "region_names": [r.name for r in self.regions],
-            "n_images": len(self.images),
-            "n_decodable": sum(1 for r in self.regions if r.decodable),
-            "corrupted": self.corruption["corrupted"],
-        }
-
-    # -- metadata -------------------------------------------------------
-    def region_metadata(self, r: "Region") -> dict:
-        """Full, ordered acquisition metadata for one region."""
-        def fmt(v, unit="", nd=None):
-            if v is None:
-                return ""
-            if nd is not None:
-                return f"{v:.{nd}f}{unit}"
-            return f"{v}{unit}"
-
-        be0 = r.energy[0] if r.decodable and r.energy else None
-        be1 = r.energy[-1] if r.decodable and r.energy else None
-        md = {}
-        md["Sample"] = r.sample
-        md["Region"] = r.name
-        md["Technique"] = r.technique
-        md["Date acquired"] = self._date_for(r.offset)
-        if r.pos_x is not None:
-            md["Position X (mm)"] = f"{r.pos_x:.3f}"
-            md["Position Y (mm)"] = f"{r.pos_y:.3f}"
-        if r.etch_level is not None:
-            md["Etch level"] = str(r.etch_level)
-            md["Etch time (s)"] = (f"{r.etch_time:g}"
-                                   if r.etch_time is not None else "")
-        md["Instrument"] = self.instrument.get("Instrument", "")
-        md["Acquisition computer"] = self.instrument.get("Acquisition computer", "")
-        md["X-ray source"] = self.instrument.get("X-ray source", "")
-        md["Anode"] = r.anode or self.instrument.get("X-ray source", "")
-        md["Photon energy (eV)"] = fmt(r.photon_energy, "", 2)
-        md["Source power (W)"] = (r.conditions.get("X-ray Power", "")
-                                  .replace("W", "").strip())
-        md["Pass energy (eV)"] = fmt(r.pass_energy, "", 0) if r.pass_energy else ""
-        md["Lens mode"] = r.lens_mode or self.instrument.get("Lens mode", "")
-        md["Aperture"] = r.aperture or self.instrument.get("Aperture", "")
-        md["BE start (eV)"] = fmt(be0, "", 2)
-        md["BE end (eV)"] = fmt(be1, "", 2)
-        md["Step (eV)"] = fmt(r.step, "", 3)
-        md["Dwell (s)"] = fmt(r.dwell, "", 3)
-        md["Points"] = str(r.n_points) if r.n_points else ""
-        md["Quality"] = r.conditions.get("Quality", "")
-        md["Charge neutraliser"] = self.instrument.get("Charge neutraliser", "")
-        md["Ion gun / sputtering"] = self.instrument.get("Ion gun / sputtering", "")
-        return md
-
-    def metadata_rows(self):
-        """One metadata dict per region, in file order."""
-        return [self.region_metadata(r) for r in self.regions]
-
-    def samples_metadata(self):
-        """Grouped: {sample_name: [region_metadata, ...]} preserving order."""
-        groups, order = {}, []
-        for r in self.regions:
-            groups.setdefault(r.sample, []).append(self.region_metadata(r))
-            if r.sample not in order:
-                order.append(r.sample)
-        return [(s, groups[s]) for s in order]
-
-
-# ==========================================================================
-#  EXPORTERS
-# ==========================================================================
-def export_csv(regions, path):
-    """Export selected regions to a single CSV (wide format)."""
-    usable = [r for r in regions if r.decodable and r.counts]
-    if not usable:
-        raise ValueError("None of the selected regions contain decodable data.")
-    cols = []
-    maxlen = 0
-    for r in usable:
-        pre = f"{r.sample} " if r.sample else ""
-        cols.append((f"{pre}{r.name} {r.energy_label} ({r.energy_units})", r.energy))
-        cols.append((f"{pre}{r.name} {r.count_label} ({r.count_units})", r.counts))
-        maxlen = max(maxlen, len(r.counts))
-    with open(path, "w", newline="") as fh:
-        w = csv.writer(fh)
-        w.writerow([c[0] for c in cols])
-        for i in range(maxlen):
-            row = [(c[1][i] if i < len(c[1]) else "") for c in cols]
-            w.writerow(row)
-    return len(usable)
-
-
-def export_vamas(regions, path, institution="Not specified",
-                 instrument="", operator="", experiment_id="",
-                 sample_id="Sample", include_transmission=True):
-    """Export selected regions as a VAMAS (ISO 14976) file.
-
-    Sequential block layout: experiment mode NORM, scan mode REGULAR,
-    technique XPS, kinetic-energy abscissa. When the spectrometer transmission
-    function is available it is written as a second corresponding variable
-    ("Transmission"), interleaved with intensity, matching CasaXPS exports.
-    Only regions with decodable data are written.
-    """
-    usable = [r for r in regions if r.decodable and r.counts]
-    if not usable:
-        raise ValueError("None of the selected regions contain decodable data.")
-
-    L = []
-    a = L.append
-
-    # ---- experiment header ----
-    a("VAMAS Surface Chemical Analysis Standard Data Transfer Format 1988 May 4")
-    a(institution)
-    a(instrument)
-    a(operator)
-    a(experiment_id)
-    a("0")            # number of lines in comment
-    a("NORM")         # experiment mode
-    a("REGULAR")      # scan mode
-    a(str(len(usable)))  # number of spectral regions (NORM)
-    a("0")            # number of experimental variables
-    a("0")            # parameter inclusion/exclusion list entries
-    a("0")            # manually entered items in block
-    a("0")            # future-upgrade experiment entries
-    a("0")            # future-upgrade block entries
-    a(str(len(usable)))  # number of blocks
-
-    now = datetime.datetime.now()
-    SENT = "1E+37"    # VAMAS "not specified" sentinel
-    for r in usable:
-        hv = r.photon_energy if r.photon_energy else 1486.69
-        # Kinetic-energy abscissa (matches CasaXPS and the transmission axis).
-        ke = r.kinetic_energy or [hv - be for be in r.energy]
-        ke0 = ke[0]
-        dke = (ke[1] - ke[0]) if len(ke) > 1 else 1.0
-        counts = r.counts
-        trans = r.transmission() if include_transmission else None
-        n_cv = 2 if trans else 1
-        anode = (r.anode.split()[0] if r.anode else "Al")  # element only
-        power = ""
-        if r.conditions.get("X-ray Power"):
-            power = r.conditions["X-ray Power"].replace("W", "").strip()
-        dwell = f"{r.dwell:.6g}" if r.dwell else SENT
-
-        a(r.name)                 # block identifier
-        a(r.sample or sample_id)  # sample identifier
-        a(str(now.year)); a(str(now.month)); a(str(now.day))
-        a(str(now.hour)); a(str(now.minute)); a(str(now.second))
-        a("0")                    # hours in advance of GMT
-        # block comment: include etch info for depth profiles
-        comment = []
-        if r.etch_level is not None:
-            comment.append(f"Etch level : {r.etch_level}")
-        if r.etch_time is not None:
-            comment.append(f"Etch time (s) : {r.etch_time:g}")
-        a(str(len(comment)))      # lines in block comment
-        for c in comment:
-            a(c)
-        a("XPS")                  # technique
-        a(anode)                  # analysis source label
-        a(f"{hv:.6g}")            # source characteristic energy
-        a(power or SENT)          # source strength (W)
-        a(SENT)                   # beam width x
-        a(SENT)                   # beam width y
-        a(SENT)                   # source polar angle of incidence
-        a(SENT)                   # source azimuth
-        a("FAT")                  # analyser mode
-        a(f"{r.pass_energy:g}" if r.pass_energy else SENT)  # pass energy
-        a(SENT)                   # magnification of transfer lens
-        a("-4.5")                 # analyser work function
-        a(SENT)                   # target bias
-        a(SENT)                   # analysis width x
-        a(SENT)                   # analysis width y
-        a(SENT)                   # take-off polar angle
-        a(SENT)                   # take-off azimuth
-        a(r.name)                 # species label
-        a("")                     # transition / charge state label
-        a("-1")                   # charge of detected particle
-        # (scan mode REGULAR)
-        a("Kinetic energy")       # abscissa label
-        a("eV")                   # abscissa units
-        a(f"{ke0:.6g}")           # abscissa start
-        a(f"{dke:.6g}")           # abscissa increment
-        a(str(n_cv))              # number of corresponding variables
-        a("Intensity"); a("d")    # corresponding var 1: label, units
-        if trans:
-            a("Transmission"); a("d")   # corresponding var 2
-        a("pulse counting")       # signal mode
-        a(dwell)                  # signal collection time (s)
-        a("1")                    # number of scans
-        a("0")                    # signal time correction
-        a(SENT)                   # sample normal polar angle of tilt
-        a(SENT)                   # sample normal tilt azimuth
-        a(SENT)                   # sample rotation angle
-        a("0")                    # additional numerical parameters
-
-        def fc(v):                # count: integer when whole, else 8 sig figs
-            return str(int(round(v))) if abs(v - round(v)) < 1e-6 else f"{v:.8g}"
-
-        def ft(v):                # transmission: high precision
-            return f"{v:.12g}"
-
-        a(str(len(counts) * n_cv))             # number of ordinate values
-        a(fc(min(counts)))                     # var 1 min
-        a(fc(max(counts)))                     # var 1 max
-        if trans:
-            a(ft(min(trans)))                  # var 2 min
-            a(ft(max(trans)))                  # var 2 max
-        # ordinate values, interleaved per point
-        if trans:
-            for c, t in zip(counts, trans):
-                a(fc(c))
-                a(ft(t))
-        else:
-            for c in counts:
-                a(fc(c))
-
-    a("end of experiment")
-    with open(path, "w", newline="\r\n") as fh:
-        fh.write("\n".join(L) + "\n")
-    return len(usable)
-
-
-def export_metadata_csv(parser, path):
-    """Write one row of acquisition metadata per region."""
-    rows = parser.metadata_rows()
-    if not rows:
-        raise ValueError("No regions found to export metadata for.")
-    fields = list(rows[0].keys())
-    with open(path, "w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=fields)
-        w.writeheader()
-        for row in rows:
-            w.writerow(row)
-    return len(rows)
-
-
-# Fields that are constant for a sample -> shown once in the PDF header block.
-_SAMPLE_LEVEL = [
-    "Date acquired", "Instrument", "Acquisition computer", "X-ray source",
-    "Anode", "Source power (W)", "Lens mode", "Aperture",
-    "Charge neutraliser", "Ion gun / sputtering",
-]
-# Per-region columns for the PDF table.
-_REGION_COLS = [
-    ("Region", "Region"), ("PE (eV)", "Pass energy (eV)"),
-    ("BE start", "BE start (eV)"), ("BE end", "BE end (eV)"),
-    ("Step (eV)", "Step (eV)"), ("Dwell (s)", "Dwell (s)"),
-    ("Points", "Points"), ("Quality", "Quality"),
-    ("hv (eV)", "Photon energy (eV)"),
-]
-
-
-def export_metadata_pdf(parser, path):
-    """Write a formatted, per-sample metadata report as PDF.
-
-    Uses reportlab if available (nicer tables); otherwise falls back to a
-    matplotlib-rendered PDF so the feature works with the base dependencies.
-    """
-    samples = parser.samples_metadata()
-    if not samples:
-        raise ValueError("No regions found to export metadata for.")
-    try:
-        return _metadata_pdf_reportlab(parser, samples, path)
-    except ImportError:
-        return _metadata_pdf_matplotlib(parser, samples, path)
-
-
-def _metadata_pdf_reportlab(parser, samples, path):
-    from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.units import mm
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak)
-
-    styles = getSampleStyleSheet()
-    h1 = styles["Heading1"]
-    h2 = styles["Heading2"]
-    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8,
-                           leading=10)
-    doc = SimpleDocTemplate(path, pagesize=landscape(A4),
-                            leftMargin=14 * mm, rightMargin=14 * mm,
-                            topMargin=14 * mm, bottomMargin=12 * mm,
-                            title="ESCApe acquisition metadata")
-    story = []
-    fname = os.path.basename(parser.path or "experiment")
-    story.append(Paragraph("ESCApe Acquisition Metadata", h1))
-    story.append(Paragraph(
-        f"File: {fname} &nbsp;&nbsp; Samples: {len(samples)} &nbsp;&nbsp; "
-        f"Regions: {parser.summary['n_regions']} &nbsp;&nbsp; "
-        f"Generated: {datetime.datetime.now():%Y-%m-%d %H:%M}", small))
-    if parser.corruption["corrupted"]:
-        story.append(Paragraph(
-            "<font color='red'>Warning: this file's binary data is corrupted; "
-            "numeric values may be unavailable.</font>", small))
-    story.append(Spacer(1, 6 * mm))
-
-    hdr_style = TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#2c3e50")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#b0b0b0")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
-         [colors.white, colors.HexColor("#f2f5f8")]),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-    ])
-
-    for si, (sample, rows) in enumerate(samples):
-        if si > 0:
-            story.append(PageBreak())
-        story.append(Paragraph(f"Sample: {sample}", h2))
-        # sample-level block (use first region's values)
-        base = rows[0]
-        info = [[k, base.get(k, "")] for k in _SAMPLE_LEVEL]
-        info_tbl = Table(info, colWidths=[55 * mm, 110 * mm])
-        info_tbl.setStyle(TableStyle([
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
-            ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-            ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#2c3e50")),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 1.5),
-            ("TOPPADDING", (0, 0), (-1, -1), 1.5),
-        ]))
-        story.append(info_tbl)
-        story.append(Spacer(1, 4 * mm))
-        story.append(Paragraph(f"Regions ({len(rows)})", small))
-
-        table = [[c[0] for c in _REGION_COLS]]
-        for row in rows:
-            table.append([row.get(c[1], "") for c in _REGION_COLS])
-        t = Table(table, repeatRows=1)
-        t.setStyle(hdr_style)
-        story.append(t)
-
-    doc.build(story)
-    return len(samples)
-
-
-def _metadata_pdf_matplotlib(parser, samples, path):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_pdf import PdfPages
-
-    fname = os.path.basename(parser.path or "experiment")
-    with PdfPages(path) as pdf:
-        for sample, rows in samples:
-            fig = plt.figure(figsize=(11.7, 8.3))  # A4 landscape
-            fig.suptitle(f"ESCApe metadata — {fname}\nSample: {sample}",
-                         fontsize=12, x=0.02, ha="left")
-            ax = fig.add_axes([0.02, 0.02, 0.96, 0.84])
-            ax.axis("off")
-            base = rows[0]
-            lines = [f"{k}: {base.get(k, '')}" for k in _SAMPLE_LEVEL]
-            ax.text(0, 1.0, "\n".join(lines), va="top", fontsize=8,
-                    family="monospace")
-            col_labels = [c[0] for c in _REGION_COLS]
-            cells = [[row.get(c[1], "") for c in _REGION_COLS] for row in rows]
-            tbl = ax.table(cellText=cells, colLabels=col_labels,
-                           loc="lower center", cellLoc="center")
-            tbl.auto_set_font_size(False)
-            tbl.set_fontsize(7)
-            tbl.scale(1, 1.2)
-            pdf.savefig(fig)
-            plt.close(fig)
-    return len(samples)
+from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
+                     load_file, reader_for, supported_patterns,
+                     UnsupportedFormat)
+from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc,
+                    make_box_images)
+from pdf_preview import PdfPreview, HAVE_PDF, open_external
+from exporters import (export_csv, export_vamas, export_metadata_csv,
+                       export_metadata_pdf)
 
 
 # ==========================================================================
@@ -1179,6 +90,29 @@ def save_calibration(c):
     try:
         with open(CALIB_PATH, "w") as fh:
             json.dump(c, fh, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+CONFIG_PATH = os.path.join(os.path.expanduser("~"),
+                           ".escape_explorer_config.json")
+
+
+def load_config():
+    """User settings (theme, layout, view options); missing file -> {}."""
+    try:
+        with open(CONFIG_PATH) as fh:
+            cfg = json.load(fh)
+        return cfg if isinstance(cfg, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_config(cfg):
+    try:
+        with open(CONFIG_PATH, "w") as fh:
+            json.dump(cfg, fh, indent=2)
         return True
     except Exception:
         return False
@@ -1220,75 +154,199 @@ def interp_intensity(region, energy):
     return y0 + f * (y1 - y0)
 
 
-def region_label(r):
-    """Concise label for a trace: depth level/time if a profile, else sample+name."""
+def region_label(r, with_source=False, show_name=True):
+    """Concise label for a trace: depth level/time if a profile, else the
+    sample (plus the region name when ``show_name``); prefixed with the file
+    name when several files are loaded."""
     if r.etch_level is not None:
-        if r.etch_time is not None:
-            return f"L{r.etch_level} ({r.etch_time:g} s)"
-        return f"L{r.etch_level}"
-    return (f"{r.sample} {r.name}".strip() if r.sample else r.name)
+        base = (f"L{r.etch_level} ({r.etch_time:g} s)"
+                if r.etch_time is not None else f"L{r.etch_level}")
+    else:
+        parts = [r.sample] if r.sample else []
+        if show_name or not parts:
+            parts.append(r.name)
+        base = " ".join(parts)
+    if with_source and r.source:
+        base = f"{r.source} · {base}"
+    return base if len(base) <= 44 else base[:41] + "…"
 
 
-class CalibrationDialog(tk.Toplevel):
-    """Enter the one-time camera-to-stage calibration."""
+def normalise_name(name):
+    """Case/whitespace-insensitive key for a region (element) name."""
+    return re.sub(r"\s+", " ", (name or "").strip()).lower()
 
-    def __init__(self, master, on_save, current=None):
-        super().__init__(master)
+
+def regions_under(node):
+    """All regions at or below a tree node, in tree order."""
+    out = []
+    if node.region is not None:
+        out.append(node.region)
+    for c in node.children:
+        out += regions_under(c)
+    return out
+
+
+def tick_state(leaf_ids, checked):
+    """Tri-state for a tree node: 0 = none ticked, 1 = some, 2 = all."""
+    if not leaf_ids:
+        return 0
+    k = len(checked.intersection(leaf_ids))
+    return 0 if k == 0 else (2 if k == len(leaf_ids) else 1)
+
+
+def _span(r):
+    if r.energy:
+        return (min(r.energy[0], r.energy[-1]), max(r.energy[0], r.energy[-1]))
+    return None
+
+
+def _iou(a, b):
+    """Intersection-over-union of two (lo, hi) energy spans."""
+    inter = min(a[1], b[1]) - max(a[0], b[0])
+    if inter <= 0:
+        return 0.0
+    union = max(a[1], b[1]) - min(a[0], b[0])
+    return inter / union if union else 0.0
+
+
+def group_regions(regions, mode="name"):
+    """Group spectra that belong on one stacked panel.
+
+    mode "name":  same element/region name (e.g. every 'C 1s').
+    mode "range": x-axis spans that overlap by >= 50 % (intersection over
+                  union), whatever the name.
+    Returns an ordered list of (label, [regions]); order is first appearance.
+    """
+    if mode == "range":
+        groups = []
+        for r in regions:
+            span = _span(r)
+            for g in groups:
+                if span and g["span"] and _iou(span, g["span"]) >= 0.5:
+                    g["regions"].append(r)
+                    break
+            else:
+                groups.append({"span": span, "regions": [r]})
+        out = []
+        for g in groups:
+            names = {normalise_name(r.name) for r in g["regions"]}
+            if len(names) == 1:
+                key = g["regions"][0].name
+            elif g["span"]:
+                key = f"{g['span'][0]:.0f}–{g['span'][1]:.0f} eV"
+            else:
+                key = "Other"
+            out.append((key, g["regions"]))
+        return out
+    by_name = {}
+    for r in regions:
+        by_name.setdefault(normalise_name(r.name), (r.name, []))[1].append(r)
+    return list(by_name.values())
+
+
+def _grid_dims(n):
+    cols = min(4, max(1, math.ceil(math.sqrt(n))))
+    rows = min(4, math.ceil(n / cols))
+    return rows, cols
+
+
+def norm_factor(r, mode, cursor=None):
+    """Divisor that normalises spectrum r for the chosen mode."""
+    ys = r.counts
+    if mode == "Max = 1":
+        m = max(ys)
+        return m if m else 1.0
+    if mode == "Area = 1":
+        s = sum(abs(y) for y in ys)
+        return s / len(ys) if s else 1.0
+    if mode == "At cursor" and cursor is not None:
+        v = interp_intensity(r, cursor)
+        return v if v and v > 0 else 1.0
+    return 1.0
+
+
+def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None,
+               with_source=False, title="", compact=False):
+    """Draw one panel: a single spectrum plain, several stacked by y offset."""
+    normed = [[y / norm_factor(r, norm, cursor) for y in r.counts]
+              for r in regs]
+    stacked = len(regs) > 1
+    spans = [(max(n) - min(n)) for n in normed if n]
+    step = offset * (max(spans) if spans else 1.0) if stacked else 0.0
+    label_every = max(1, math.ceil(len(regs) / 25))
+    show_name = len({normalise_name(r.name) for r in regs}) > 1
+    for i, (r, n) in enumerate(zip(regs, normed)):
+        yoff = [y + i * step for y in n]
+        line, = ax.plot(r.energy, yoff, lw=0.8 if compact else 0.9)
+        if stacked and i % label_every == 0:
+            ax.annotate(region_label(r, with_source, show_name),
+                        (r.energy[0], yoff[0]),
+                        textcoords="offset points", xytext=(4, 3),
+                        fontsize=6 if compact else 7,
+                        color=line.get_color())
+    if norm == "At cursor" and cursor is not None:
+        ax.axvline(cursor, color="#c00", ls="--", lw=0.8)
+    r0 = regs[0]
+    ax.set_title(title, fontsize=8 if compact else 11)
+    if compact:
+        ax.tick_params(labelsize=6)
+    else:
+        ax.set_xlabel(f"{r0.energy_label} ({r0.energy_units})")
+        ylab = (f"{r0.count_label} ({r0.count_units})" if norm == "None"
+                else f"{r0.count_label} (normalised)")
+        ax.set_ylabel(ylab + (", stacked" if step else ""))
+    if r0.energy_label.lower().startswith("binding"):
+        ax.invert_xaxis()
+
+
+class CalibrationPanel(ttk.LabelFrame):
+    """Inline camera-to-stage calibration form (lives in the Images tab)."""
+
+    def __init__(self, master, on_save, on_close, current=None):
+        super().__init__(master, text="Camera calibration", padding=8)
         self.on_save = on_save
-        self.title("Camera calibration")
-        self.resizable(False, False)
-        self.transient(master)
-        self.grab_set()
+        self.on_close = on_close
         c = current or {"centre_x_mm": 0.0, "centre_y_mm": 0.0,
                         "mm_per_px": 0.02, "flip_x": False, "flip_y": False,
                         "rotation_deg": 0.0}
-
-        intro = ("Map stage coordinates (mm) onto the holder photo. These are "
-                 "fixed for your camera setup — enter them once.\n\n"
-                 "• Image centre X/Y: the stage position (mm) at the centre of "
-                 "the photo.\n"
-                 "• mm per pixel: image width in mm ÷ pixel width.\n"
-                 "• Flip X/Y, rotation: correct the photo's orientation so "
-                 "markers land on the right samples.")
-        ttk.Label(self, text=intro, wraplength=380, justify="left",
-                  padding=12).grid(row=0, column=0, columnspan=2, sticky="w")
-
+        ttk.Label(self, wraplength=230, justify="left", font=("", 8),
+                  text="Maps stage coordinates (mm) onto the holder photo. "
+                       "Centre X/Y = stage position at the photo centre; "
+                       "mm per pixel = image width in mm ÷ pixel width. "
+                       "Flip/rotate until the markers land on the samples."
+                  ).grid(row=0, column=0, columnspan=2, sticky="w",
+                         pady=(0, 6))
         self.vars = {}
-        rows = [("Image centre X (mm)", "centre_x_mm"),
-                ("Image centre Y (mm)", "centre_y_mm"),
-                ("mm per pixel", "mm_per_px"),
-                ("Rotation (degrees)", "rotation_deg")]
         r = 1
-        for label, key in rows:
+        for label, key in [("Centre X (mm)", "centre_x_mm"),
+                           ("Centre Y (mm)", "centre_y_mm"),
+                           ("mm per pixel", "mm_per_px"),
+                           ("Rotation (deg)", "rotation_deg")]:
             ttk.Label(self, text=label).grid(row=r, column=0, sticky="e",
-                                             padx=(12, 6), pady=3)
+                                             padx=(0, 6), pady=2)
             v = tk.StringVar(value=str(c.get(key, 0.0)))
-            ttk.Entry(self, textvariable=v, width=14).grid(
-                row=r, column=1, sticky="w", padx=(0, 12))
+            ttk.Entry(self, textvariable=v, width=10).grid(row=r, column=1,
+                                                           sticky="w")
             self.vars[key] = v
             r += 1
         self.flip_x = tk.BooleanVar(value=c.get("flip_x", False))
         self.flip_y = tk.BooleanVar(value=c.get("flip_y", False))
         ttk.Checkbutton(self, text="Flip X", variable=self.flip_x).grid(
-            row=r, column=0, sticky="w", padx=12)
+            row=r, column=0, sticky="w")
         ttk.Checkbutton(self, text="Flip Y", variable=self.flip_y).grid(
             row=r, column=1, sticky="w")
         r += 1
         btns = ttk.Frame(self)
-        btns.grid(row=r, column=0, columnspan=2, pady=12)
-        ttk.Button(btns, text="Save", command=self._save).pack(side="left", padx=6)
-        ttk.Button(btns, text="Cancel", command=self.destroy).pack(side="left")
+        btns.grid(row=r, column=0, columnspan=2, pady=(8, 0))
+        ttk.Button(btns, text="Apply", command=self._save).pack(side="left",
+                                                               padx=4)
+        ttk.Button(btns, text="Close", command=on_close).pack(side="left")
 
     def _save(self):
         try:
-            calib = {
-                "centre_x_mm": float(self.vars["centre_x_mm"].get()),
-                "centre_y_mm": float(self.vars["centre_y_mm"].get()),
-                "mm_per_px": float(self.vars["mm_per_px"].get()),
-                "rotation_deg": float(self.vars["rotation_deg"].get()),
-                "flip_x": self.flip_x.get(),
-                "flip_y": self.flip_y.get(),
-            }
+            calib = {k: float(v.get()) for k, v in self.vars.items()}
+            calib["flip_x"] = self.flip_x.get()
+            calib["flip_y"] = self.flip_y.get()
             if calib["mm_per_px"] == 0:
                 raise ValueError("mm per pixel cannot be zero.")
         except ValueError as exc:
@@ -1296,434 +354,1020 @@ class CalibrationDialog(tk.Toplevel):
             return
         save_calibration(calib)
         self.on_save(calib)
-        self.destroy()
 
 
-class DisplayWindow(tk.Toplevel):
-    """Composite display: spectra grid (top-left), metadata (right),
-    selectable image filmstrip (bottom). Renders 1..16 spectra per page in a
-    near-square grid (max 4x4) and can save the selection to PDF."""
+class Workspace:
+    """The single main window: file tree with tick boxes (left), stacked-plot
+    area (top right) and a Metadata / Images / Stage-map notebook (bottom
+    right). Ticked spectra are plotted; spectra sharing an element name (or
+    x-range) are stacked with a y offset on one panel."""
 
-    MAX_PER_PAGE = 16
+    PANEL_CHOICES = ["Auto", "1", "2", "4", "6", "9", "12", "16"]
+    TRACE_CHOICES = ["All", "3", "5", "10", "20", "50", "100"]
+    NORM_MODES = ["None", "Max = 1", "Area = 1", "At cursor"]
+    GROUP_MODES = {"Element name": "name", "Energy range": "range"}
 
-    def __init__(self, master, app):
-        super().__init__(master)
-        self.app = app
-        self.title("ESCApe Display")
-        self.geometry("1040x720")
-        self.protocol("WM_DELETE_WINDOW", self.hide)
+    def __init__(self, root):
+        self.root = root
+        root.title("ESCApe Explorer")
+        self.cfg = load_config()
+        h = min(800, max(560, root.winfo_screenheight() - 110))
+        w = min(1400, max(1000, root.winfo_screenwidth() - 40))
+        root.geometry(self.cfg.get("geometry") or f"{w}x{h}")
+        root.minsize(900, 560)
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.themes = ThemeManager(root)
+        self.theme_name = self.cfg.get("theme", "Light")
+        if self.theme_name not in THEME_NAMES:
+            self.theme_name = "Light"
+        self.palette = self.themes.apply(self.theme_name)
+        self._apply_mpl_theme()
 
-        self.regions = []          # currently selected regions
-        self.page = 0
-        self._thumb_imgs = []      # keep refs so Tk doesn't GC them
+        self.docs = []              # loaded SpectrumFile readers
+        self.node_map = {}          # tree iid -> (parser, TreeNode)
+        self.leaf_ids = {}          # tree iid -> frozenset(id(region)) it holds
+        self.box_state = {}         # tree iid -> last drawn tick state
+        self.region_parser = {}     # id(region) -> owning parser
+        self.checked = set()        # id(region) of ticked spectra
+        self.sel_regions = []       # regions under the highlighted rows
+        self.panel_start = 0        # first visible panel (row-aligned)
+        self.trace_start = 0        # first visible trace of long stacks
+        self._scale_guard = False
+        self.cursors = {}           # group key -> "At cursor" energy
+        self.calib = load_calibration()
+        self._open = {}             # id(node) -> expanded?
+        self._render_job = None
+        self._axmap = {}
+        self._thumb_imgs = []
         self._view_photo = None
-        self.calib = load_calibration()   # camera-to-stage calibration
+        self._cur_image = None
+        self.box_imgs, self.blank_img = make_box_images(self.palette)
 
-        # --- toolbar ---------------------------------------------------
-        tb = ttk.Frame(self)
-        tb.pack(side="top", fill="x", padx=6, pady=4)
-        self.save_btn = ttk.Button(tb, text="Save spectra to PDF",
-                                   command=self.save_pdf, state="disabled")
-        self.save_btn.pack(side="left")
-        self.prev_btn = ttk.Button(tb, text="◀ Prev", width=8,
+        self._build_menu()
+        self._build_body()
+        self.set_theme(self.theme_name, save=False)
+        root.after(80, self._restore_layout)
+
+    # -- construction ---------------------------------------------------
+    def _build_menu(self):
+        bar = tk.Menu(self.root)
+        filem = tk.Menu(bar, tearoff=0)
+        self.themes.register_menu(bar)
+        self.themes.register_menu(filem)
+        filem.add_command(label="Open spectra file(s)…",
+                          command=self.open_files)
+        filem.add_command(label="Open folder…", command=self.open_folder)
+        filem.add_command(label="Close all files", command=self.close_all)
+        filem.add_separator()
+        filem.add_command(label="Export ticked spectra → CSV…",
+                          command=lambda: self.export_ticked("csv"))
+        filem.add_command(label="Export ticked spectra → VAMAS…",
+                          command=lambda: self.export_ticked("vamas"))
+        filem.add_command(label="Export spectra (choose regions/levels)…",
+                          command=self.open_export)
+        filem.add_separator()
+        filem.add_command(label="Export metadata → CSV…",
+                          command=self.export_meta_csv)
+        filem.add_command(label="Export metadata → PDF…",
+                          command=self.export_meta_pdf)
+        filem.add_separator()
+        filem.add_command(label="Preview spectra PDF…",
+                          command=self.preview_spectra)
+        filem.add_command(label="Preview metadata PDF…",
+                          command=self.preview_metadata)
+        filem.add_separator()
+        filem.add_command(label="Quit", command=self._on_close)
+        bar.add_cascade(label="File", menu=filem)
+        viewm = tk.Menu(bar, tearoff=0)
+        self.themes.register_menu(viewm)
+        viewm.add_command(label="Expand all", command=lambda: self._expand(True))
+        viewm.add_command(label="Collapse all",
+                          command=lambda: self._expand(False))
+        viewm.add_command(label="Untick all", command=self.untick_all)
+        viewm.add_separator()
+        viewm.add_command(label="Show/hide file tree",
+                          command=lambda: self._toggle_pane("tree"))
+        viewm.add_command(label="Show/hide info column",
+                          command=lambda: self._toggle_pane("info"))
+        viewm.add_command(label="Focus plot   (F11)", command=self.toggle_focus)
+        viewm.add_separator()
+        themem = tk.Menu(viewm, tearoff=0)
+        self.themes.register_menu(themem)
+        self.theme_var = tk.StringVar(value=self.theme_name)
+        for name in THEME_NAMES:
+            themem.add_radiobutton(label=name, value=name,
+                                   variable=self.theme_var,
+                                   command=lambda n=name: self.set_theme(n))
+        viewm.add_cascade(label="Colour theme", menu=themem)
+        bar.add_cascade(label="View", menu=viewm)
+        self.view_menu = viewm
+        self.menubar = bar
+        self.root.config(menu=bar)
+
+    def _build_body(self):
+        self.status = ttk.Label(self.root, anchor="w", relief="sunken",
+                                text="Open a spectra file to begin.")
+        self.status.pack(side="bottom", fill="x")
+        self._build_toolbar()
+
+        self.outer = ttk.PanedWindow(self.root, orient="horizontal")
+        self.outer.pack(fill="both", expand=True)
+        self.tree_pane = ttk.Frame(self.outer)
+        self.center = ttk.Frame(self.outer)
+        self.center.grid_rowconfigure(0, weight=1)
+        self.center.grid_columnconfigure(0, weight=1)
+        self.plot_pane = ttk.Frame(self.center)
+        self.plot_pane.grid(row=0, column=0, sticky="nsew")
+        self.preview = PdfPreview(self.center, on_close=self.close_preview)
+        self.preview.grid(row=0, column=0, sticky="nsew")
+        self.preview.grid_remove()
+        self._pdf_dir = None
+        self.info_pane = ttk.PanedWindow(self.outer, orient="vertical")
+        self.outer.add(self.tree_pane, weight=0)
+        self.outer.add(self.center, weight=1)
+        self.outer.add(self.info_pane, weight=0)
+
+        self._build_tree_pane(self.tree_pane)
+        self._build_plot_pane(self.plot_pane)
+        self.meta_frame = ttk.LabelFrame(self.info_pane, text="Metadata")
+        self.nb = ttk.Notebook(self.info_pane)
+        self.info_pane.add(self.meta_frame, weight=3)
+        self.info_pane.add(self.nb, weight=2)
+        self._build_meta_table(self.meta_frame)
+        self._build_side_tabs()
+        self._panes = {"tree": self.tree_pane, "info": self.info_pane}
+        self._hidden = {}           # pane name -> width when hidden
+        self.root.bind("<F11>", lambda e: self.toggle_focus())
+
+    def _build_toolbar(self):
+        tb = ttk.Frame(self.root)
+        tb.pack(side="top", fill="x", padx=4, pady=(4, 2))
+        mb = ttk.Menubutton(tb, text="Open ▾")
+        m = tk.Menu(mb, tearoff=0)
+        m.add_command(label="Spectra file(s)…", command=self.open_files)
+        m.add_command(label="Folder…", command=self.open_folder)
+        m.add_separator()
+        m.add_command(label="Close all files", command=self.close_all)
+        mb["menu"] = m
+        mb.pack(side="left")
+        self.themes.register_menu(m)
+
+        mb = ttk.Menubutton(tb, text="Export ▾")
+        m = tk.Menu(mb, tearoff=0)
+        m.add_command(label="Ticked spectra → CSV…",
+                      command=lambda: self.export_ticked("csv"))
+        m.add_command(label="Ticked spectra → VAMAS…",
+                      command=lambda: self.export_ticked("vamas"))
+        m.add_command(label="Choose regions / levels…", command=self.open_export)
+        m.add_separator()
+        m.add_command(label="Metadata → CSV…", command=self.export_meta_csv)
+        m.add_command(label="Metadata → PDF…", command=self.export_meta_pdf)
+        mb["menu"] = m
+        mb.pack(side="left", padx=4)
+        self.themes.register_menu(m)
+
+        mb = ttk.Menubutton(tb, text="PDF ▾")
+        m = tk.Menu(mb, tearoff=0)
+        m.add_command(label="Preview spectra…", command=self.preview_spectra)
+        m.add_command(label="Save spectra as PDF…", command=self.save_pdf)
+        m.add_separator()
+        m.add_command(label="Preview metadata…", command=self.preview_metadata)
+        m.add_command(label="Save metadata as PDF…",
+                      command=self.export_meta_pdf)
+        mb["menu"] = m
+        mb.pack(side="left")
+        self.themes.register_menu(m)
+        ttk.Button(tb, text="Metadata…", command=self.open_metadata).pack(
+            side="left", padx=4)
+        self.toolbar_right = ttk.Frame(tb)
+        self.toolbar_right.pack(side="right")
+        tcb = ttk.Combobox(self.toolbar_right, width=14, state="readonly",
+                           values=THEME_NAMES, textvariable=self.theme_var)
+        tcb.pack(side="right")
+        tcb.bind("<<ComboboxSelected>>",
+                 lambda e: self.set_theme(self.theme_var.get()))
+        ttk.Label(self.toolbar_right, text="Theme").pack(side="right",
+                                                         padx=(8, 4))
+        self.focus_btn = ttk.Button(self.toolbar_right, text="Focus plot",
+                                    command=self.toggle_focus)
+        self.focus_btn.pack(side="right", padx=(6, 0))
+        self.info_btn = ttk.Button(self.toolbar_right, text="Info ◨", width=7,
+                                   command=lambda: self._toggle_pane("info"))
+        self.info_btn.pack(side="right", padx=(6, 0))
+        self.tree_btn = ttk.Button(self.toolbar_right, text="◧ Tree", width=7,
+                                   command=lambda: self._toggle_pane("tree"))
+        self.tree_btn.pack(side="right", padx=(6, 0))
+
+    # -- theme --------------------------------------------------------------
+    def _apply_mpl_theme(self):
+        if HAVE_MPL:
+            matplotlib.rcParams.update(mpl_rc(self.palette))
+
+    def set_theme(self, name, save=True):
+        """Switch the colour theme live (widgets, tick boxes, plots)."""
+        if name not in THEME_NAMES:
+            return
+        self.theme_name = name
+        self.theme_var.set(name)
+        self.palette = self.themes.apply(name)
+        self._apply_mpl_theme()
+        self.box_imgs, self.blank_img = make_box_images(self.palette)
+        self.box_state.clear()
+        self._populate_tree()
+        if HAVE_MPL:
+            self.fig.set_facecolor(self.palette["plot_bg"])
+            self.canvas.get_tk_widget().configure(bg=self.palette["plot_bg"])
+            self._make_toolbar()
+        self._render()
+        self._redraw_viewer()
+        if save:
+            self.cfg["theme"] = name
+
+    def _menu(self, parent):
+        """A popup menu coloured for the current theme."""
+        m = tk.Menu(parent, tearoff=0)
+        self.themes.register_menu(m)
+        self.themes.recolor_tk(self.root)
+        return m
+
+    # -- panes: collapse / focus / remembered sizes ----------------------
+    def _toggle_pane(self, name):
+        pane = self._panes[name]
+        if name in self._hidden:                     # show again
+            width = self._hidden.pop(name)
+            if name == "tree":
+                self.outer.insert(0, pane, weight=0)
+            else:
+                self.outer.add(pane, weight=0)
+            self.root.after_idle(lambda: self._set_width(name, width))
+        else:                                        # hide
+            self._hidden[name] = max(150, pane.winfo_width())
+            self.outer.forget(pane)
+
+    def _set_width(self, name, width):
+        try:
+            if name == "tree":
+                self.outer.sashpos(0, width)
+            else:
+                total = self.outer.winfo_width()
+                self.outer.sashpos(len(self.outer.panes()) - 2, total - width)
+        except tk.TclError:
+            pass
+
+    def toggle_focus(self):
+        """Hide tree + info column so the plot fills the window (and back)."""
+        if self._hidden:
+            for name in list(self._hidden):
+                self._toggle_pane(name)
+            self.focus_btn.config(text="Focus plot")
+        else:
+            for name in ("tree", "info"):
+                self._toggle_pane(name)
+            self.focus_btn.config(text="Show panels")
+
+    def _restore_layout(self):
+        cfg = self.cfg
+        try:
+            self.outer.update_idletasks()
+            total = self.outer.winfo_width()
+            tree_w = int(cfg.get("sash_tree", 0)) or 0
+            info_w = int(cfg.get("sash_info", 0)) or 0
+            if not tree_w:
+                tree_w = 360 if total >= 1300 else 300
+            if not info_w:
+                info_w = 380 if total >= 1300 else 300
+            self.outer.sashpos(0, tree_w)
+            self.outer.sashpos(1, total - info_w)
+            h = self.info_pane.winfo_height()
+            if h > 100:
+                self.info_pane.sashpos(0, int(cfg.get("sash_info_v", 0)) or
+                                       int(h * 0.55))
+        except tk.TclError:
+            pass
+
+    def _on_close(self):
+        cfg = self.cfg
+        try:
+            cfg["geometry"] = self.root.winfo_geometry()
+            visible = not self._hidden
+            if visible:
+                cfg["sash_tree"] = self.outer.sashpos(0)
+                cfg["sash_info"] = (self.outer.winfo_width()
+                                    - self.outer.sashpos(1))
+                cfg["sash_info_v"] = self.info_pane.sashpos(0)
+        except tk.TclError:
+            pass
+        self.preview.close_document()
+        if self._pdf_dir:
+            shutil.rmtree(self._pdf_dir, ignore_errors=True)
+        cfg["group_by"] = self.group_var.get()
+        cfg["norm"] = self.norm_var.get()
+        cfg["offset"] = float(self.offset_var.get())
+        cfg["panels_per_page"] = self.panels_var.get()
+        cfg["traces_per_panel"] = self.traces_var.get()
+        save_config(cfg)
+        self.root.quit()
+
+    def _build_tree_pane(self, parent):
+        tb2 = ttk.Frame(parent)
+        tb2.pack(side="top", fill="x", padx=4, pady=(2, 2))
+        ttk.Button(tb2, text="Expand", width=8,
+                   command=lambda: self._expand(True)).pack(side="left")
+        ttk.Button(tb2, text="Collapse", width=8,
+                   command=lambda: self._expand(False)).pack(side="left",
+                                                            padx=4)
+        ttk.Button(tb2, text="Untick all",
+                   command=self.untick_all).pack(side="left")
+
+        fb = ttk.Frame(parent)
+        fb.pack(side="top", fill="x", padx=4, pady=(2, 4))
+        ttk.Label(fb, text="Filter:").pack(side="left")
+        self.filter_var = tk.StringVar()
+        ent = ttk.Entry(fb, textvariable=self.filter_var)
+        ent.pack(side="left", fill="x", expand=True, padx=4)
+        ent.bind("<KeyRelease>", lambda e: self._populate_tree())
+        ttk.Button(fb, text="Clear", width=6,
+                   command=lambda: (self.filter_var.set(""),
+                                    self._populate_tree())).pack(side="left")
+
+        holder = ttk.Frame(parent)
+        holder.pack(side="top", fill="both", expand=True)
+        cols = ("detail", "pts", "pe", "etch")
+        self.tree = ttk.Treeview(holder, columns=cols,
+                                 show="tree headings", selectmode="extended")
+        self.tree.heading("#0", text="Tick to plot")
+        self.tree.heading("detail", text="Range / position")
+        self.tree.heading("pts", text="Pts")
+        self.tree.heading("pe", text="PE")
+        self.tree.heading("etch", text="Etch")
+        self.tree.column("#0", width=210, stretch=True, minwidth=120)
+        self.tree.column("detail", width=95, anchor="w", stretch=False)
+        self.tree.column("pts", width=42, anchor="e", stretch=False)
+        self.tree.column("pe", width=38, anchor="e", stretch=False)
+        self.tree.column("etch", width=56, anchor="e", stretch=False)
+        sb = ttk.Scrollbar(holder, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
+        self.tree.pack(side="left", expand=True, fill="both")
+        self.tree.bind("<Button-1>", self._on_tree_click)
+        self.tree.bind("<space>", self._on_tree_space)
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+        self.tree.bind("<<TreeviewOpen>>", lambda e: self._note_open(True))
+        self.tree.bind("<<TreeviewClose>>", lambda e: self._note_open(False))
+        self.tree.bind("<Button-3>", self._context_menu)   # right-click
+        self.tree.bind("<Button-2>", self._context_menu)   # mac right-click
+
+    def _build_plot_pane(self, parent):
+        cfg = self.cfg
+        # row 1: how spectra are combined
+        ctl = ttk.Frame(parent)
+        ctl.pack(side="top", fill="x", padx=6, pady=(4, 0))
+        ttk.Label(ctl, text="Group by").pack(side="left")
+        self.group_var = tk.StringVar(value=cfg.get("group_by", "Element name"))
+        gb = ttk.Combobox(ctl, textvariable=self.group_var, width=14,
+                          state="readonly", values=list(self.GROUP_MODES))
+        gb.pack(side="left", padx=(2, 10))
+        gb.bind("<<ComboboxSelected>>",
+                lambda e: self._schedule_render(reset_page=True))
+
+        ttk.Label(ctl, text="Normalise").pack(side="left")
+        self.norm_var = tk.StringVar(value=cfg.get("norm", "None"))
+        nb = ttk.Combobox(ctl, textvariable=self.norm_var, width=9,
+                          state="readonly", values=self.NORM_MODES)
+        nb.pack(side="left", padx=(2, 10))
+        nb.bind("<<ComboboxSelected>>", lambda e: self._schedule_render())
+
+        ttk.Label(ctl, text="Stack offset").pack(side="left")
+        self.offset_var = tk.DoubleVar(value=float(cfg.get("offset", 0.6)))
+        ttk.Scale(ctl, from_=0.0, to=3.0, variable=self.offset_var,
+                  orient="horizontal", length=110,
+                  command=lambda e: self._schedule_render()).pack(
+            side="left", padx=4)
+
+        self.reverse = tk.BooleanVar(value=False)
+        ttk.Checkbutton(ctl, text="Reverse", variable=self.reverse,
+                        command=self._schedule_render).pack(side="left",
+                                                            padx=6)
+        self.hint = ttk.Label(ctl, style="Hint.TLabel", font=("", 9))
+        self.hint.pack(side="right", padx=8)
+
+        # row 2: how many, and scrolling
+        vw = ttk.Frame(parent)
+        vw.pack(side="top", fill="x", padx=6, pady=(2, 0))
+        ttk.Label(vw, text="Panels per page").pack(side="left")
+        self.panels_var = tk.StringVar(value=cfg.get("panels_per_page", "Auto"))
+        pb = ttk.Combobox(vw, textvariable=self.panels_var, width=5,
+                          state="readonly", values=self.PANEL_CHOICES)
+        pb.pack(side="left", padx=(2, 10))
+        pb.bind("<<ComboboxSelected>>",
+                lambda e: self._schedule_render(reset_page=True))
+
+        ttk.Label(vw, text="Traces per panel").pack(side="left")
+        self.traces_var = tk.StringVar(value=cfg.get("traces_per_panel", "All"))
+        tbx = ttk.Combobox(vw, textvariable=self.traces_var, width=5,
+                           values=self.TRACE_CHOICES)
+        tbx.pack(side="left", padx=(2, 10))
+        tbx.bind("<<ComboboxSelected>>", lambda e: self._on_traces_changed())
+        tbx.bind("<Return>", lambda e: self._on_traces_changed())
+        tbx.bind("<FocusOut>", lambda e: self._on_traces_changed())
+
+        self.prev_btn = ttk.Button(vw, text="◀ Prev", width=7,
                                    command=self.prev_page, state="disabled")
-        self.prev_btn.pack(side="left", padx=(12, 2))
-        self.page_lbl = ttk.Label(tb, text="")
-        self.page_lbl.pack(side="left", padx=2)
-        self.next_btn = ttk.Button(tb, text="Next ▶", width=8,
+        self.prev_btn.pack(side="left")
+        self.next_btn = ttk.Button(vw, text="Next ▶", width=7,
                                    command=self.next_page, state="disabled")
-        self.next_btn.pack(side="left", padx=2)
-        self.count_lbl = ttk.Label(tb, text="No spectra selected")
+        self.next_btn.pack(side="left", padx=(4, 8))
+        self.page_lbl = ttk.Label(vw, text="")
+        self.page_lbl.pack(side="left")
+        self.count_lbl = ttk.Label(vw, text="")
         self.count_lbl.pack(side="right")
 
-        # --- bottom image filmstrip (packed first so it keeps its height) -
-        self.strip_wrap = ttk.LabelFrame(self, text="Images")
-        self.strip_wrap.pack(side="bottom", fill="x", padx=6, pady=(0, 6))
-        self.strip_canvas = tk.Canvas(self.strip_wrap, height=128,
-                                      highlightthickness=0)
-        sx = ttk.Scrollbar(self.strip_wrap, orient="horizontal",
-                           command=self.strip_canvas.xview)
-        self.strip_canvas.configure(xscrollcommand=sx.set)
-        sx.pack(side="bottom", fill="x")
-        self.strip_canvas.pack(side="top", fill="x")
-        self.strip_inner = ttk.Frame(self.strip_canvas)
-        self.strip_canvas.create_window((0, 0), window=self.strip_inner,
-                                        anchor="nw")
-        self.strip_inner.bind(
-            "<Configure>",
-            lambda e: self.strip_canvas.configure(
-                scrollregion=self.strip_canvas.bbox("all")))
-
-        # --- main split: spectra (left) | metadata (right) -------------
-        pane = ttk.PanedWindow(self, orient="horizontal")
-        pane.pack(side="top", fill="both", expand=True, padx=6, pady=4)
-
-        self.plot_frame = ttk.Frame(pane)
-        pane.add(self.plot_frame, weight=4)
-        self.canvas = None
-        self.fig = None
+        self.fig = self.canvas = self.toolbar = None
         if HAVE_MPL:
-            self.fig = Figure(figsize=(6.5, 4.5), dpi=100)
-            self.canvas = FigureCanvasTkAgg(self.fig, master=self.plot_frame)
-            self.canvas.get_tk_widget().pack(expand=True, fill="both")
-            NavigationToolbar2Tk(self.canvas, self.plot_frame)
+            self.fig = Figure(figsize=(6, 3.5), dpi=100)
+            self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
+            self._make_toolbar()
+            # trace-window slider (under the plot)
+            self.trace_bar = ttk.Frame(parent)
+            self.trace_bar.pack(side="bottom", fill="x", padx=6)
+            self.trace_lbl = ttk.Label(self.trace_bar, text="", width=22)
+            self.trace_lbl.pack(side="left")
+            self.trace_var = tk.IntVar(value=0)
+            self.trace_scale = ttk.Scale(
+                self.trace_bar, from_=0, to=1, orient="horizontal",
+                command=self._on_trace_scale, state="disabled")
+            self.trace_scale.pack(side="left", fill="x", expand=True)
+            ttk.Label(self.trace_bar, text="wheel: panels · Shift+wheel: traces",
+                      font=("", 8)).pack(side="right", padx=(8, 0))
+            self.panel_sb = ttk.Scrollbar(parent, orient="vertical",
+                                          command=self._panel_scroll)
+            self.panel_sb.pack(side="right", fill="y")
+            w = self.canvas.get_tk_widget()
+            w.pack(side="top", expand=True, fill="both")
+            self.canvas.mpl_connect("button_press_event", self._on_plot_click)
+            w.bind("<MouseWheel>", self._on_wheel)
+            w.bind("<Button-4>", lambda e: self._on_wheel(e, 120))
+            w.bind("<Button-5>", lambda e: self._on_wheel(e, -120))
+            w.bind("<Enter>", lambda e: w.focus_set())
+            for key, fn in (("<Prior>", self.prev_page), ("<Next>", self.next_page),
+                            ("<Home>", lambda: self._jump(0)),
+                            ("<End>", lambda: self._jump(10 ** 9))):
+                w.bind(key, lambda e, fn=fn: fn())
         else:
-            ttk.Label(self.plot_frame, justify="left", padding=20,
-                      text="matplotlib is not installed.\n\n"
-                           "    pip install matplotlib").pack()
+            ttk.Label(parent, justify="left", padding=20,
+                      text="matplotlib is not installed, so spectra cannot be "
+                           "plotted.\n\n    pip install matplotlib").pack()
 
-        meta_frame = ttk.LabelFrame(pane, text="Metadata")
-        pane.add(meta_frame, weight=1)
-        self.meta = tk.Text(meta_frame, wrap="word", width=30,
-                            font=("TkDefaultFont", 9))
-        ms = ttk.Scrollbar(meta_frame, command=self.meta.yview)
-        self.meta.configure(yscrollcommand=ms.set, state="disabled")
-        ms.pack(side="right", fill="y")
+    def _make_toolbar(self):
+        """(Re)create the matplotlib navigation toolbar at the very bottom of
+        the plot pane, coloured for the current theme."""
+        if self.toolbar is not None:
+            self.toolbar.destroy()
+        self.toolbar = NavigationToolbar2Tk(self.canvas, self.plot_pane,
+                                            pack_toolbar=False)
+        kw = ({"before": self.trace_bar}
+              if getattr(self, "trace_bar", None) else {})
+        self.toolbar.pack(side="bottom", fill="x", **kw)
+        self.themes.recolor_mpl_toolbar(self.toolbar)
+
+    def _build_meta_table(self, parent):
+        self.meta = ttk.Treeview(parent, columns=("field", "value"),
+                                 show="headings", selectmode="extended",
+                                 height=8)
+        self.meta.heading("field", text="Field")
+        self.meta.heading("value", text="Value")
+        self.meta.column("field", width=125, stretch=False, minwidth=60)
+        self.meta.column("value", width=200, stretch=True, minwidth=60)
+        self.meta.tag_configure("head", font=("TkDefaultFont", 9, "bold"))
+        sb = ttk.Scrollbar(parent, command=self.meta.yview)
+        self.meta.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")
         self.meta.pack(side="left", expand=True, fill="both")
-
-    # -- window helpers -------------------------------------------------
-    def hide(self):
-        self.withdraw()
-
-    # -- image filmstrip ------------------------------------------------
-    def set_images(self, images):
-        for w in self.strip_inner.winfo_children():
-            w.destroy()
-        self._thumb_imgs = []
-        if not images:
-            ttk.Label(self.strip_inner, text="  (no images in this file)",
-                      padding=8).pack(side="left")
-            return
-        for n, blob in enumerate(images, 1):
-            cell = ttk.Frame(self.strip_inner)
-            cell.pack(side="left", padx=4, pady=4)
-            thumb = self._make_thumb(blob)
-            if thumb is not None:
-                btn = ttk.Button(cell, image=thumb,
-                                 command=lambda b=blob: self.open_image(b))
-                btn.image = thumb
-                self._thumb_imgs.append(thumb)
-            else:
-                btn = ttk.Button(cell, text="[image\nunavailable]", width=12,
-                                 command=lambda b=blob: self.open_image(b))
-            btn.pack()
-            label = blob.name if len(images) == 1 else f"{blob.name} {n}"
-            ttk.Label(cell, text=label, font=("TkDefaultFont", 8)).pack()
-
-    def _make_thumb(self, blob, size=(150, 100)):
-        if not HAVE_PIL:
-            return None
-        jpeg = self.app.parser.extract_jpeg(blob)
-        if jpeg is None:
-            return None
-        try:
-            import io
-            img = Image.open(io.BytesIO(jpeg))
-            img.thumbnail(size)
-            return ImageTk.PhotoImage(img)
-        except Exception:
-            return None
-
-    def open_image(self, blob):
-        viewer = tk.Toplevel(self)
-        viewer.title(blob.name)
-        positions = self.app.parser.sample_positions()
-        self._cur_blob = blob
-
-        bar = ttk.Frame(viewer)
-        bar.pack(side="top", fill="x", padx=6, pady=4)
-        show_map = tk.BooleanVar(value=False)
-        overlay = tk.BooleanVar(value=False)
-        body = ttk.Frame(viewer)
-        body.pack(side="top", fill="both", expand=True)
-        photo_frame = ttk.Frame(body)
-        photo_frame.pack(side="left", fill="both", expand=True)
-        map_frame = ttk.Frame(body)
-
-        def redraw_photo():
-            for w in photo_frame.winfo_children():
-                w.destroy()
-            if overlay.get() and self.calib and HAVE_MPL and positions:
-                self._render_photo_overlay(photo_frame, blob, positions)
-            else:
-                self._render_plain_photo(photo_frame, blob)
-
-        def toggle_map():
-            if show_map.get() and HAVE_MPL and positions:
-                map_frame.pack(side="left", fill="both", expand=True)
-                self._render_stage_map(map_frame)
-            else:
-                map_frame.pack_forget()
-
-        def toggle_overlay():
-            if overlay.get() and not self.calib:
-                overlay.set(False)
-                if messagebox.askyesno(
-                        "Calibration needed",
-                        "Overlaying markers on the photo needs a one-time "
-                        "camera calibration. Set it now?"):
-                    open_calib()
-                return
-            redraw_photo()
-
-        def open_calib():
-            def saved(c):
-                self.calib = c
-                overlay.set(True)
-                redraw_photo()
-            CalibrationDialog(viewer, saved, current=self.calib)
-
-        ttk.Button(bar, text="Calibrate…", command=open_calib).pack(side="left")
-        ov_cb = ttk.Checkbutton(bar, variable=overlay, command=toggle_overlay,
-                                text="Overlay positions on photo")
-        ov_cb.pack(side="left", padx=8)
-        map_cb = ttk.Checkbutton(bar, variable=show_map, command=toggle_map,
-                                 text="Stage map (beside)")
-        map_cb.pack(side="left")
-        if not positions:
-            for w in (ov_cb, map_cb):
-                w.configure(state="disabled")
-            ttk.Label(bar, text="  (no positions recorded)").pack(side="left")
-        elif not HAVE_MPL:
-            for w in (ov_cb, map_cb):
-                w.configure(state="disabled")
-
-        redraw_photo()
-
-    def _render_plain_photo(self, parent, blob):
-        if not HAVE_PIL:
-            ttk.Label(parent, padding=20,
-                      text="Pillow is not installed.\n\n  pip install pillow"
-                      ).pack()
-            return
-        jpeg = self.app.parser.extract_jpeg(blob)
-        if jpeg is None:
-            ttk.Label(parent, padding=20,
-                      text=f"Image cannot be displayed.\n\n{blob.note}").pack()
-            return
-        try:
-            import io
-            img = Image.open(io.BytesIO(jpeg))
-            img.thumbnail((760, 580))
-            self._view_photo = ImageTk.PhotoImage(img)
-            ttk.Label(parent, image=self._view_photo).pack()
-        except Exception as exc:
-            ttk.Label(parent, padding=20, text=f"Could not render:\n{exc}").pack()
-
-    def _render_photo_overlay(self, parent, blob, positions):
-        """Show the photo with analysis markers placed via the calibration."""
-        jpeg = self.app.parser.extract_jpeg(blob)
-        if jpeg is None or not HAVE_PIL:
-            self._render_plain_photo(parent, blob)
-            return
-        import io
-        img = Image.open(io.BytesIO(jpeg)).convert("RGB")
-        w, h = img.size
-        sel_samples = {r.sample for r in self.regions}
-        fig = Figure(figsize=(7.2, 5.6), dpi=100)
-        ax = fig.add_subplot(111)
-        ax.imshow(img, extent=[0, w, h, 0])   # top-left origin
-        for sample, (x_mm, y_mm) in positions.items():
-            px, py = stage_to_pixel(x_mm, y_mm, w, h, self.calib)
-            hot = sample in sel_samples
-            ax.scatter([px], [py], s=160 if hot else 90,
-                       facecolors="none",
-                       edgecolors="#ff2d2d" if hot else "#19e0ff",
-                       linewidths=2.2 if hot else 1.6, zorder=3)
-            ax.annotate(sample, (px, py), textcoords="offset points",
-                        xytext=(7, -7), fontsize=8,
-                        color="#ff2d2d" if hot else "#19e0ff",
-                        fontweight=("bold" if hot else "normal"))
-        ax.set_xlim(0, w); ax.set_ylim(h, 0)
-        ax.set_axis_off()
-        fig.tight_layout()
-        canvas = FigureCanvasTkAgg(fig, master=parent)
-        canvas.get_tk_widget().pack(fill="both", expand=True)
-        canvas.draw()
-        ttk.Label(parent, font=("", 8), foreground="#555", wraplength=560,
-                  justify="left",
-                  text="Markers placed from your saved calibration. If they're "
-                       "off, use Calibrate… to adjust centre, scale, flip or "
-                       "rotation.").pack(side="bottom", fill="x", padx=4)
-
-    def _render_stage_map(self, parent):
-        for w in parent.winfo_children():
-            w.destroy()
-        positions = self.app.parser.sample_positions()
-        sel_samples = {r.sample for r in self.regions}
-        fig = Figure(figsize=(4.6, 4.4), dpi=100)
-        ax = fig.add_subplot(111)
-        for sample, (x, y) in positions.items():
-            hot = sample in sel_samples
-            ax.scatter([x], [y], s=120 if hot else 70,
-                       c="#d33" if hot else "#3a6ea5",
-                       edgecolors="black", zorder=3)
-            ax.annotate(sample, (x, y), textcoords="offset points",
-                        xytext=(6, 5), fontsize=8,
-                        fontweight=("bold" if hot else "normal"))
-        ax.set_xlabel("Stage X (mm)")
-        ax.set_ylabel("Stage Y (mm)")
-        ax.set_title("Analysis positions on holder")
-        ax.grid(True, ls=":", alpha=0.5)
-        ax.set_aspect("equal", adjustable="datalim")
-        fig.tight_layout()
-        canvas = FigureCanvasTkAgg(fig, master=parent)
-        canvas.get_tk_widget().pack(fill="both", expand=True)
-        canvas.draw()
-        ttk.Label(parent, font=("", 8), foreground="#555", wraplength=300,
-                  justify="left",
-                  text="Schematic stage coordinates (mm). Highlighted points "
-                       "match the current spectrum selection. Not overlaid on "
-                       "the photo: the file has no camera calibration.").pack(
-            side="bottom", fill="x", padx=4, pady=(0, 4))
-
-    # -- selection entry points ----------------------------------------
-    def show_node(self, node: TreeNode):
-        """Single-node entry (kept for compatibility)."""
-        if node is None:
-            return
-        if node.image is not None:
-            self.deiconify()
-            self.open_image(node.image)
-            return
-        self.show_regions(self._regions_under(node))
-
-    def show_regions(self, regions):
-        self.deiconify()
-        self.regions = [r for r in regions if r is not None]
-        self.page = 0
-        self._render()
+        self.meta.bind("<Control-c>", self._copy_meta)
+        self.meta_hint = ttk.Label(
+            parent, style="Muted.TLabel", wraplength=300, justify="left",
+            text="Select a sample or spectrum in the tree to see its "
+                 "acquisition metadata.\n\nTicking a box plots a spectrum; "
+                 "selecting a row shows its details here.")
         self._update_metadata()
 
+    def _copy_meta(self, _e=None):
+        rows = self.meta.selection() or self.meta.get_children()
+        text = "\n".join("\t".join(str(v) for v in self.meta.item(i, "values"))
+                         for i in rows)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
+    def _build_side_tabs(self):
+        self.tab_images = ttk.Frame(self.nb)
+        self.tab_map = ttk.Frame(self.nb)
+        self.nb.add(self.tab_images, text="Images")
+        self.nb.add(self.tab_map, text="Stage map")
+
+        # images: horizontal thumbnail strip on top, viewer below
+        strip = ttk.Frame(self.tab_images)
+        strip.pack(side="top", fill="x")
+        self.thumb_canvas = tk.Canvas(strip, height=98, highlightthickness=0)
+        tsb = ttk.Scrollbar(strip, orient="horizontal",
+                            command=self.thumb_canvas.xview)
+        self.thumb_canvas.configure(xscrollcommand=tsb.set)
+        tsb.pack(side="bottom", fill="x")
+        self.thumb_canvas.pack(side="top", fill="x")
+        self.thumb_inner = ttk.Frame(self.thumb_canvas)
+        self.thumb_canvas.create_window((0, 0), window=self.thumb_inner,
+                                        anchor="nw")
+        self.thumb_inner.bind(
+            "<Configure>",
+            lambda e: self.thumb_canvas.configure(
+                scrollregion=self.thumb_canvas.bbox("all")))
+
+        bar = ttk.Frame(self.tab_images)
+        bar.pack(side="top", fill="x", padx=6, pady=2)
+        ttk.Button(bar, text="Calibrate…", command=self._toggle_calib).pack(
+            side="left")
+        self.overlay_var = tk.BooleanVar(value=False)
+        self.overlay_cb = ttk.Checkbutton(
+            bar, variable=self.overlay_var, command=self._toggle_overlay,
+            text="Overlay positions")
+        self.overlay_cb.pack(side="left", padx=8)
+        self.calib_holder = ttk.Frame(self.tab_images)
+        self.viewer = ttk.Frame(self.tab_images)
+        self.viewer.pack(side="top", fill="both", expand=True)
+        self._refresh_images()
+
+        # stage map (rendered lazily when its tab is shown)
+        self.map_frame = ttk.Frame(self.tab_map)
+        self.map_frame.pack(fill="both", expand=True)
+        self.nb.bind("<<NotebookTabChanged>>", lambda e: self._refresh_side())
+
+    # -- file handling --------------------------------------------------
     @staticmethod
-    def _regions_under(node: TreeNode):
+    def _open_filetypes():
+        fmts = supported_patterns()
+        allpats = " ".join(p for _n, pats in fmts for p in pats)
+        return ([("All supported spectra files", allpats)]
+                + [(n, " ".join(p)) for n, p in fmts]
+                + [("All files", "*.*")])
+
+    def open_files(self):
+        paths = filedialog.askopenfilenames(filetypes=self._open_filetypes())
+        self._add_files(paths)
+
+    def open_folder(self):
+        folder = filedialog.askdirectory(title="Open all spectra files in folder")
+        if not folder:
+            return
+        paths = []
+        for name in sorted(os.listdir(folder)):
+            p = os.path.join(folder, name)
+            if os.path.isfile(p):
+                try:
+                    reader_for(p)
+                except (UnsupportedFormat, OSError):
+                    continue
+                paths.append(p)
+        if not paths:
+            messagebox.showinfo("Open folder",
+                                "No recognised spectra files in that folder.")
+            return
+        self._add_files(paths)
+
+    def _add_files(self, paths):
+        """Load several files, reporting problems once at the end."""
+        problems = []
+        for path in paths:
+            problems += self._add_file(path)
+        if problems:
+            shown = problems[:12]
+            more = f"\n… and {len(problems) - 12} more" if len(problems) > 12 else ""
+            messagebox.showwarning("Some files need attention",
+                                   "\n\n".join(shown) + more)
+
+    def _add_file(self, path):
+        """Load one file into the tree. Returns a list of problem strings."""
+        name = os.path.basename(path)
+        if any(p.path == path for p in self.docs):
+            return [f"{name}: already loaded."]
+        try:
+            parser = load_file(path)
+        except UnsupportedFormat as exc:
+            return [str(exc)]
+        except Exception as exc:
+            return [f"{name}: could not be read ({exc})"]
+        self.docs.append(parser)
+        for r in parser.regions:
+            self.region_parser[id(r)] = parser
+        self._populate_tree()
+        self._refresh_images()
+        self._schedule_render(reset_page=True)
+        problems = []
+        if parser.corruption["corrupted"]:
+            problems.append(f"{name}: {parser.corruption['message']}")
+        problems += [f"{name}: {w}" for w in parser.warnings]
+        return problems
+
+    def _remove_doc(self, parser):
+        for r in parser.regions:
+            self.checked.discard(id(r))
+            self.region_parser.pop(id(r), None)
+        self.docs.remove(parser)
+        self.sel_regions = []
+        if self._cur_image and self._cur_image[0] is parser:
+            self._cur_image = None
+        self._populate_tree()
+        self._refresh_images()
+        self._update_metadata()
+        self._schedule_render(reset_page=True)
+
+    def close_all(self):
+        for p in list(self.docs):
+            self._remove_doc(p)
+
+    # -- tree -----------------------------------------------------------
+    def _populate_tree(self):
+        self.tree.delete(*self.tree.get_children())
+        self.node_map.clear()
+        self.leaf_ids.clear()
+        self.box_state.clear()
+        flt = self.filter_var.get().strip().lower()
+
+        def matches(node):
+            if not flt:
+                return True
+            hay = (node.label + " " + " ".join(str(c) for c in node.cols)).lower()
+            return flt in hay or any(matches(c) for c in node.children)
+
+        def add(parent, parser, node, depth, n_samples):
+            if not matches(node):
+                return
+            leaves = [r for r in regions_under(node) if r.decodable and r.counts]
+            ids = frozenset(id(r) for r in leaves)
+            opened = True if flt else self._open.get(
+                id(node), depth == 0 or (depth == 1 and n_samples <= 3))
+            cols = tuple(node.cols) if node.cols else ("", "", "", "")
+            state = tick_state(ids, self.checked)
+            iid = self.tree.insert(
+                parent, "end", text=" " + node.label, open=opened, values=cols,
+                image=self.box_imgs[state] if ids else self.blank_img)
+            self.node_map[iid] = (parser, node)
+            if ids:
+                self.leaf_ids[iid] = ids
+                self.box_state[iid] = state
+            for c in node.children:
+                add(iid, parser, c, depth + 1, n_samples)
+
+        for p in self.docs:
+            if p.tree:
+                add("", p, p.tree, 0, len(p.tree.children))
+        show_etch = any(p.depth_profile.get("is_profile") for p in self.docs)
+        self.tree.configure(displaycolumns=(
+            ("detail", "pts", "pe", "etch") if show_etch
+            else ("detail", "pts", "pe")))
+
+    def _note_open(self, opened):
+        iid = self.tree.focus()
+        item = self.node_map.get(iid)
+        if item:
+            self._open[id(item[1])] = opened
+
+    def _expand(self, opened):
+        for iid, (_p, node) in self.node_map.items():
+            self.tree.item(iid, open=opened)
+            self._open[id(node)] = opened
+
+    def _refresh_boxes(self):
+        for iid, ids in self.leaf_ids.items():
+            st = tick_state(ids, self.checked)
+            if self.box_state.get(iid) != st:
+                self.box_state[iid] = st
+                self.tree.item(iid, image=self.box_imgs[st])
+
+    def _toggle(self, iids, force=None):
+        ids = set()
+        for i in iids:
+            ids |= self.leaf_ids.get(i, set())
+        if not ids:
+            return
+        if force is None:
+            force = not ids <= self.checked
+        if force:
+            self.checked |= ids
+        else:
+            self.checked -= ids
+        self._refresh_boxes()
+        self._schedule_render()
+
+    def untick_all(self):
+        self.checked.clear()
+        self._refresh_boxes()
+        self._schedule_render(reset_page=True)
+
+    def _on_tree_click(self, event):
+        iid = self.tree.identify_row(event.y)
+        if not iid or iid not in self.leaf_ids:
+            return
+        try:
+            elem = self.tree.identify_element(event.x, event.y)
+        except tk.TclError:
+            elem = ""
+        if elem != "image":
+            return
+        self._toggle([iid])
+        return "break"          # tick without changing the row selection
+
+    def _on_tree_space(self, _event):
+        sel = list(self.tree.selection())
+        if sel:
+            self._toggle(sel)
+        return "break"
+
+    def _regions_of(self, iids):
+        regs, seen = [], set()
+        for iid in iids:
+            item = self.node_map.get(iid)
+            if item is None:
+                continue
+            for r in regions_under(item[1]):
+                if id(r) not in seen:
+                    seen.add(id(r))
+                    regs.append(r)
+        return regs
+
+    def _on_select(self, _event=None):
+        sel = self.tree.selection()
+        self.sel_regions = self._regions_of(sel)
+        images = [(p, n.image) for p, n in
+                  (self.node_map[i] for i in sel if i in self.node_map)
+                  if n.image is not None]
+        if len(images) == 1 and not self.sel_regions:
+            self._show_image(*images[0])
+        self._update_metadata()
+        self._refresh_side()
+
+    def _context_menu(self, event):
+        row = self.tree.identify_row(event.y)
+        if not row:
+            return
+        if row not in self.tree.selection():
+            self.tree.selection_set(row)
+        sel = list(self.tree.selection())
+        regions = [r for r in self._regions_of(sel) if r.decodable and r.counts]
+        n = len(regions)
+        menu = self._menu(self.tree)
+        if n:
+            menu.add_command(label=f"Tick ({n})",
+                             command=lambda: self._toggle(sel, True))
+            menu.add_command(label=f"Untick ({n})",
+                             command=lambda: self._toggle(sel, False))
+            menu.add_separator()
+            exp = self._menu(menu)
+            exp.add_command(label="CSV…",
+                            command=lambda: self._write_export(regions, "csv"))
+            exp.add_command(label="VAMAS…",
+                            command=lambda: self._write_export(regions, "vamas"))
+            menu.add_cascade(label=f"Export from here down ({n})", menu=exp)
+        else:
+            menu.add_command(label="(no decodable spectra here)",
+                             state="disabled")
+        item = self.node_map.get(row)
+        if item and item[1] is item[0].tree:
+            menu.add_separator()
+            menu.add_command(label="Remove this file",
+                             command=lambda p=item[0]: self._remove_doc(p))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    # -- plotting -------------------------------------------------------
+    def _ticked_regions(self):
         out = []
-        if node.region is not None:
-            out.append(node.region)
-        for c in node.children:
-            out += DisplayWindow._regions_under(c)
+        for p in self.docs:
+            if p.tree:
+                out += [r for r in regions_under(p.tree)
+                        if id(r) in self.checked and r.decodable and r.counts]
         return out
 
-    # -- grid layout ----------------------------------------------------
-    @staticmethod
-    def _grid_dims(n):
-        import math
-        cols = min(4, max(1, math.ceil(math.sqrt(n))))
-        rows = min(4, math.ceil(n / cols))
-        return rows, cols
+    def _groups(self):
+        groups = group_regions(self._ticked_regions(),
+                               self.GROUP_MODES[self.group_var.get()])
+        if self.reverse.get():
+            groups = [(k, rs[::-1]) for k, rs in groups]
+        return groups
 
-    def _pages(self):
-        n = len(self.regions)
-        if n == 0:
-            return 0
-        return (n + self.MAX_PER_PAGE - 1) // self.MAX_PER_PAGE
+    # -- view window: panels per page / traces per panel ----------------
+    def _panels_per_page(self, n_groups):
+        try:
+            n = max(1, min(16, int(self.panels_var.get())))
+        except ValueError:                       # "Auto"
+            n = min(16, max(1, n_groups))
+        return max(1, min(n, max(1, n_groups)))
 
-    def _render(self):
-        if not HAVE_MPL:
-            return
-        self.fig.clear()
-        n = len(self.regions)
-        npages = self._pages()
-        self.count_lbl.config(
-            text=("No spectra selected" if n == 0
-                  else f"{n} spectrum selected" if n == 1
-                  else f"{n} spectra selected"))
-        self.save_btn.config(state=("normal" if n else "disabled"))
-        for b in (self.prev_btn, self.next_btn):
-            b.config(state=("normal" if npages > 1 else "disabled"))
-        self.page_lbl.config(text=(f"Page {self.page + 1}/{npages}"
-                                   if npages > 1 else ""))
-        if n == 0:
-            self.canvas.draw()
-            return
+    def _traces_limit(self):
+        try:
+            n = int(str(self.traces_var.get()).strip())
+        except ValueError:
+            return None                          # "All"
+        return n if n > 0 else None
 
-        start = self.page * self.MAX_PER_PAGE
-        chunk = self.regions[start:start + self.MAX_PER_PAGE]
-        rows, cols = self._grid_dims(len(chunk))
-        for i, r in enumerate(chunk):
-            ax = self.fig.add_subplot(rows, cols, i + 1)
-            self._plot_into(ax, r, compact=(len(chunk) > 1))
-        self.fig.tight_layout()
-        self.canvas.draw()
+    def _on_traces_changed(self):
+        if self._traces_limit() is None:
+            self.traces_var.set("All")
+        self._schedule_render()
 
-    @staticmethod
-    def _plot_into(ax, r, compact=False):
-        if r.decodable and r.counts:
-            ax.plot(r.energy, r.counts, lw=0.8)
-            title = f"{r.sample} — {r.name}" if r.sample else r.name
-            ax.set_title(title, fontsize=(8 if compact else 11))
-            if not compact:
-                ax.set_xlabel(f"{r.energy_label} ({r.energy_units})")
-                ax.set_ylabel(f"{r.count_label} ({r.count_units})")
-            else:
-                ax.tick_params(labelsize=6)
-            if r.energy_label.lower().startswith("binding"):
-                ax.invert_xaxis()
-        else:
-            ax.text(0.5, 0.5, f"{r.name}\n(no data)", ha="center",
-                    va="center", transform=ax.transAxes,
-                    fontsize=(8 if compact else 10))
-            ax.set_axis_off()
+    def _schedule_render(self, reset_page=False):
+        if reset_page:
+            self.panel_start = 0
+            self.trace_start = 0
+        if self._render_job is None:
+            self._render_job = self.root.after_idle(self._render)
+
+    def _cols(self, n_groups):
+        return _grid_dims(self._panels_per_page(n_groups))[1]
+
+    def _jump(self, idx):
+        self.panel_start = max(0, idx)           # clamped (and row-aligned)
+        self._schedule_render()
 
     def prev_page(self):
-        if self.page > 0:
-            self.page -= 1
-            self._render()
+        n = len(self._groups())
+        self._jump(self.panel_start - self._panels_per_page(n))
 
     def next_page(self):
-        if self.page < self._pages() - 1:
-            self.page += 1
-            self._render()
+        n = len(self._groups())
+        self._jump(self.panel_start + self._panels_per_page(n))
 
-    # -- metadata panel -------------------------------------------------
-    def _update_metadata(self):
-        self.meta.config(state="normal")
-        self.meta.delete("1.0", "end")
-        if not self.regions:
-            self.meta.insert("end", "Select one or more spectra in the "
-                                    "browser to see acquisition metadata.")
-            self.meta.config(state="disabled")
+    def _panel_scroll(self, *args):
+        n = len(self._groups())
+        cols = self._cols(n)
+        if args[0] == "moveto":
+            self.panel_start = int(float(args[1]) * n)
+        elif args[0] == "scroll":
+            unit = cols if args[2] == "units" else self._panels_per_page(n)
+            self.panel_start += int(args[1]) * unit
+        self._schedule_render()
+
+    def _on_wheel(self, event, delta=None):
+        d = delta if delta is not None else event.delta
+        step = -1 if d > 0 else 1
+        if event.state & 0x0001:                 # Shift: slide the trace window
+            limit = self._traces_limit()
+            if limit:
+                self.trace_start += step * max(1, limit // 5)
+                self._schedule_render()
+        else:                                    # wheel: move by a row of panels
+            self.panel_start += step * self._cols(len(self._groups()))
+            self._schedule_render()
+        return "break"
+
+    def _on_trace_scale(self, val):
+        if self._scale_guard:
             return
-        parser = self.app.parser
-        samples = sorted({r.sample for r in self.regions})
-        if len(self.regions) == 1 or len(samples) == 1:
-            base = parser.region_metadata(self.regions[0])
-            order = ["Sample", "Date acquired", "Etch level", "Etch time (s)",
-                     "Instrument", "Acquisition computer", "X-ray source",
-                     "Anode", "Photon energy (eV)", "Source power (W)",
-                     "Charge neutraliser", "Ion gun / sputtering"]
-            for k in order:
-                if base.get(k):
-                    self.meta.insert("end", f"{k}:\n  {base[k]}\n\n")
-            if len(self.regions) == 1:
-                r = self.regions[0]
-                self.meta.insert("end", "— Region —\n")
-                for k in ["Region", "Pass energy (eV)", "BE start (eV)",
-                          "BE end (eV)", "Step (eV)", "Dwell (s)", "Points",
-                          "Quality"]:
-                    if base.get(k):
-                        self.meta.insert("end", f"{k}: {base[k]}\n")
-                if r.note:
-                    self.meta.insert("end", f"\n{r.note}\n")
-            else:
-                self.meta.insert("end", f"— {len(self.regions)} regions —\n")
-                for r in self.regions:
-                    pe = (f"  PE {r.pass_energy:g} eV" if r.pass_energy else "")
-                    self.meta.insert("end", f"• {r.name}{pe}\n")
-        else:
-            self.meta.insert("end", f"{len(self.regions)} spectra across "
-                                    f"{len(samples)} samples:\n\n")
-            for s in samples:
-                rs = [r for r in self.regions if r.sample == s]
-                self.meta.insert("end", f"{s} ({len(rs)}):\n")
-                for r in rs:
-                    self.meta.insert("end", f"  • {r.name}\n")
-                self.meta.insert("end", "\n")
-        self.meta.config(state="disabled")
+        v = int(round(float(val)))
+        if v != self.trace_start:
+            self.trace_start = v
+            self._schedule_render()
 
-    # -- save / print to PDF -------------------------------------------
+    def _update_trace_controls(self, limit, longest):
+        max_start = max(0, longest - limit) if limit else 0
+        self.trace_start = max(0, min(self.trace_start, max_start))
+        if not HAVE_MPL:
+            return
+        self._scale_guard = True
+        try:
+            self.trace_scale.configure(to=max(1, max_start))
+            self.trace_scale.set(self.trace_start)
+            self.trace_scale.state(["!disabled"] if max_start > 0
+                                   else ["disabled"])
+        finally:
+            self._scale_guard = False
+        if limit and longest > limit:
+            a = self.trace_start + 1
+            self.trace_lbl.config(
+                text=f"Traces {a}–{min(a + limit - 1, longest)} of {longest}")
+        else:
+            self.trace_lbl.config(text="All traces shown")
+
+    def _render(self):
+        self._render_job = None
+        groups = self._groups()
+        n_groups = len(groups)
+        n_spec = sum(len(rs) for _k, rs in groups)
+        npp = self._panels_per_page(n_groups)
+        cols = _grid_dims(npp)[1]
+        max_start = max(0, n_groups - npp)
+        self.panel_start = max(0, min(self.panel_start, max_start))
+        self.panel_start -= self.panel_start % cols       # row-aligned
+        chunk = groups[self.panel_start:self.panel_start + npp]
+        limit = self._traces_limit()
+        self._update_trace_controls(
+            limit, max((len(rs) for _k, rs in groups), default=0))
+        self.count_lbl.config(
+            text="Nothing ticked" if not n_spec else
+            f"{n_spec} spectr{'um' if n_spec == 1 else 'a'} in "
+            f"{n_groups} panel{'' if n_groups == 1 else 's'}")
+        self.prev_btn.config(
+            state="normal" if self.panel_start > 0 else "disabled")
+        self.next_btn.config(
+            state="normal" if self.panel_start + npp < n_groups else "disabled")
+        shown = len(chunk)
+        self.page_lbl.config(
+            text=(f"Panels {self.panel_start + 1}–{self.panel_start + shown} "
+                  f"of {n_groups}") if n_groups > npp else "")
+        self.hint.config(
+            text="Click a panel to set the normalisation energy."
+            if self.norm_var.get() == "At cursor" and n_spec else "")
+        if HAVE_MPL:
+            self.fig.clear()
+            self._axmap = {}
+            if chunk:
+                self._axmap = self._draw_page(self.fig, chunk, limit,
+                                              self.trace_start)
+            else:
+                self.fig.text(0.5, 0.5,
+                              "Tick spectra in the tree to plot them here.\n"
+                              "Spectra with the same element name are "
+                              "stacked on one panel.",
+                              ha="center", va="center",
+                              color=self.palette["muted"])
+            self.fig.set_facecolor(self.palette["plot_bg"])
+            self.canvas.draw()
+            if n_groups:
+                self.panel_sb.set(self.panel_start / n_groups,
+                                  (self.panel_start + shown) / n_groups)
+            else:
+                self.panel_sb.set(0, 1)
+        self._update_status()
+        self._refresh_side()
+
+    def _draw_page(self, fig, chunk, limit=None, start=0):
+        """Draw one page of panels onto fig; returns {axes: group key}.
+        ``limit``/``start`` show a window of long stacks."""
+        rows, cols = _grid_dims(len(chunk))
+        compact = len(chunk) > 1
+        with_source = len(self.docs) > 1
+        norm = self.norm_var.get()
+        offset = float(self.offset_var.get())
+        axmap = {}
+        for i, (key, rs) in enumerate(chunk):
+            ax = fig.add_subplot(rows, cols, i + 1)
+            vis, span = rs, ""
+            if limit and len(rs) > limit:
+                s = min(start, len(rs) - limit)
+                vis = rs[s:s + limit]
+                span = f" ({s + 1}–{s + limit} of {len(rs)})"
+            cur = None
+            if norm == "At cursor":
+                cur = self.cursors.get(key)
+                if cur is None:
+                    e = vis[0].energy
+                    cur = self.cursors[key] = (e[0] + e[-1]) / 2.0
+            r = vis[0]
+            if len(rs) == 1:
+                title = f"{r.sample} — {r.name}" if r.sample else r.name
+            else:
+                title = f"{key} — {len(vis)} spectra{span}"
+            draw_stack(ax, vis, offset, norm, cur, with_source, title, compact)
+            axmap[ax] = key
+        fig.tight_layout()
+        return axmap
+
+    def _on_plot_click(self, event):
+        if (self.norm_var.get() != "At cursor" or event.inaxes is None
+                or event.xdata is None):
+            return
+        if str(getattr(self.toolbar, "mode", "")):
+            return              # zoom / pan tool is active
+        key = self._axmap.get(event.inaxes)
+        if key is not None:
+            self.cursors[key] = float(event.xdata)
+            self._schedule_render()
+
+    # -- PDF output: shared builder, save, and in-app preview --------------
+    def _pdf_per_page(self):
+        try:
+            return max(1, min(16, int(self.panels_var.get())))
+        except ValueError:
+            return 6
+
+    def build_spectra_pdf(self, path, per_page, landscape=True,
+                          windowed=False):
+        """Write every panel to a PDF (white 'paper' style, any theme)."""
+        from matplotlib.backends.backend_pdf import PdfPages
+        groups = self._groups()
+        limit = self._traces_limit() if windowed else None
+        size = (11.7, 8.3) if landscape else (8.3, 11.7)
+        with matplotlib.rc_context(mpl_rc(PRINT)), PdfPages(path) as pdf:
+            for p in range((len(groups) + per_page - 1) // per_page):
+                fig = Figure(figsize=size, dpi=150)
+                self._draw_page(fig, groups[p * per_page:(p + 1) * per_page],
+                                limit, self.trace_start)
+                pdf.savefig(fig)
+        return len(groups)
+
     def save_pdf(self):
-        if not self.regions:
+        if not self._groups():
+            messagebox.showinfo("Save PDF", "Tick some spectra first.")
             return
         if not HAVE_MPL:
             messagebox.showinfo("PDF", "matplotlib is required to make a PDF.")
@@ -1734,28 +1378,623 @@ class DisplayWindow(tk.Toplevel):
         if not path:
             return
         try:
-            from matplotlib.backends.backend_pdf import PdfPages
-            from matplotlib.figure import Figure as MplFigure
-            with PdfPages(path) as pdf:
-                per = self.MAX_PER_PAGE
-                for p in range((len(self.regions) + per - 1) // per):
-                    chunk = self.regions[p * per:(p + 1) * per]
-                    rows, cols = self._grid_dims(len(chunk))
-                    fig = MplFigure(figsize=(11.7, 8.3), dpi=150)
-                    for i, r in enumerate(chunk):
-                        ax = fig.add_subplot(rows, cols, i + 1)
-                        self._plot_into(ax, r, compact=(len(chunk) > 1))
-                    fig.tight_layout()
-                    pdf.savefig(fig)
+            self.build_spectra_pdf(path, self._pdf_per_page())
         except Exception as exc:
             messagebox.showerror("PDF failed", str(exc))
             return
-        messagebox.showinfo("Saved",
-                            f"Wrote {len(self.regions)} spectrum(a) to:\n{path}")
+        messagebox.showinfo("Saved", f"Plot saved to\n{path}")
+
+    def _pdf_tmp(self, name):
+        if self._pdf_dir is None or not os.path.isdir(self._pdf_dir):
+            self._pdf_dir = tempfile.mkdtemp(prefix="escape_explorer_pdf_")
+        return os.path.join(self._pdf_dir, name)
+
+    def _show_preview(self):
+        self.plot_pane.grid_remove()
+        self.preview.grid()
+        self.themes.recolor_tk(self.center)
+        self.preview.update_idletasks()
+        self.preview.refresh()          # re-fit now that the canvas has a size
+
+    def close_preview(self):
+        self.preview.grid_remove()
+        self.plot_pane.grid()
+        self.preview.close_document()
+
+    def preview_spectra(self):
+        if not HAVE_MPL:
+            messagebox.showinfo("PDF", "matplotlib is required to make a PDF.")
+            return
+        if not self._groups():
+            messagebox.showinfo("Preview PDF", "Tick some spectra first.")
+            return
+        pv = self.preview
+        pv.clear_options()
+        self._pv_panels = tk.StringVar(value=str(self._pdf_per_page()))
+        self._pv_orient = tk.StringVar(value="Landscape")
+        self._pv_window = tk.BooleanVar(value=False)
+        ttk.Label(pv.options, text="Panels per page").pack(side="left")
+        cb = ttk.Combobox(pv.options, textvariable=self._pv_panels, width=4,
+                          state="readonly",
+                          values=["1", "2", "4", "6", "9", "12", "16"])
+        cb.pack(side="left", padx=(2, 10))
+        cb.bind("<<ComboboxSelected>>", lambda e: self._regen_spectra_preview())
+        ttk.Label(pv.options, text="Page").pack(side="left")
+        ob = ttk.Combobox(pv.options, textvariable=self._pv_orient, width=9,
+                          state="readonly", values=["Landscape", "Portrait"])
+        ob.pack(side="left", padx=(2, 10))
+        ob.bind("<<ComboboxSelected>>", lambda e: self._regen_spectra_preview())
+        if self._traces_limit():
+            ttk.Checkbutton(
+                pv.options, variable=self._pv_window,
+                text="Only the traces currently in view",
+                command=self._regen_spectra_preview).pack(side="left")
+        self.themes.recolor_tk(pv)
+        if not self._regen_spectra_preview():
+            return
+        self._show_preview()
+
+    def _regen_spectra_preview(self):
+        path = self._pdf_tmp("spectra.pdf")
+        try:
+            self.build_spectra_pdf(
+                path, int(self._pv_panels.get()),
+                self._pv_orient.get() == "Landscape", self._pv_window.get())
+        except Exception as exc:
+            messagebox.showerror("PDF failed", str(exc))
+            return False
+        return self._open_preview(path, "Spectra PDF", "spectra.pdf",
+                                  keep_page=True)
+
+    def preview_metadata(self):
+        parser = self._metadata_doc()
+        if parser is None:
+            return
+        path = self._pdf_tmp("metadata.pdf")
+        try:
+            export_metadata_pdf(parser, path)
+        except Exception as exc:
+            messagebox.showerror("PDF failed", str(exc))
+            return
+        self.preview.clear_options()
+        ttk.Label(self.preview.options, style="Hint.TLabel",
+                  text=f"Metadata report for {os.path.basename(parser.path or '')}"
+                  ).pack(side="left")
+        if self._open_preview(path, "Metadata PDF", "metadata.pdf"):
+            self._show_preview()
+
+    def _open_preview(self, path, title, save_name, keep_page=False):
+        """Show ``path`` in the preview, or in the system viewer if PyMuPDF
+        is missing. Returns True when shown in-app."""
+        if not HAVE_PDF:
+            messagebox.showinfo(
+                "PDF preview",
+                "In-app preview needs the 'pymupdf' package "
+                "(pip install pymupdf). Opening the PDF in your default "
+                "viewer instead.")
+            try:
+                open_external(path)
+            except Exception as exc:
+                messagebox.showerror("Could not open", str(exc))
+            return False
+        try:
+            self.preview.show(path, title, save_name, keep_page=keep_page)
+        except Exception as exc:
+            messagebox.showerror("Preview failed", str(exc))
+            return False
+        return True
+
+    def _update_status(self):
+        if not self.docs:
+            self.status.config(text="Open a spectra file to begin.")
+            return
+        nreg = sum(len(p.regions) for p in self.docs)
+        nimg = sum(len(p.images) for p in self.docs)
+        self.status.config(
+            text=f"{len(self.docs)} file(s) — {nreg} regions, {nimg} image(s) "
+                 f"— {len(self.checked)} ticked")
+
+    # -- side panels ----------------------------------------------------
+    def _current_tab(self):
+        try:
+            return self.nb.select()
+        except tk.TclError:
+            return ""
+
+    def _refresh_side(self):
+        tab = self._current_tab()
+        if tab == str(self.tab_map):
+            self._render_stage_map()
+        elif tab == str(self.tab_images) and self.overlay_var.get():
+            self._redraw_viewer()
+
+    def _highlight_samples(self, parser):
+        regs = self.sel_regions + self._ticked_regions()
+        return {r.sample for r in regs if self.region_parser.get(id(r)) is parser}
+
+    def _update_metadata(self):
+        t = self.meta
+        t.delete(*t.get_children())
+        regs = self.sel_regions
+        if not regs:
+            self.meta_hint.place(relx=0.02, rely=0.02, relwidth=0.9)
+            return
+        self.meta_hint.place_forget()
+
+        def head(txt):
+            t.insert("", "end", values=(txt, ""), tags=("head",))
+
+        def row(k, v):
+            t.insert("", "end", values=(k, v))
+
+        parser = self.region_parser.get(id(regs[0]))
+        samples = sorted({(r.source, r.sample) for r in regs})
+        if len(regs) == 1 or len(samples) == 1:
+            base = parser.region_metadata(regs[0])
+            order = ["Sample", "Source file", "File format", "Date acquired",
+                     "Etch level", "Etch time (s)", "Instrument", "Operator",
+                     "Acquisition computer", "X-ray source", "Anode",
+                     "Photon energy (eV)", "Source power (W)",
+                     "Charge neutraliser", "Ion gun / sputtering"]
+            for k in order:
+                if base.get(k):
+                    row(k, base[k])
+            if len(regs) == 1:
+                r = regs[0]
+                head("Region")
+                for k in ["Region", "Pass energy (eV)", "Lens mode", "Aperture",
+                          "BE start (eV)", "BE end (eV)", "Step (eV)",
+                          "Dwell (s)", "Points", "Quality"]:
+                    if base.get(k):
+                        row(k, base[k])
+                if r.note:
+                    row("Note", r.note)
+            else:
+                head(f"{len(regs)} regions")
+                for r in regs[:60]:
+                    pe = f"PE {r.pass_energy:g} eV" if r.pass_energy else ""
+                    row(r.name, pe)
+                if len(regs) > 60:
+                    row("…", f"and {len(regs) - 60} more")
+        else:
+            head(f"{len(regs)} spectra, {len(samples)} samples")
+            for src, s in samples[:80]:
+                rs = [r for r in regs if (r.source, r.sample) == (src, s)]
+                label = s or src or "(unnamed)"
+                if len(self.docs) > 1 and s:
+                    label = f"{s} — {src}"
+                row(label, ", ".join(dict.fromkeys(r.name for r in rs)))
+            if len(samples) > 80:
+                row("…", f"and {len(samples) - 80} more samples")
+
+    # -- images tab -----------------------------------------------------
+    def _refresh_images(self):
+        for w in self.thumb_inner.winfo_children():
+            w.destroy()
+        self._thumb_imgs = []
+        items = [(p, b) for p in self.docs for b in p.images]
+        if not items:
+            ttk.Label(self.thumb_inner, text="(no images loaded)",
+                      padding=8).pack()
+            self._cur_image = None
+            self._redraw_viewer()
+            return
+        multi = len(self.docs) > 1
+        for n, (p, blob) in enumerate(items, 1):
+            cell = ttk.Frame(self.thumb_inner)
+            cell.pack(side="top", padx=4, pady=4)
+            thumb = self._make_thumb(p, blob)
+            cmd = lambda p=p, b=blob: self._show_image(p, b)
+            if thumb is not None:
+                btn = ttk.Button(cell, image=thumb, command=cmd)
+                btn.image = thumb
+                self._thumb_imgs.append(thumb)
+            else:
+                btn = ttk.Button(cell, text="[image\nunavailable]", width=12,
+                                 command=cmd)
+            btn.pack()
+            label = blob.name if not multi else \
+                f"{blob.name} — {os.path.basename(p.path or '')}"
+            ttk.Label(cell, text=label, font=("TkDefaultFont", 8),
+                      wraplength=170).pack()
+        if self._cur_image is None:
+            self._redraw_viewer()
+
+    def _make_thumb(self, parser, blob, size=(150, 100)):
+        if not HAVE_PIL:
+            return None
+        jpeg = parser.extract_jpeg(blob)
+        if jpeg is None:
+            return None
+        try:
+            import io
+            img = Image.open(io.BytesIO(jpeg))
+            img.thumbnail(size)
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
+
+    def _show_image(self, parser, blob):
+        self._cur_image = (parser, blob)
+        self.nb.select(self.tab_images)
+        self._redraw_viewer()
+
+    def _redraw_viewer(self):
+        for w in self.viewer.winfo_children():
+            w.destroy()
+        if not self._cur_image:
+            self.overlay_cb.config(state="disabled")
+            ttk.Label(self.viewer, padding=20,
+                      text="Click an image on the left, or select an image "
+                           "node in the tree.").pack()
+            return
+        parser, blob = self._cur_image
+        positions = parser.sample_positions()
+        self.overlay_cb.config(
+            state="normal" if positions and HAVE_MPL else "disabled")
+        if (self.overlay_var.get() and self.calib and HAVE_MPL and positions):
+            self._render_photo_overlay(parser, blob, positions)
+        else:
+            self._render_plain_photo(parser, blob)
+
+    def _render_plain_photo(self, parser, blob):
+        parent = self.viewer
+        if not HAVE_PIL:
+            ttk.Label(parent, padding=20,
+                      text="Pillow is not installed.\n\n  pip install pillow"
+                      ).pack()
+            return
+        jpeg = parser.extract_jpeg(blob)
+        if jpeg is None:
+            ttk.Label(parent, padding=20,
+                      text=f"Image cannot be displayed.\n\n{blob.note}").pack()
+            return
+        try:
+            import io
+            img = Image.open(io.BytesIO(jpeg))
+            w = max(300, parent.winfo_width() - 10)
+            h = max(200, parent.winfo_height() - 10)
+            img.thumbnail((w, h))
+            self._view_photo = ImageTk.PhotoImage(img)
+            ttk.Label(parent, image=self._view_photo).pack()
+        except Exception as exc:
+            ttk.Label(parent, padding=20, text=f"Could not render:\n{exc}").pack()
+
+    def _render_photo_overlay(self, parser, blob, positions):
+        """Photo with analysis markers placed via the saved calibration."""
+        parent = self.viewer
+        jpeg = parser.extract_jpeg(blob)
+        if jpeg is None or not HAVE_PIL:
+            self._render_plain_photo(parser, blob)
+            return
+        import io
+        img = Image.open(io.BytesIO(jpeg)).convert("RGB")
+        w, h = img.size
+        hot_samples = self._highlight_samples(parser)
+        fig = Figure(figsize=(7.2, 4.6), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.imshow(img, extent=[0, w, h, 0])   # top-left origin
+        for sample, (x_mm, y_mm) in positions.items():
+            px, py = stage_to_pixel(x_mm, y_mm, w, h, self.calib)
+            hot = sample in hot_samples
+            ax.scatter([px], [py], s=160 if hot else 90, facecolors="none",
+                       edgecolors="#ff2d2d" if hot else "#19e0ff",
+                       linewidths=2.2 if hot else 1.6, zorder=3)
+            ax.annotate(sample, (px, py), textcoords="offset points",
+                        xytext=(7, -7), fontsize=8,
+                        color="#ff2d2d" if hot else "#19e0ff",
+                        fontweight="bold" if hot else "normal")
+        ax.set_xlim(0, w)
+        ax.set_ylim(h, 0)
+        ax.set_axis_off()
+        fig.tight_layout()
+        canvas = FigureCanvasTkAgg(fig, master=parent)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        canvas.draw()
+
+    def _toggle_overlay(self):
+        if self.overlay_var.get() and not self.calib:
+            self.overlay_var.set(False)
+            if messagebox.askyesno(
+                    "Calibration needed",
+                    "Overlaying markers on the photo needs a one-time camera "
+                    "calibration. Set it now?"):
+                self._toggle_calib()
+            return
+        self._redraw_viewer()
+
+    def _toggle_calib(self):
+        if self.calib_holder.winfo_ismapped():
+            self._hide_calib()
+            return
+        for w in self.calib_holder.winfo_children():
+            w.destroy()
+        CalibrationPanel(self.calib_holder, self._calib_saved,
+                         self._hide_calib, current=self.calib).pack(
+            fill="x", padx=6, pady=4)
+        self.calib_holder.pack(side="bottom", fill="x", before=self.viewer)
+
+    def _hide_calib(self):
+        self.calib_holder.pack_forget()
+
+    def _calib_saved(self, calib):
+        self.calib = calib
+        self.overlay_var.set(True)
+        self._redraw_viewer()
+
+    # -- stage map tab --------------------------------------------------
+    def _render_stage_map(self):
+        parent = self.map_frame
+        for w in parent.winfo_children():
+            w.destroy()
+        if not HAVE_MPL:
+            ttk.Label(parent, padding=20,
+                      text="matplotlib is required for the stage map.").pack()
+            return
+        focus = (self.sel_regions + self._ticked_regions())
+        parser = (self.region_parser.get(id(focus[0])) if focus
+                  else (self.docs[0] if self.docs else None))
+        positions = parser.sample_positions() if parser else {}
+        if not positions:
+            ttk.Label(parent, padding=20,
+                      text="No stage positions recorded. Load a file (and "
+                           "select or tick its spectra) to see where each "
+                           "sample sat on the holder.").pack()
+            return
+        hot_samples = self._highlight_samples(parser)
+        fig = Figure(figsize=(5.4, 3.6), dpi=100)
+        ax = fig.add_subplot(111)
+        for sample, (x, y) in positions.items():
+            hot = sample in hot_samples
+            ax.scatter([x], [y], s=120 if hot else 70,
+                       c="#d33" if hot else "#3a6ea5",
+                       edgecolors="black", zorder=3)
+            ax.annotate(sample, (x, y), textcoords="offset points",
+                        xytext=(6, 5), fontsize=8,
+                        fontweight="bold" if hot else "normal")
+        ax.set_xlabel("Stage X (mm)")
+        ax.set_ylabel("Stage Y (mm)")
+        ax.set_title("Analysis positions — "
+                     + os.path.basename(parser.path or ""), fontsize=9)
+        ax.grid(True, ls=":", alpha=0.5)
+        ax.set_aspect("equal", adjustable="datalim")
+        fig.tight_layout()
+        canvas = FigureCanvasTkAgg(fig, master=parent)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        canvas.draw()
+
+    # -- export ---------------------------------------------------------
+    def _write_export(self, regions, fmt, include_tf=True):
+        """Ask for a path and write regions as CSV/VAMAS. True on success."""
+        regions = [r for r in regions if r.decodable and r.counts]
+        if not regions:
+            messagebox.showinfo("Export", "No decodable spectra to export.")
+            return False
+        if fmt == "csv":
+            path = filedialog.asksaveasfilename(
+                defaultextension=".csv", filetypes=[("CSV", "*.csv")])
+        else:
+            path = filedialog.asksaveasfilename(
+                defaultextension=".vms",
+                filetypes=[("VAMAS", "*.vms"), ("VAMAS", "*.vamas")])
+        if not path:
+            return False
+        parser = self.region_parser.get(id(regions[0]))
+        inst = parser.instrument if parser else {}
+        try:
+            if fmt == "csv":
+                n = export_csv(regions, path)
+            else:
+                n = export_vamas(
+                    regions, path,
+                    instrument=inst.get("Instrument", ""),
+                    operator=inst.get("Acquisition computer", ""),
+                    experiment_id=os.path.basename(
+                        (parser.path if parser else "") or ""),
+                    include_transmission=include_tf)
+        except Exception as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return False
+        messagebox.showinfo("Exported", f"{n} spectra written to\n{path}")
+        return True
+
+    def export_ticked(self, fmt):
+        regs = self._ticked_regions()
+        if not regs:
+            messagebox.showinfo("Export", "Tick the spectra you want to "
+                                         "export first.")
+            return
+        self._write_export(regs, fmt)
+
+    def open_export(self):
+        if not any(p.regions for p in self.docs):
+            messagebox.showinfo("Nothing to export",
+                                "Open a spectra file first.")
+            return
+        ExportDialog(self.root, self)
+
+    # -- metadata export ------------------------------------------------
+    def _metadata_doc(self):
+        """Which loaded file a metadata export should use (None = ask user)."""
+        if not self.docs:
+            messagebox.showinfo("No metadata", "Open a spectra file first.")
+            return None
+        if len(self.docs) == 1:
+            return self.docs[0]
+        owners = {id(p): p for p in
+                  (self.node_map[i][0] for i in self.tree.selection()
+                   if i in self.node_map)}
+        if len(owners) == 1:
+            return next(iter(owners.values()))
+        messagebox.showinfo("Choose a file",
+                            "Several files are loaded. Select a row belonging "
+                            "to the file whose metadata you want, then try "
+                            "again.")
+        return None
+
+    def open_metadata(self):
+        if self._metadata_doc() is None:
+            return
+        choice = MetadataDialog(self.root)
+        self.themes.recolor_tk(self.root)
+        self.root.wait_window(choice)
+        if choice.result == "csv":
+            self.export_meta_csv()
+        elif choice.result == "pdf":
+            self.export_meta_pdf()
+
+    def export_meta_csv(self):
+        parser = self._metadata_doc()
+        if parser is None:
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv", filetypes=[("CSV", "*.csv")],
+            initialfile="metadata.csv")
+        if not path:
+            return
+        try:
+            n = export_metadata_csv(parser, path)
+        except Exception as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return
+        messagebox.showinfo("Exported", f"Wrote metadata for {n} region(s) "
+                                        f"to:\n{path}")
+
+    def export_meta_pdf(self):
+        parser = self._metadata_doc()
+        if parser is None:
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".pdf", filetypes=[("PDF", "*.pdf")],
+            initialfile="metadata.pdf")
+        if not path:
+            return
+        try:
+            n = export_metadata_pdf(parser, path)
+        except Exception as exc:
+            messagebox.showerror("Export failed", str(exc))
+            return
+        messagebox.showinfo("Exported",
+                            f"Wrote a metadata report for {n} sample(s) "
+                            f"to:\n{path}")
+
+
+class _ExportSection(ttk.Frame):
+    """Region/level choices for one loaded file inside the export dialog."""
+
+    def __init__(self, master, parser, checked, title=None):
+        super().__init__(master)
+        self.parser = parser
+        self.profile = parser.depth_profile
+        self.vars = []           # (BooleanVar, region): per-region ticks
+        self.type_vars = {}      # region name -> BooleanVar (depth profiles)
+        any_ticked = any(id(r) in checked for r in parser.regions)
+        if title:
+            ttk.Label(self, text=title, font=("", 10, "bold")).pack(
+                anchor="w", pady=(10, 2))
+        if self.profile.get("is_profile"):
+            self._build_profile(any_ticked, checked)
+        else:
+            order, groups = [], {}
+            for r in parser.regions:
+                groups.setdefault(r.sample, []).append(r)
+                if r.sample not in order:
+                    order.append(r.sample)
+            for sample in order:
+                ttk.Label(self, text=sample or "Sample",
+                          font=("", 9, "bold")).pack(anchor="w", pady=(8, 1))
+                for r in groups[sample]:
+                    on = (id(r) in checked) if any_ticked else r.decodable
+                    v = tk.BooleanVar(value=bool(on and r.decodable))
+                    ttk.Checkbutton(
+                        self, variable=v,
+                        state="normal" if r.decodable else "disabled",
+                        text=f"   {r.name}  [{r.n_points} pts]"
+                             f"{'' if r.decodable else '   (no data)'}"
+                        ).pack(anchor="w")
+                    self.vars.append((v, r))
+
+    def _build_profile(self, any_ticked, checked):
+        dp = self.profile
+        ttk.Label(self, justify="left", font=("", 9),
+                  text=(f"Depth profile: {dp['n_levels']} levels, "
+                        f"{dp['regions_per_level']} regions/level\n"
+                        f"Etch: {dp['etch_source']}\n"
+                        f"Total etch time: {dp['total_etch_time']:g} s "
+                        f"({dp['total_etch_time'] / 60.0:g} min)")
+                  ).pack(anchor="w", pady=(4, 8))
+        ttk.Label(self, text="Regions to include:",
+                  font=("", 9, "bold")).pack(anchor="w")
+        names = []
+        for r in self.parser.regions:
+            if r.name not in names:
+                names.append(r.name)
+        for name in names:
+            on = (not any_ticked) or any(
+                id(r) in checked for r in self.parser.regions if r.name == name)
+            v = tk.BooleanVar(value=on)
+            ttk.Checkbutton(self, variable=v, text=f"   {name}").pack(
+                anchor="w")
+            self.type_vars[name] = v
+
+        ttk.Label(self, text="Levels to include:", font=("", 9, "bold")
+                  ).pack(anchor="w", pady=(10, 1))
+        self.level_mode = tk.StringVar(value="all")
+        nlev = dp["n_levels"]
+        for val, txt in [("all", f"All {nlev} levels"),
+                         ("first", "First N levels"),
+                         ("every", "Every Nth level"),
+                         ("range", "Level range")]:
+            ttk.Radiobutton(self, text=txt, value=val,
+                            variable=self.level_mode).pack(anchor="w")
+        spin = ttk.Frame(self)
+        spin.pack(anchor="w", pady=4)
+        ttk.Label(spin, text="N / step:").pack(side="left")
+        self.n_spin = tk.IntVar(value=min(61, nlev))
+        ttk.Spinbox(spin, from_=1, to=nlev, width=6,
+                    textvariable=self.n_spin).pack(side="left", padx=4)
+        ttk.Label(spin, text="range:").pack(side="left", padx=(10, 2))
+        self.range_from = tk.IntVar(value=0)
+        self.range_to = tk.IntVar(value=nlev - 1)
+        ttk.Spinbox(spin, from_=0, to=nlev - 1, width=5,
+                    textvariable=self.range_from).pack(side="left")
+        ttk.Label(spin, text="–").pack(side="left")
+        ttk.Spinbox(spin, from_=0, to=nlev - 1, width=5,
+                    textvariable=self.range_to).pack(side="left")
+
+    def selected_regions(self):
+        if not self.profile.get("is_profile"):
+            return [r for v, r in self.vars if v.get()]
+        types = {n for n, v in self.type_vars.items() if v.get()}
+        mode = self.level_mode.get()
+        n = max(1, self.n_spin.get())
+        lo, hi = self.range_from.get(), self.range_to.get()
+
+        def level_ok(lvl):
+            if lvl is None or mode == "all":
+                return True
+            if mode == "first":
+                return lvl < n
+            if mode == "every":
+                return lvl % n == 0
+            if mode == "range":
+                return lo <= lvl <= hi
+            return True
+
+        return [r for r in self.parser.regions
+                if r.decodable and r.name in types and level_ok(r.etch_level)]
+
+    def set_all(self, value):
+        for v, r in self.vars:
+            if r.decodable:
+                v.set(value)
+        for v in self.type_vars.values():
+            v.set(value)
 
 
 class ExportDialog(tk.Toplevel):
-    """Checkbox selection of regions + format choice."""
+    """Choose regions (or depth-profile levels) from every loaded file and a
+    format. Pre-selects the currently ticked spectra."""
 
     def __init__(self, master, app):
         super().__init__(master)
@@ -1772,7 +2011,8 @@ class ExportDialog(tk.Toplevel):
         ttk.Button(top, text="None", width=6,
                    command=lambda: self._set_all(False)).pack(side="right")
         ttk.Button(top, text="All", width=6,
-                   command=lambda: self._set_all(True)).pack(side="right", padx=4)
+                   command=lambda: self._set_all(True)).pack(side="right",
+                                                             padx=4)
 
         canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
         frame = ttk.Frame(canvas)
@@ -1783,43 +2023,30 @@ class ExportDialog(tk.Toplevel):
         canvas.create_window((0, 0), window=frame, anchor="nw")
         frame.bind("<Configure>",
                    lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        # mouse-wheel scrolling for long lists
-        canvas.bind_all("<MouseWheel>",
-                        lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
+        # mouse-wheel scrolling only while the pointer is over this list
+        wheel = lambda e: canvas.yview_scroll(int(-e.delta / 120), "units")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", wheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        self.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>")
+                  if e.widget is self else None)
 
-        self.profile = app.parser.depth_profile
-        self.vars = []           # per-region checkboxes (non-profile)
-        self.type_vars = {}      # per-region-type checkboxes (profile)
+        multi = len(app.docs) > 1
+        self.sections = []
+        for p in app.docs:
+            sec = _ExportSection(
+                frame, p, app.checked,
+                title=os.path.basename(p.path or "") if multi else None)
+            sec.pack(fill="x", anchor="w")
+            self.sections.append(sec)
 
-        if self.profile.get("is_profile"):
-            self._build_profile_selectors(frame)
-        else:
-            groups, order = {}, []
-            for r in app.parser.regions:
-                groups.setdefault(r.sample, []).append(r)
-                if r.sample not in order:
-                    order.append(r.sample)
-            for sample in order:
-                ttk.Label(frame, text=sample or "Sample",
-                          font=("", 9, "bold")).pack(anchor="w", pady=(8, 1))
-                for r in groups[sample]:
-                    v = tk.BooleanVar(value=r.decodable)
-                    state = "normal" if r.decodable else "disabled"
-                    suffix = "" if r.decodable else "   (no data)"
-                    ttk.Checkbutton(
-                        frame, variable=v, state=state,
-                        text=f"   {r.name}  [{r.n_points} pts]{suffix}"
-                        ).pack(anchor="w", pady=0)
-                    self.vars.append((v, r))
-
-        # format
         fmt_frame = ttk.LabelFrame(self, text="Format")
         fmt_frame.pack(fill="x", padx=12, pady=10)
         self.fmt = tk.StringVar(value="csv")
         ttk.Radiobutton(fmt_frame, text="CSV (.csv)", value="csv",
                         variable=self.fmt).pack(anchor="w", padx=8, pady=2)
-        ttk.Radiobutton(fmt_frame, text="VAMAS / ISO 14976 (.vms)", value="vamas",
-                        variable=self.fmt).pack(anchor="w", padx=8, pady=2)
+        ttk.Radiobutton(fmt_frame, text="VAMAS / ISO 14976 (.vms)",
+                        value="vamas", variable=self.fmt).pack(anchor="w",
+                                                               padx=8, pady=2)
         self.incl_tf = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             fmt_frame, variable=self.incl_tf,
@@ -1828,596 +2055,30 @@ class ExportDialog(tk.Toplevel):
 
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=12, pady=(0, 12))
-        ttk.Button(btns, text="Export", command=self.do_export).pack(side="right")
-        ttk.Button(btns, text="Cancel", command=self.destroy).pack(side="right", padx=6)
+        ttk.Button(btns, text="Export", command=self.do_export).pack(
+            side="right")
+        ttk.Button(btns, text="Cancel", command=self.destroy).pack(
+            side="right", padx=6)
 
-        if app.parser.corruption["corrupted"]:
+        if any(p.corruption["corrupted"] for p in app.docs):
             ttk.Label(self, foreground="#a00", wraplength=430, justify="left",
-                      text="This file's numeric data is corrupted, so no "
-                           "regions can be exported. See the loader warning."
-                      ).pack(padx=12, pady=(0, 10))
-
-    def _build_profile_selectors(self, frame):
-        dp = self.profile
-        total_min = dp["total_etch_time"] / 60.0
-        ttk.Label(frame, justify="left", font=("", 9),
-                  text=(f"Depth profile: {dp['n_levels']} levels, "
-                        f"{dp['regions_per_level']} regions/level\n"
-                        f"Etch: {dp['etch_source']}\n"
-                        f"Total etch time: {dp['total_etch_time']:g} s "
-                        f"({total_min:g} min)")).pack(anchor="w", pady=(4, 8))
-
-        ttk.Label(frame, text="Regions to include:",
-                  font=("", 9, "bold")).pack(anchor="w")
-        seen = []
-        for r in self.app.parser.regions:
-            if r.name not in seen:
-                seen.append(r.name)
-        for name in seen:
-            v = tk.BooleanVar(value=True)
-            ttk.Checkbutton(frame, variable=v, text=f"   {name}"
-                            ).pack(anchor="w")
-            self.type_vars[name] = v
-
-        ttk.Label(frame, text="Levels to include:", font=("", 9, "bold")
-                  ).pack(anchor="w", pady=(10, 1))
-        self.level_mode = tk.StringVar(value="all")
-        nlev = dp["n_levels"]
-        for val, txt in [("all", f"All {nlev} levels"),
-                         ("first", "First N levels"),
-                         ("every", "Every Nth level"),
-                         ("range", "Level range")]:
-            ttk.Radiobutton(frame, text=txt, value=val,
-                            variable=self.level_mode).pack(anchor="w")
-        spin = ttk.Frame(frame)
-        spin.pack(anchor="w", pady=4)
-        ttk.Label(spin, text="N / step:").pack(side="left")
-        self.n_spin = tk.IntVar(value=min(61, nlev))
-        ttk.Spinbox(spin, from_=1, to=nlev, width=6,
-                    textvariable=self.n_spin).pack(side="left", padx=4)
-        ttk.Label(spin, text="range:").pack(side="left", padx=(10, 2))
-        self.range_from = tk.IntVar(value=0)
-        self.range_to = tk.IntVar(value=nlev - 1)
-        ttk.Spinbox(spin, from_=0, to=nlev - 1, width=5,
-                    textvariable=self.range_from).pack(side="left")
-        ttk.Label(spin, text="–").pack(side="left")
-        ttk.Spinbox(spin, from_=0, to=nlev - 1, width=5,
-                    textvariable=self.range_to).pack(side="left")
-
-    def _selected_regions(self):
-        if not self.profile.get("is_profile"):
-            return [r for v, r in self.vars if v.get()]
-        types = {n for n, v in self.type_vars.items() if v.get()}
-        mode = self.level_mode.get()
-        n = max(1, self.n_spin.get())
-        lo, hi = self.range_from.get(), self.range_to.get()
-
-        def level_ok(lvl):
-            if lvl is None:
-                return True
-            if mode == "all":
-                return True
-            if mode == "first":
-                return lvl < n
-            if mode == "every":
-                return lvl % n == 0
-            if mode == "range":
-                return lo <= lvl <= hi
-            return True
-
-        return [r for r in self.app.parser.regions
-                if r.decodable and r.name in types and level_ok(r.etch_level)]
+                      text="A loaded file's numeric data is corrupted, so its "
+                           "regions cannot be exported. See the loader "
+                           "warning.").pack(padx=12, pady=(0, 10))
 
     def _set_all(self, value):
-        for v, r in self.vars:
-            if r.decodable:
-                v.set(value)
-        for v in self.type_vars.values():
-            v.set(value)
+        for s in self.sections:
+            s.set_all(value)
 
     def do_export(self):
-        chosen = self._selected_regions()
+        chosen = [r for s in self.sections for r in s.selected_regions()]
         if not chosen:
             messagebox.showwarning("Nothing selected",
                                    "Select at least one region to export.")
             return
-        fmt = self.fmt.get()
-        if fmt == "csv":
-            path = filedialog.asksaveasfilename(
-                defaultextension=".csv",
-                filetypes=[("CSV", "*.csv")])
-            if not path:
-                return
-            try:
-                n = export_csv(chosen, path)
-            except Exception as exc:
-                messagebox.showerror("Export failed", str(exc))
-                return
-        else:
-            path = filedialog.asksaveasfilename(
-                defaultextension=".vms",
-                filetypes=[("VAMAS", "*.vms"), ("VAMAS", "*.vamas")])
-            if not path:
-                return
-            inst = self.app.parser.instrument
-            try:
-                n = export_vamas(
-                    chosen, path,
-                    instrument=inst.get("Instrument", ""),
-                    operator=inst.get("Acquisition computer", ""),
-                    experiment_id=os.path.basename(self.app.parser.path or ""),
-                    include_transmission=self.incl_tf.get())
-            except Exception as exc:
-                messagebox.showerror("Export failed", str(exc))
-                return
-        messagebox.showinfo("Exported",
-                            f"Wrote {n} region(s) to:\n{path}")
-        self.destroy()
-
-
-class StackedPlotWindow(tk.Toplevel):
-    """Interactive stacked / waterfall plot of selected spectra, with
-    per-spectrum normalisation (max, area, or at a clicked cursor energy),
-    an adjustable stack offset, and PDF export."""
-
-    def __init__(self, master, app, regions):
-        super().__init__(master)
-        self.app = app
-        self.regions = [r for r in regions if r.decodable and r.counts]
-        self.cursor_energy = None
-        self.title("Stacked plot")
-        self.geometry("840x720")
-        if not HAVE_MPL:
-            ttk.Label(self, padding=20,
-                      text="matplotlib is required for stacked plots.").pack()
-            return
-        if not self.regions:
-            ttk.Label(self, padding=20,
-                      text="No decodable spectra in the selection.").pack()
-            return
-
-        bar = ttk.Frame(self)
-        bar.pack(side="top", fill="x", padx=6, pady=6)
-        ttk.Label(bar, text="Normalise:").pack(side="left")
-        self.norm = tk.StringVar(value="None")
-        nb = ttk.Combobox(bar, textvariable=self.norm, width=11,
-                          state="readonly",
-                          values=["None", "Max = 1", "Area = 1", "At cursor"])
-        nb.pack(side="left", padx=(2, 12))
-        nb.bind("<<ComboboxSelected>>", lambda e: self._on_norm_change())
-
-        ttk.Label(bar, text="Stack offset:").pack(side="left")
-        self.offset_var = tk.DoubleVar(value=1.0)
-        ttk.Scale(bar, from_=0.0, to=3.0, variable=self.offset_var,
-                  orient="horizontal", length=130,
-                  command=lambda e: self._render()).pack(side="left", padx=4)
-
-        self.reverse = tk.BooleanVar(value=False)
-        ttk.Checkbutton(bar, text="Reverse order", variable=self.reverse,
-                        command=self._render).pack(side="left", padx=8)
-        ttk.Button(bar, text="Save PDF…", command=self.save_pdf).pack(
-            side="right")
-
-        self.hint = ttk.Label(self, foreground="#a00", font=("", 9))
-        self.hint.pack(side="top", anchor="w", padx=10)
-
-        self.fig = Figure(figsize=(8, 6.6), dpi=100)
-        self.ax = self.fig.add_subplot(111)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=self)
-        NavigationToolbar2Tk(self.canvas, self)
-        self.canvas.get_tk_widget().pack(fill="both", expand=True)
-        self.canvas.mpl_connect("button_press_event", self._on_click)
-        self._render()
-
-    # -- normalisation --------------------------------------------------
-    def _on_norm_change(self):
-        if self.norm.get() == "At cursor" and self.cursor_energy is None:
-            # default the cursor to the middle of the shared energy range
-            e = self.regions[0].energy
-            self.cursor_energy = (e[0] + e[-1]) / 2.0
-        self._render()
-
-    def _on_click(self, event):
-        if (self.norm.get() == "At cursor" and event.inaxes is not None
-                and event.xdata is not None):
-            self.cursor_energy = float(event.xdata)
-            self._render()
-
-    def _norm_factor(self, r):
-        mode = self.norm.get()
-        ys = r.counts
-        if mode == "Max = 1":
-            m = max(ys)
-            return m if m else 1.0
-        if mode == "Area = 1":
-            s = sum(abs(y) for y in ys)
-            return s / len(ys) if s else 1.0
-        if mode == "At cursor" and self.cursor_energy is not None:
-            v = interp_intensity(r, self.cursor_energy)
-            return v if v else 1.0
-        return 1.0
-
-    # -- drawing --------------------------------------------------------
-    def _draw(self, ax):
-        regs = list(self.regions)
-        if self.reverse.get():
-            regs = regs[::-1]
-        normed = [[y / self._norm_factor(r) for y in r.counts] for r in regs]
-        spans = [(max(n) - min(n)) for n in normed if n]
-        ref = max(spans) if spans else 1.0
-        step = self.offset_var.get() * ref
-        for i, (r, n) in enumerate(zip(regs, normed)):
-            yoff = [y + i * step for y in n]
-            line, = ax.plot(r.energy, yoff, lw=0.9)
-            ax.annotate(region_label(r), (r.energy[0], yoff[0]),
-                        textcoords="offset points", xytext=(4, 3),
-                        fontsize=7, color=line.get_color())
-        if self.norm.get() == "At cursor" and self.cursor_energy is not None:
-            ax.axvline(self.cursor_energy, color="#c00", ls="--", lw=0.8)
-        r0 = regs[0]
-        ax.set_xlabel(f"{r0.energy_label} ({r0.energy_units})")
-        ax.set_ylabel("Intensity" + (" (stacked, normalised)"
-                                     if step else " (normalised)"))
-        ax.set_title(f"Stacked plot — {len(regs)} spectra")
-        if r0.energy_label.lower().startswith("binding"):
-            ax.invert_xaxis()
-
-    def _render(self):
-        self.ax.clear()
-        self._draw(self.ax)
-        if self.norm.get() == "At cursor":
-            self.hint.config(text="Click on the plot to set the normalisation "
-                                  "energy (spectra are scaled to match there).")
-        else:
-            self.hint.config(text="")
-        self.fig.tight_layout()
-        self.canvas.draw()
-
-    def save_pdf(self):
-        path = filedialog.asksaveasfilename(
-            defaultextension=".pdf", filetypes=[("PDF", "*.pdf")])
-        if not path:
-            return
-        try:
-            from matplotlib.backends.backend_pdf import PdfPages
-            fig = Figure(figsize=(8.3, 10.5), dpi=150)
-            ax = fig.add_subplot(111)
-            self._draw(ax)
-            fig.tight_layout()
-            with PdfPages(path) as pdf:
-                pdf.savefig(fig)
-        except Exception as exc:
-            messagebox.showerror("Save failed", str(exc))
-            return
-        messagebox.showinfo("Saved", f"Stacked plot saved to\n{path}")
-
-
-class BrowserApp:
-    """Main browser window."""
-
-    def __init__(self, root):
-        self.root = root
-        self.root.title("ESCApe Explorer — Browser")
-        self.root.geometry("620x640")
-        self.parser = EscapeParser()
-        self.node_map = {}          # treeview item id -> TreeNode
-        self.display = None
-
-        self._build_menu()
-        self._build_body()
-
-    def _build_menu(self):
-        bar = tk.Menu(self.root)
-        filem = tk.Menu(bar, tearoff=0)
-        filem.add_command(label="Open .experiment…", command=self.open_file)
-        filem.add_command(label="Export spectra…", command=self.open_export)
-        filem.add_separator()
-        filem.add_command(label="Export metadata → CSV…",
-                          command=self.export_meta_csv)
-        filem.add_command(label="Export metadata → PDF…",
-                          command=self.export_meta_pdf)
-        filem.add_separator()
-        filem.add_command(label="Quit", command=self.root.quit)
-        bar.add_cascade(label="File", menu=filem)
-        viewm = tk.Menu(bar, tearoff=0)
-        viewm.add_command(label="Show display window",
-                          command=self.show_display)
-        bar.add_cascade(label="View", menu=viewm)
-        self.root.config(menu=bar)
-
-    def _build_body(self):
-        tb = ttk.Frame(self.root)
-        tb.pack(side="top", fill="x", padx=4, pady=4)
-        ttk.Button(tb, text="Open", command=self.open_file).pack(side="left")
-        ttk.Button(tb, text="Export spectra…",
-                   command=self.open_export).pack(side="left", padx=4)
-        ttk.Button(tb, text="Metadata…",
-                   command=self.open_metadata).pack(side="left")
-        ttk.Button(tb, text="Display window",
-                   command=self.show_display).pack(side="left", padx=4)
-        ttk.Button(tb, text="Stacked plot…",
-                   command=self.open_stacked).pack(side="left")
-
-        # filter row
-        fb = ttk.Frame(self.root)
-        fb.pack(side="top", fill="x", padx=4, pady=(0, 4))
-        ttk.Label(fb, text="Filter:").pack(side="left")
-        self.filter_var = tk.StringVar()
-        ent = ttk.Entry(fb, textvariable=self.filter_var)
-        ent.pack(side="left", fill="x", expand=True, padx=4)
-        ent.bind("<KeyRelease>", lambda e: self._populate_tree())
-        ttk.Button(fb, text="Clear", width=6,
-                   command=lambda: (self.filter_var.set(""),
-                                    self._populate_tree())).pack(side="left")
-
-        cols = ("detail", "pts", "pe", "etch")
-        self.tree = ttk.Treeview(self.root, columns=cols,
-                                 show="tree headings", selectmode="extended")
-        self.tree.heading("#0", text="Experiment / Sample / Region")
-        self.tree.heading("detail", text="Detail")
-        self.tree.heading("pts", text="Points")
-        self.tree.heading("pe", text="Pass E (eV)")
-        self.tree.heading("etch", text="Etch time")
-        self.tree.column("#0", width=260, stretch=True)
-        self.tree.column("detail", width=120, anchor="w")
-        self.tree.column("pts", width=60, anchor="e")
-        self.tree.column("pe", width=70, anchor="e")
-        self.tree.column("etch", width=80, anchor="e")
-        sb = ttk.Scrollbar(self.root, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
-        self.tree.pack(side="top", expand=True, fill="both")
-        self.tree.bind("<<TreeviewSelect>>", self.on_select)
-        self.tree.bind("<Button-3>", self._context_menu)   # right-click
-        self.tree.bind("<Button-2>", self._context_menu)   # mac right-click
-
-        self.status = ttk.Label(self.root, anchor="w", relief="sunken",
-                                text="Open a .experiment file to begin.")
-        self.status.pack(side="bottom", fill="x")
-
-    # -- actions --------------------------------------------------------
-    def open_file(self):
-        path = filedialog.askopenfilename(
-            filetypes=[("Kratos Experiment", "*.experiment"),
-                       ("All files", "*.*")])
-        if not path:
-            return
-        try:
-            self.parser = EscapeParser().load(path)
-        except Exception as exc:
-            messagebox.showerror("Load failed", str(exc))
-            return
-        self._populate_tree(reset_display=True)
-        s = self.parser.summary
-        self.status.config(
-            text=f"{os.path.basename(path)} — {s['n_regions']} regions, "
-                 f"{s['n_images']} image(s), {s['n_decodable']} decodable")
-        if self.parser.corruption["corrupted"]:
-            messagebox.showwarning("File data corrupted",
-                                   self.parser.corruption["message"])
-
-    def _populate_tree(self, reset_display=False):
-        self.tree.delete(*self.tree.get_children())
-        self.node_map.clear()
-        n_samples = len(self.parser.tree.children) if self.parser.tree else 0
-        flt = getattr(self, "filter_var", None)
-        flt = flt.get().strip().lower() if flt else ""
-
-        def matches(node):
-            if not flt:
-                return True
-            hay = (node.label + " " + " ".join(str(c) for c in node.cols)).lower()
-            if flt in hay:
-                return True
-            return any(matches(c) for c in node.children)
-
-        def add(parent, node, depth=0):
-            if not matches(node):
-                return
-            opened = (depth == 0) or bool(flt) or (depth == 1 and n_samples <= 3)
-            cols = tuple(node.cols) if node.cols else ("", "", "", "")
-            iid = self.tree.insert(parent, "end", text=node.label, open=opened,
-                                   values=cols)
-            self.node_map[iid] = node
-            for c in node.children:
-                add(iid, c, depth + 1)
-
-        if self.parser.tree:
-            add("", self.parser.tree)
-
-        if reset_display:
-            self.show_display()
-            if self.display and self.display.winfo_exists():
-                self.display.set_images(self.parser.images)
-                self.display.show_regions([])
-
-    def on_select(self, _event):
-        sel = self.tree.selection()
-        if not sel:
-            return
-        self.show_display()
-        # Gather regions from every selected node (expanding folders/samples).
-        regions, seen = [], set()
-        only_image = None
-        for iid in sel:
-            node = self.node_map.get(iid)
-            if node is None:
-                continue
-            if node.image is not None and len(sel) == 1:
-                only_image = node.image
-            for r in DisplayWindow._regions_under(node):
-                if id(r) not in seen:
-                    seen.add(id(r))
-                    regions.append(r)
-        if regions:
-            self.display.show_regions(regions)
-        elif only_image is not None:
-            self.display.open_image(only_image)
-
-    # -- right-click menu & stacked plot -------------------------------
-    def _gather_selected_regions(self, extra_iids=()):
-        """Decodable regions under all currently-selected (or given) nodes."""
-        iids = list(self.tree.selection()) or list(extra_iids)
-        regions, seen = [], set()
-        for iid in iids:
-            node = self.node_map.get(iid)
-            if node is None:
-                continue
-            for r in DisplayWindow._regions_under(node):
-                if r.decodable and id(r) not in seen:
-                    seen.add(id(r))
-                    regions.append(r)
-        return regions
-
-    def _context_menu(self, event):
-        if not self.parser.regions:
-            return
-        row = self.tree.identify_row(event.y)
-        if not row:
-            return
-        # operate on the multi-selection if the clicked row is part of it,
-        # otherwise on just the clicked row
-        if row not in self.tree.selection():
-            self.tree.selection_set(row)
-        node = self.node_map.get(row)
-        regions = self._gather_selected_regions()
-        n = len(regions)
-        menu = tk.Menu(self.tree, tearoff=0)
-        if n:
-            menu.add_command(label=f"Plot these {n} spectra"
-                             if n > 1 else "Plot this spectrum",
-                             command=lambda: self._plot_regions(regions))
-            menu.add_command(label=f"Create stacked plot ({n})…",
-                             command=lambda: self._stacked(regions))
-            menu.add_separator()
-            exp = tk.Menu(menu, tearoff=0)
-            exp.add_command(label="CSV…",
-                            command=lambda: self._export_regions(regions, "csv"))
-            exp.add_command(label="VAMAS…",
-                            command=lambda: self._export_regions(regions, "vamas"))
-            menu.add_cascade(label=f"Export from here down ({n})", menu=exp)
-        else:
-            menu.add_command(label="(no decodable spectra here)",
-                             state="disabled")
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
-
-    def _plot_regions(self, regions):
-        self.show_display()
-        self.display.show_regions(regions)
-
-    def _stacked(self, regions):
-        regions = [r for r in regions if r.decodable and r.counts]
-        if not regions:
-            messagebox.showinfo("Stacked plot",
-                                "Select one or more decodable spectra first.")
-            return
-        StackedPlotWindow(self.root, self, regions)
-
-    def open_stacked(self):
-        regions = self._gather_selected_regions()
-        if not regions:
-            messagebox.showinfo(
-                "Stacked plot",
-                "Select one or more spectra (or a region folder) in the "
-                "browser first, then click Stacked plot.")
-            return
-        self._stacked(regions)
-
-    def _export_regions(self, regions, fmt):
-        regions = [r for r in regions if r.decodable and r.counts]
-        if not regions:
-            messagebox.showinfo("Export", "No decodable spectra here.")
-            return
-        if fmt == "csv":
-            path = filedialog.asksaveasfilename(
-                defaultextension=".csv", filetypes=[("CSV", "*.csv")])
-            if not path:
-                return
-            try:
-                export_csv(regions, path)
-            except Exception as exc:
-                messagebox.showerror("Export failed", str(exc))
-                return
-        else:
-            path = filedialog.asksaveasfilename(
-                defaultextension=".vms",
-                filetypes=[("VAMAS", "*.vms"), ("VAMAS", "*.vamas")])
-            if not path:
-                return
-            inst = self.parser.instrument
-            try:
-                export_vamas(regions, path,
-                             instrument=inst.get("Instrument", ""),
-                             operator=inst.get("Acquisition computer", ""),
-                             experiment_id=os.path.basename(self.parser.path or ""))
-            except Exception as exc:
-                messagebox.showerror("Export failed", str(exc))
-                return
-        messagebox.showinfo("Exported", f"{len(regions)} spectra written to\n{path}")
-
-    def show_display(self):
-        if self.display is None or not self.display.winfo_exists():
-            self.display = DisplayWindow(self.root, self)
-            self.display.set_images(self.parser.images)
-        else:
-            self.display.deiconify()
-
-    def open_export(self):
-        if not self.parser.regions:
-            messagebox.showinfo("Nothing to export",
-                                "Open a .experiment file first.")
-            return
-        ExportDialog(self.root, self)
-
-    def open_metadata(self):
-        if not self.parser.regions:
-            messagebox.showinfo("No metadata",
-                                "Open a .experiment file first.")
-            return
-        choice = MetadataDialog(self.root)
-        self.root.wait_window(choice)
-        if choice.result == "csv":
-            self.export_meta_csv()
-        elif choice.result == "pdf":
-            self.export_meta_pdf()
-
-    def export_meta_csv(self):
-        if not self.parser.regions:
-            messagebox.showinfo("No metadata", "Open a .experiment file first.")
-            return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".csv", filetypes=[("CSV", "*.csv")],
-            initialfile="metadata.csv")
-        if not path:
-            return
-        try:
-            n = export_metadata_csv(self.parser, path)
-        except Exception as exc:
-            messagebox.showerror("Export failed", str(exc))
-            return
-        messagebox.showinfo("Exported", f"Wrote metadata for {n} region(s) "
-                                        f"to:\n{path}")
-
-    def export_meta_pdf(self):
-        if not self.parser.regions:
-            messagebox.showinfo("No metadata", "Open a .experiment file first.")
-            return
-        path = filedialog.asksaveasfilename(
-            defaultextension=".pdf", filetypes=[("PDF", "*.pdf")],
-            initialfile="metadata.pdf")
-        if not path:
-            return
-        try:
-            n = export_metadata_pdf(self.parser, path)
-        except Exception as exc:
-            messagebox.showerror("Export failed", str(exc))
-            return
-        messagebox.showinfo("Exported",
-                            f"Wrote a metadata report for {n} sample(s) "
-                            f"to:\n{path}")
+        if self.app._write_export(chosen, self.fmt.get(),
+                                  include_tf=self.incl_tf.get()):
+            self.destroy()
 
 
 class MetadataDialog(tk.Toplevel):
@@ -2446,7 +2107,7 @@ class MetadataDialog(tk.Toplevel):
 
 def main():
     root = tk.Tk()
-    BrowserApp(root)
+    Workspace(root)
     root.mainloop()
 
 
