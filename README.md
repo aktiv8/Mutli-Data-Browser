@@ -31,7 +31,8 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `escape_explorer.py` | the application window and dialogs |
 | `readers/` | one reader per format plus the registry that picks one (`readers/__init__.py`) |
 | `exporters.py` | CSV, VAMAS and metadata (CSV/PDF) writers |
-| `themes.py` | colour themes |
+| `themes.py` | design tokens and colour themes |
+| `fonts.py`, `assets/fonts/` | bundled IBM Plex Sans (SIL Open Font License) |
 | `pdf_preview.py` | in-app PDF preview (PyMuPDF) |
 | `launch.py` | one-step launcher (creates a venv, installs deps, starts the app) |
 | `requirements.txt` | Python packages (matplotlib, Pillow, reportlab, PyMuPDF) |
@@ -76,10 +77,10 @@ python3 launch.py           # macOS / Linux
 ## Using the app
 
 One workspace window: the **file tree** on the left, a large **plot** in the
-middle, and an **info column** on the right (Metadata table above an
+middle, and an **info column** on the right (Details above an
 Images / Stage map notebook). Drag any splitter; sizes are remembered.
 
-1. **Open ▾** (or File menu) → *Spectra file(s)…* to load several files of any
+1. **Open** (or File menu) → *Spectra files…* to load several files of any
    supported format, or *Folder…* to load every recognised file in a folder.
    Each file is a top-level node in the tree.
 2. Every node that holds spectra has a **tick box** (click it, or press
@@ -87,15 +88,21 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
    under it; a partly-ticked parent shows a bar. **Filter** narrows the tree
    (ticks are kept). Right-click a row to tick/untick a subtree, export from
    there down, or remove a file.
-3. **Ticked spectra are plotted at once.** Spectra sharing an element name
-   (every *C 1s*, across samples and across files) are drawn on **one panel,
-   stacked with a y offset**; other elements get their own panels. Plot controls:
+3. **Ticked spectra are plotted at once, and the tree is the legend.** Spectra
+   sharing an element name (every *C 1s*, across samples and across files) are
+   drawn on **one panel, stacked with a y offset**; other elements get their own
+   panels. A ticked box in the tree is a **swatch in the trace's colour**: one
+   colour per file when several files are loaded (otherwise per sample), and a
+   fading ramp of one hue for long stacks such as depth profiles. Stacked panels
+   have no y-ticks: a scale bar gives the intensity scale, and each trace is
+   labelled at its right-hand end. The selected spectrum is drawn heavier.
+   A sample holding a single spectrum appears as one row. View controls:
    * **Group by** — *Element name*, or *Energy range* (spectra whose x-ranges
      overlap by at least half share a panel).
    * **Normalise** — *None*, *Max = 1*, *Area = 1*, or *At cursor* (click a panel
      to set an energy; every spectrum in it is scaled to match there).
-   * **Stack offset** — the gap between stacked traces (0 overlays them);
-     **Reverse** flips the stacking order.
+   * **Offset** — the gap between stacked traces (0 overlays them);
+     **Reverse stack** flips the order.
 4. **How many, and scrolling.**
    * **Panels per page** — Auto, 1, 2, 4, 6, 9, 12 or 16. Scroll the panels with
      the mouse wheel, the scrollbar beside the plot, PageUp/PageDown, Home/End or
@@ -104,27 +111,32 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
      stack (say a 200-level depth profile) each panel then shows a window of
      that many traces; slide it with **Shift + wheel** or the *Traces* slider
      under the plot.
-5. **Selecting** a row (rather than ticking it) fills the **Metadata** table
-   (copy with Ctrl+C) and the **Images** / **Stage map** tabs. *Overlay
+5. **Selecting** a row (rather than ticking it) fills the **Details** panel
+   (sample, acquisition and region, copyable) and the **Images** / **Stage map**
+   tabs, which only appear when the loaded files have images or stage positions. *Overlay
    positions* on a photo needs a one-time **Calibrate…** step (image centre in
    mm, mm per pixel, flip/rotation), saved in your home folder.
-6. **Colour themes** — *Light* (the original look), *Dark*, *Midnight*,
-   *Solarized Light*, *High contrast*. Change them from the **Theme** box or
-   View → Colour theme; the choice is remembered. The native Windows menu bar
-   and message boxes can't be recoloured. PDFs always print on white.
-7. **Layout** — the **◧ Tree** and **Info ◨** buttons collapse the side panels,
-   and **Focus plot** (F11) hides both so the plot fills the window.
-8. **PDF ▾** — *Preview spectra…* and *Preview metadata…* show the PDF inside the
+6. **Colour themes** — *Light* (the default), *Dark* (the plot sits recessed
+   below the chrome, like an instrument screen), *Midnight*, *Solarized Light*,
+   *High contrast*, and *System* (the native OS look). Change them from the
+   **Theme** box or View → Colour theme; the choice is remembered. Every theme
+   has its own colour-blind-safe data palette and meets WCAG AA text contrast
+   (checked by the tests). The native Windows menu bar and message boxes can't
+   be recoloured. PDFs always print on white.
+7. **Layout** — **Files** and **Details** in the toolbar show or hide the side
+   panels, and **Focus** (F11) hides both so the plot fills the window. Hover a
+   control for a short explanation.
+8. **PDF** — *Preview spectra* and *Preview metadata* show the PDF inside the
    app (page navigation, zoom, **Save as…**, *Open in viewer*). The spectra
    preview lets you change panels per page, portrait/landscape and whether to
    use only the traces currently in view; **Save as…** writes exactly what you
    see. Without PyMuPDF the PDF opens in your default viewer instead.
-9. **Export ▾** — *Ticked spectra → CSV / VAMAS* writes exactly what is ticked.
-   *Choose regions / levels…* opens the export dialog (pre-set to your ticks) for
+9. **Export** — *Ticked spectra to CSV / VAMAS* writes exactly what is ticked.
+   *Regions and levels…* opens the export dialog (pre-set to your ticks) for
    picking regions or depth-profile levels. VAMAS output is CasaXPS-compatible:
    a kinetic-energy abscissa with **Intensity** and the spectrometer
    **Transmission** function as corresponding variables (toggle it off in the
-   dialog). *Metadata → CSV / PDF* saves per-sample acquisition metadata; with
+   dialog). *Metadata to CSV / PDF* saves per-sample acquisition metadata; with
    several files open, select a row of the file you want first.
 
 ## Stacked / waterfall plots
@@ -142,7 +154,7 @@ dialog then offers **region-type checkboxes** and **level selection** (*All*,
 *First N*, *Every Nth*, or a *range*).
 
 Level 0 is the surface at t = 0, then the cumulative sputter time; etch level
-and etch time appear in the metadata CSV/PDF and the Metadata table, and are
+and etch time appear in the metadata CSV/PDF and the Details panel, and are
 written into each VAMAS block as comment lines.
 
 ## Notes
@@ -151,6 +163,9 @@ written into each VAMAS block as comment lines.
   `sudo apt-get install python3-tk` (Debian/Ubuntu),
   `sudo dnf install python3-tkinter` (Fedora). The launcher will tell you if
   it’s missing.
+* The interface font is **IBM Plex Sans** (SIL Open Font License, see
+  `assets/fonts/OFL.txt`), registered for this app only. If it can't be loaded
+  the app quietly falls back to the system font.
 * Settings (theme, panel sizes, view options) are saved in
   `~/.escape_explorer_config.json`; the camera calibration in
   `~/.escape_explorer_calib.json`.

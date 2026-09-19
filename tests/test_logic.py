@@ -13,7 +13,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import escape_explorer as ee  # noqa: E402
-import themes  # noqa: E402
 from readers import Region  # noqa: E402
 
 
@@ -55,28 +54,6 @@ class TestGrouping(unittest.TestCase):
         self.assertEqual(ee.norm_factor(r, "Max = 1"), 4.0)
         self.assertEqual(ee.norm_factor(r, "None"), 1.0)
         self.assertGreater(ee.norm_factor(r, "Area = 1"), 0)
-
-
-class TestThemes(unittest.TestCase):
-    def test_every_palette_defines_every_key(self):
-        for name, pal in themes.PALETTES.items():
-            missing = set(themes.KEYS) - set(pal)
-            self.assertFalse(missing, f"{name} lacks {missing}")
-            self.assertGreaterEqual(len(pal["cycle"]), 6)
-
-    def test_light_is_the_default_native_theme(self):
-        self.assertEqual(themes.NATIVE, "Light")
-        self.assertEqual(themes.THEME_NAMES[0], "Light")
-        self.assertIn("Dark", themes.THEME_NAMES)
-
-    def test_print_style_is_white_paper(self):
-        rc = themes.mpl_rc(themes.PRINT)
-        self.assertEqual(rc["figure.facecolor"], "#ffffff")
-        self.assertEqual(rc["text.color"], "#000000")
-
-    def test_dark_rc_follows_palette(self):
-        rc = themes.mpl_rc(themes.PALETTES["Dark"])
-        self.assertEqual(rc["axes.facecolor"], themes.PALETTES["Dark"]["plot_bg"])
 
 
 class TestConfig(unittest.TestCase):

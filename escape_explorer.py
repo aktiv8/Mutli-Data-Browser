@@ -40,6 +40,7 @@ import json
 import math
 
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
 # Optional dependencies ----------------------------------------------------
@@ -65,8 +66,10 @@ except Exception:
 from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
                      load_file, reader_for, supported_patterns,
                      UnsupportedFormat)
-from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc,
-                    make_box_images)
+import fonts
+import themes
+from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
+                    ramp)
 from pdf_preview import PdfPreview, HAVE_PDF, open_external
 from exporters import (export_csv, export_vamas, export_metadata_csv,
                        export_metadata_pdf)
@@ -154,21 +157,68 @@ def interp_intensity(region, energy):
     return y0 + f * (y1 - y0)
 
 
-def region_label(r, with_source=False, show_name=True):
-    """Concise label for a trace: depth level/time if a profile, else the
-    sample (plus the region name when ``show_name``); prefixed with the file
-    name when several files are loaded."""
+def trace_label(r, multi_file=False, show_name=True):
+    """Short end-of-trace label. Depth profiles: the level (and etch time);
+    otherwise the sample, plus the region name only where a panel mixes
+    regions. Unnamed samples fall back to the file stem (several files) or the
+    region name. Colour already tells files apart, so no file prefix."""
     if r.etch_level is not None:
         base = (f"L{r.etch_level} ({r.etch_time:g} s)"
                 if r.etch_time is not None else f"L{r.etch_level}")
     else:
         parts = [r.sample] if r.sample else []
-        if show_name or not parts:
+        if show_name and parts:
             parts.append(r.name)
+        if not parts:
+            parts = [os.path.splitext(r.source)[0]
+                     if (multi_file and r.source) else r.name]
         base = " ".join(parts)
-    if with_source and r.source:
-        base = f"{r.source} · {base}"
-    return base if len(base) <= 44 else base[:41] + "…"
+    return base if len(base) <= 24 else base[:22] + "…"
+
+
+def colour_slots(docs):
+    """{id(region): palette slot}: one slot per file when several files are
+    loaded, else one per sample, so a file/sample keeps its colour whatever is
+    ticked."""
+    slots, out = {}, {}
+    multi = len(docs) > 1
+    for p in docs:
+        for r in p.regions:
+            key = p.path if multi else r.sample
+            out[id(r)] = slots.setdefault(key, len(slots))
+    return out
+
+
+def stack_colours(slots, cycle, background):
+    """Colours for one stack given each trace's slot: the categorical colour,
+    or a sequential ramp of one hue when every trace shares a slot (e.g. the
+    levels of a depth profile)."""
+    if len(slots) > 1 and len(set(slots)) == 1:
+        return ramp(cycle[slots[0] % len(cycle)], len(slots), background)
+    return [cycle[s % len(cycle)] for s in slots]
+
+
+def nice_step(x):
+    """Round a positive number down to 1, 2 or 5 x 10^n."""
+    if not x or x <= 0 or not math.isfinite(x):
+        return 1.0
+    e = math.floor(math.log10(x))
+    m = x / 10 ** e
+    for k in (5, 2, 1):
+        if m >= k:
+            return k * 10 ** e
+    return 10 ** e
+
+
+def dodge(values, gap):
+    """Nudge label positions upward so neighbours are at least ``gap`` apart
+    (order preserved). Returns the new positions."""
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    out = list(values)
+    for a, b in zip(order, order[1:]):
+        if out[b] - out[a] < gap:
+            out[b] = out[a] + gap
+    return out
 
 
 def normalise_name(name):
@@ -265,37 +315,75 @@ def norm_factor(r, mode, cursor=None):
     return 1.0
 
 
-def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None,
-               with_source=False, title="", compact=False):
-    """Draw one panel: a single spectrum plain, several stacked by y offset."""
+def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
+               title="", subtitle="", selected=(), multi_file=False,
+               first_col=True, bottom_row=True, accent="#0F6B8C",
+               muted="#56636E"):
+    """Draw one panel: a single spectrum plain, several stacked by y offset.
+
+    Stacked panels drop the (meaningless) y ticks for a scale bar and label
+    each trace at its right-hand end, in the trace colour, with labels nudged
+    apart. ``selected`` holds ``id(region)`` of spectra to draw heavier."""
     normed = [[y / norm_factor(r, norm, cursor) for y in r.counts]
               for r in regs]
-    stacked = len(regs) > 1
-    spans = [(max(n) - min(n)) for n in normed if n]
+    n = len(regs)
+    stacked = n > 1
+    spans = [(max(v) - min(v)) for v in normed if v]
     step = offset * (max(spans) if spans else 1.0) if stacked else 0.0
-    label_every = max(1, math.ceil(len(regs) / 25))
-    show_name = len({normalise_name(r.name) for r in regs}) > 1
-    for i, (r, n) in enumerate(zip(regs, normed)):
-        yoff = [y + i * step for y in n]
-        line, = ax.plot(r.energy, yoff, lw=0.8 if compact else 0.9)
-        if stacked and i % label_every == 0:
-            ax.annotate(region_label(r, with_source, show_name),
-                        (r.energy[0], yoff[0]),
-                        textcoords="offset points", xytext=(4, 3),
-                        fontsize=6 if compact else 7,
-                        color=line.get_color())
-    if norm == "At cursor" and cursor is not None:
-        ax.axvline(cursor, color="#c00", ls="--", lw=0.8)
     r0 = regs[0]
-    ax.set_title(title, fontsize=8 if compact else 11)
-    if compact:
-        ax.tick_params(labelsize=6)
-    else:
-        ax.set_xlabel(f"{r0.energy_label} ({r0.energy_units})")
-        ylab = (f"{r0.count_label} ({r0.count_units})" if norm == "None"
-                else f"{r0.count_label} (normalised)")
-        ax.set_ylabel(ylab + (", stacked" if step else ""))
-    if r0.energy_label.lower().startswith("binding"):
+    binding = r0.energy_label.lower().startswith("binding")
+    show_name = len({normalise_name(r.name) for r in regs}) > 1
+    label_every = max(1, math.ceil(n / 12))
+    ends = []
+    for i, (r, v) in enumerate(zip(regs, normed)):
+        yoff = [y + i * step for y in v]
+        col = colours[i] if colours else None
+        sel = id(r) in selected
+        ax.plot(r.energy, yoff, color=col,
+                lw=1.9 if sel else (0.8 if n > 12 else 1.1),
+                zorder=3 if sel else 2)
+        if stacked and i % label_every == 0:
+            xs = r.energy
+            j = (min if binding else max)(range(len(xs)), key=xs.__getitem__)
+            lo, hi = max(0, j - 2), min(len(yoff), j + 3)
+            ends.append((sum(yoff[lo:hi]) / (hi - lo),
+                         trace_label(r, multi_file, show_name), col))
+    if norm == "At cursor" and cursor is not None:
+        ax.axvline(cursor, color=accent, ls="--", lw=0.9)
+    ax.margins(x=0.02, y=0.06)
+    ax.relim()
+    ax.autoscale_view()
+    y0, y1 = ax.get_ylim()
+    yspan = (y1 - y0) or 1.0
+    yaxis_tf = ax.get_yaxis_transform()          # x: axes fraction, y: data
+    if stacked:
+        ax.set_yticks([])
+        ax.spines["left"].set_visible(False)
+        # scale bar to the left of the axes replaces the y axis
+        bar = nice_step(yspan * 0.22)
+        base = y0 + yspan * 0.06
+        ax.plot([-0.018, -0.018], [base, base + bar], transform=yaxis_tf,
+                color=muted, lw=1.6, solid_capstyle="butt", clip_on=False)
+        unit = "" if norm != "None" else f" {r0.count_units}"
+        ax.text(-0.03, base + bar / 2,
+                (f"{bar:,.0f}" if bar >= 1 else f"{bar:g}") + unit,
+                transform=yaxis_tf, rotation=90, ha="right", va="center",
+                fontsize=8, color=muted, clip_on=False)
+        pos = dodge([e[0] for e in ends], 0.062 * yspan)
+        for (_y, text, col), yy in zip(ends, pos):
+            t = ax.text(1.012, yy, text, transform=yaxis_tf, color=col,
+                        fontsize=8, va="center", ha="left", clip_on=False)
+            t.set_in_layout(False)      # the page reserves the gutter itself
+    ax.set_title(title, loc="left")
+    if subtitle:
+        ax.set_title(subtitle, loc="right", fontsize=8, fontweight="normal",
+                     color=muted)
+    if bottom_row:
+        ax.set_xlabel(f"{r0.energy_label.capitalize()} ({r0.energy_units})")
+    if first_col and not stacked:
+        ax.set_ylabel(f"{r0.count_label} ({r0.count_units})" if norm == "None"
+                      else f"{r0.count_label} (normalised)")
+    if binding:
         ax.invert_xaxis()
 
 
@@ -356,6 +444,44 @@ class CalibrationPanel(ttk.LabelFrame):
         self.on_save(calib)
 
 
+class Tooltip:
+    """Small hover hint for a widget (Tk has none built in). Coloured from the
+    live theme via ``palette_fn``; shown after a short pause, hidden on leave,
+    click or key."""
+
+    def __init__(self, widget, text, palette_fn, delay=550):
+        self.widget, self.text, self.palette_fn = widget, text, palette_fn
+        self.delay, self._job, self._tip = delay, None, None
+        widget.bind("<Enter>", self._arm, add="+")
+        for ev in ("<Leave>", "<ButtonPress>", "<KeyPress>"):
+            widget.bind(ev, self._hide, add="+")
+
+    def _arm(self, _e=None):
+        self._hide()
+        self._job = self.widget.after(self.delay, self._show)
+
+    def _show(self):
+        self._job = None
+        p = self.palette_fn()
+        tip = tk.Toplevel(self.widget)
+        tip.wm_overrideredirect(True)
+        tip.configure(bg=p["border"])
+        tk.Label(tip, text=self.text, justify="left", padx=8, pady=4,
+                 bg=p["panel"], fg=p["fg"], wraplength=300).pack(padx=1, pady=1)
+        x = self.widget.winfo_rootx()
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        tip.wm_geometry(f"+{x}+{y}")
+        self._tip = tip
+
+    def _hide(self, _e=None):
+        if self._job is not None:
+            self.widget.after_cancel(self._job)
+            self._job = None
+        if self._tip is not None:
+            self._tip.destroy()
+            self._tip = None
+
+
 class Workspace:
     """The single main window: file tree with tick boxes (left), stacked-plot
     area (top right) and a Metadata / Images / Stage-map notebook (bottom
@@ -371,11 +497,16 @@ class Workspace:
         self.root = root
         root.title("ESCApe Explorer")
         self.cfg = load_config()
-        h = min(800, max(560, root.winfo_screenheight() - 110))
+        h = min(780, max(560, root.winfo_screenheight() - 140))
         w = min(1400, max(1000, root.winfo_screenwidth() - 40))
         root.geometry(self.cfg.get("geometry") or f"{w}x{h}")
         root.minsize(900, 560)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.font_family = fonts.apply_tk_fonts(root)
+        tkfont.Font(root=root, name="AppSection", family=self.font_family,
+                    size=fonts.SIZE["section"], weight="bold")
+        if HAVE_MPL:
+            themes.MPL_FAMILY = fonts.register_matplotlib()
         self.themes = ThemeManager(root)
         self.theme_name = self.cfg.get("theme", "Light")
         if self.theme_name not in THEME_NAMES:
@@ -401,7 +532,11 @@ class Workspace:
         self._thumb_imgs = []
         self._view_photo = None
         self._cur_image = None
-        self.box_imgs, self.blank_img = make_box_images(self.palette)
+        self.swatches = SwatchCache(self.palette)
+        self.blank_img = self.swatches.blank
+        self.trace_color = {}       # id(region) -> colour used on the plot
+        self.color_slot = {}        # id(region) -> stable palette slot
+        self.leaf_region = {}       # tree iid -> its Region (leaf rows)
 
         self._build_menu()
         self._build_body()
@@ -465,9 +600,10 @@ class Workspace:
         self.root.config(menu=bar)
 
     def _build_body(self):
-        self.status = ttk.Label(self.root, anchor="w", relief="sunken",
-                                text="Open a spectra file to begin.")
+        self.status = ttk.Label(self.root, anchor="w", style="Status.TLabel",
+                                text="No files loaded. Use Open to add spectra.")
         self.status.pack(side="bottom", fill="x")
+        ttk.Separator(self.root).pack(side="bottom", fill="x")
         self._build_toolbar()
 
         self.outer = ttk.PanedWindow(self.root, orient="horizontal")
@@ -489,7 +625,7 @@ class Workspace:
 
         self._build_tree_pane(self.tree_pane)
         self._build_plot_pane(self.plot_pane)
-        self.meta_frame = ttk.LabelFrame(self.info_pane, text="Metadata")
+        self.meta_frame = ttk.Frame(self.info_pane)
         self.nb = ttk.Notebook(self.info_pane)
         self.info_pane.add(self.meta_frame, weight=3)
         self.info_pane.add(self.nb, weight=2)
@@ -501,62 +637,66 @@ class Workspace:
 
     def _build_toolbar(self):
         tb = ttk.Frame(self.root)
-        tb.pack(side="top", fill="x", padx=4, pady=(4, 2))
-        mb = ttk.Menubutton(tb, text="Open ▾")
-        m = tk.Menu(mb, tearoff=0)
-        m.add_command(label="Spectra file(s)…", command=self.open_files)
-        m.add_command(label="Folder…", command=self.open_folder)
-        m.add_separator()
-        m.add_command(label="Close all files", command=self.close_all)
-        mb["menu"] = m
-        mb.pack(side="left")
-        self.themes.register_menu(m)
+        tb.pack(side="top", fill="x", padx=8, pady=(6, 4))
 
-        mb = ttk.Menubutton(tb, text="Export ▾")
-        m = tk.Menu(mb, tearoff=0)
-        m.add_command(label="Ticked spectra → CSV…",
-                      command=lambda: self.export_ticked("csv"))
-        m.add_command(label="Ticked spectra → VAMAS…",
-                      command=lambda: self.export_ticked("vamas"))
-        m.add_command(label="Choose regions / levels…", command=self.open_export)
-        m.add_separator()
-        m.add_command(label="Metadata → CSV…", command=self.export_meta_csv)
-        m.add_command(label="Metadata → PDF…", command=self.export_meta_pdf)
-        mb["menu"] = m
-        mb.pack(side="left", padx=4)
-        self.themes.register_menu(m)
+        def menubutton(text, items):
+            btn = ttk.Button(tb, text=f"{text} ▾", style="Tool.TButton")
+            m = tk.Menu(btn, tearoff=0)
+            for it in items:
+                if it is None:
+                    m.add_separator()
+                else:
+                    m.add_command(label=it[0], command=it[1])
 
-        mb = ttk.Menubutton(tb, text="PDF ▾")
-        m = tk.Menu(mb, tearoff=0)
-        m.add_command(label="Preview spectra…", command=self.preview_spectra)
-        m.add_command(label="Save spectra as PDF…", command=self.save_pdf)
-        m.add_separator()
-        m.add_command(label="Preview metadata…", command=self.preview_metadata)
-        m.add_command(label="Save metadata as PDF…",
-                      command=self.export_meta_pdf)
-        mb["menu"] = m
-        mb.pack(side="left")
-        self.themes.register_menu(m)
-        ttk.Button(tb, text="Metadata…", command=self.open_metadata).pack(
-            side="left", padx=4)
-        self.toolbar_right = ttk.Frame(tb)
-        self.toolbar_right.pack(side="right")
-        tcb = ttk.Combobox(self.toolbar_right, width=14, state="readonly",
+            def drop():
+                try:
+                    m.tk_popup(btn.winfo_rootx(),
+                               btn.winfo_rooty() + btn.winfo_height())
+                finally:
+                    m.grab_release()
+            btn.configure(command=drop)
+            btn.pack(side="left", padx=(0, 2))
+            self.themes.register_menu(m)
+
+        menubutton("Open", [("Spectra files…", self.open_files),
+                            ("Folder…", self.open_folder), None,
+                            ("Close all files", self.close_all)])
+        menubutton("Export", [
+            ("Ticked spectra to CSV…", lambda: self.export_ticked("csv")),
+            ("Ticked spectra to VAMAS…", lambda: self.export_ticked("vamas")),
+            ("Regions and levels…", self.open_export), None,
+            ("Metadata to CSV…", self.export_meta_csv),
+            ("Metadata to PDF…", self.export_meta_pdf)])
+        menubutton("PDF", [("Preview spectra", self.preview_spectra),
+                           ("Save spectra as PDF…", self.save_pdf), None,
+                           ("Preview metadata", self.preview_metadata),
+                           ("Save metadata as PDF…", self.export_meta_pdf)])
+
+        right = ttk.Frame(tb)
+        right.pack(side="right")
+        self.show_vars = {"tree": tk.BooleanVar(value=True),
+                          "info": tk.BooleanVar(value=True)}
+        focus = ttk.Button(right, text="Focus", style="Tool.TButton",
+                           command=self.toggle_focus)
+        focus.pack(side="right", padx=(2, 0))
+        Tooltip(focus, "Hide the file tree and details so the plot fills the "
+                       "window (F11).", lambda: self.palette)
+        for key, text, tip in (("info", "Details",
+                                "Show or hide the details column."),
+                               ("tree", "Files",
+                                "Show or hide the file tree.")):
+            cb = ttk.Checkbutton(right, text=text, style="Toolbutton",
+                                 variable=self.show_vars[key],
+                                 command=lambda k=key: self._toggle_pane(k))
+            cb.pack(side="right", padx=(2, 0))
+            Tooltip(cb, tip, lambda: self.palette)
+        tcb = ttk.Combobox(right, width=14, state="readonly",
                            values=THEME_NAMES, textvariable=self.theme_var)
-        tcb.pack(side="right")
+        tcb.pack(side="right", padx=(0, 12))
         tcb.bind("<<ComboboxSelected>>",
                  lambda e: self.set_theme(self.theme_var.get()))
-        ttk.Label(self.toolbar_right, text="Theme").pack(side="right",
-                                                         padx=(8, 4))
-        self.focus_btn = ttk.Button(self.toolbar_right, text="Focus plot",
-                                    command=self.toggle_focus)
-        self.focus_btn.pack(side="right", padx=(6, 0))
-        self.info_btn = ttk.Button(self.toolbar_right, text="Info ◨", width=7,
-                                   command=lambda: self._toggle_pane("info"))
-        self.info_btn.pack(side="right", padx=(6, 0))
-        self.tree_btn = ttk.Button(self.toolbar_right, text="◧ Tree", width=7,
-                                   command=lambda: self._toggle_pane("tree"))
-        self.tree_btn.pack(side="right", padx=(6, 0))
+        ttk.Label(right, text="Theme", style="Muted.TLabel").pack(
+            side="right", padx=(12, 6))
 
     # -- theme --------------------------------------------------------------
     def _apply_mpl_theme(self):
@@ -571,7 +711,9 @@ class Workspace:
         self.theme_var.set(name)
         self.palette = self.themes.apply(name)
         self._apply_mpl_theme()
-        self.box_imgs, self.blank_img = make_box_images(self.palette)
+        self._restyle_details()
+        self.swatches = SwatchCache(self.palette)
+        self.blank_img = self.swatches.blank
         self.box_state.clear()
         self._populate_tree()
         if HAVE_MPL:
@@ -603,6 +745,7 @@ class Workspace:
         else:                                        # hide
             self._hidden[name] = max(150, pane.winfo_width())
             self.outer.forget(pane)
+        self.show_vars[name].set(name not in self._hidden)
 
     def _set_width(self, name, width):
         try:
@@ -619,11 +762,9 @@ class Workspace:
         if self._hidden:
             for name in list(self._hidden):
                 self._toggle_pane(name)
-            self.focus_btn.config(text="Focus plot")
         else:
             for name in ("tree", "info"):
                 self._toggle_pane(name)
-            self.focus_btn.config(text="Show panels")
 
     def _restore_layout(self):
         cfg = self.cfg
@@ -633,7 +774,7 @@ class Workspace:
             tree_w = int(cfg.get("sash_tree", 0)) or 0
             info_w = int(cfg.get("sash_info", 0)) or 0
             if not tree_w:
-                tree_w = 360 if total >= 1300 else 300
+                tree_w = 430 if total >= 1300 else 340
             if not info_w:
                 info_w = 380 if total >= 1300 else 300
             self.outer.sashpos(0, tree_w)
@@ -641,7 +782,7 @@ class Workspace:
             h = self.info_pane.winfo_height()
             if h > 100:
                 self.info_pane.sashpos(0, int(cfg.get("sash_info_v", 0)) or
-                                       int(h * 0.55))
+                                       int(h * 0.64))
         except tk.TclError:
             pass
 
@@ -669,24 +810,23 @@ class Workspace:
         self.root.quit()
 
     def _build_tree_pane(self, parent):
-        tb2 = ttk.Frame(parent)
-        tb2.pack(side="top", fill="x", padx=4, pady=(2, 2))
-        ttk.Button(tb2, text="Expand", width=8,
-                   command=lambda: self._expand(True)).pack(side="left")
-        ttk.Button(tb2, text="Collapse", width=8,
-                   command=lambda: self._expand(False)).pack(side="left",
-                                                            padx=4)
-        ttk.Button(tb2, text="Untick all",
-                   command=self.untick_all).pack(side="left")
+        top = ttk.Frame(parent)
+        top.pack(side="top", fill="x", padx=10, pady=(8, 2))
+        ttk.Label(top, text="Files", style="Section.TLabel").pack(side="left")
+        for text, cmd in (("Clear ticks", self.untick_all),
+                          ("Collapse", lambda: self._expand(False)),
+                          ("Expand", lambda: self._expand(True))):
+            ttk.Button(top, text=text, style="Tool.TButton",
+                       command=cmd).pack(side="right")
 
         fb = ttk.Frame(parent)
-        fb.pack(side="top", fill="x", padx=4, pady=(2, 4))
-        ttk.Label(fb, text="Filter:").pack(side="left")
+        fb.pack(side="top", fill="x", padx=10, pady=(2, 6))
+        ttk.Label(fb, text="Filter").pack(side="left")
         self.filter_var = tk.StringVar()
         ent = ttk.Entry(fb, textvariable=self.filter_var)
-        ent.pack(side="left", fill="x", expand=True, padx=4)
+        ent.pack(side="left", fill="x", expand=True, padx=(6, 4))
         ent.bind("<KeyRelease>", lambda e: self._populate_tree())
-        ttk.Button(fb, text="Clear", width=6,
+        ttk.Button(fb, text="Clear", style="Tool.TButton",
                    command=lambda: (self.filter_var.set(""),
                                     self._populate_tree())).pack(side="left")
 
@@ -695,15 +835,15 @@ class Workspace:
         cols = ("detail", "pts", "pe", "etch")
         self.tree = ttk.Treeview(holder, columns=cols,
                                  show="tree headings", selectmode="extended")
-        self.tree.heading("#0", text="Tick to plot")
-        self.tree.heading("detail", text="Range / position")
-        self.tree.heading("pts", text="Pts")
-        self.tree.heading("pe", text="PE")
-        self.tree.heading("etch", text="Etch")
-        self.tree.column("#0", width=210, stretch=True, minwidth=120)
-        self.tree.column("detail", width=95, anchor="w", stretch=False)
-        self.tree.column("pts", width=42, anchor="e", stretch=False)
-        self.tree.column("pe", width=38, anchor="e", stretch=False)
+        self.tree.heading("#0", text="Name", anchor="w")
+        self.tree.heading("detail", text="Range", anchor="w")
+        self.tree.heading("pts", text="Points", anchor="e")
+        self.tree.heading("pe", text="Pass (eV)", anchor="e")
+        self.tree.heading("etch", text="Etch", anchor="e")
+        self.tree.column("#0", width=230, stretch=True, minwidth=140)
+        self.tree.column("detail", width=104, anchor="w", stretch=False)
+        self.tree.column("pts", width=52, anchor="e", stretch=False)
+        self.tree.column("pe", width=66, anchor="e", stretch=False)
         self.tree.column("etch", width=56, anchor="e", stretch=False)
         sb = ttk.Scrollbar(holder, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
@@ -719,89 +859,101 @@ class Workspace:
 
     def _build_plot_pane(self, parent):
         cfg = self.cfg
-        # row 1: how spectra are combined
+        tip = lambda w, t: Tooltip(w, t, lambda: self.palette)      # noqa: E731
+        # one view row: how spectra are combined
         ctl = ttk.Frame(parent)
-        ctl.pack(side="top", fill="x", padx=6, pady=(4, 0))
+        ctl.pack(side="top", fill="x", padx=10, pady=(8, 2))
         ttk.Label(ctl, text="Group by").pack(side="left")
         self.group_var = tk.StringVar(value=cfg.get("group_by", "Element name"))
-        gb = ttk.Combobox(ctl, textvariable=self.group_var, width=14,
+        gb = ttk.Combobox(ctl, textvariable=self.group_var, width=12,
                           state="readonly", values=list(self.GROUP_MODES))
-        gb.pack(side="left", padx=(2, 10))
+        gb.pack(side="left", padx=(6, 12))
         gb.bind("<<ComboboxSelected>>",
                 lambda e: self._schedule_render(reset_page=True))
+        tip(gb, "Which spectra share a panel: the same element name, or "
+                "overlapping energy ranges.")
 
         ttk.Label(ctl, text="Normalise").pack(side="left")
         self.norm_var = tk.StringVar(value=cfg.get("norm", "None"))
         nb = ttk.Combobox(ctl, textvariable=self.norm_var, width=9,
                           state="readonly", values=self.NORM_MODES)
-        nb.pack(side="left", padx=(2, 10))
+        nb.pack(side="left", padx=(6, 12))
         nb.bind("<<ComboboxSelected>>", lambda e: self._schedule_render())
+        tip(nb, "Scale every spectrum: to its maximum, its area, or to match "
+                "at an energy you click on the plot.")
 
-        ttk.Label(ctl, text="Stack offset").pack(side="left")
+        ttk.Label(ctl, text="Offset").pack(side="left")
         self.offset_var = tk.DoubleVar(value=float(cfg.get("offset", 0.6)))
-        ttk.Scale(ctl, from_=0.0, to=3.0, variable=self.offset_var,
-                  orient="horizontal", length=110,
-                  command=lambda e: self._schedule_render()).pack(
-            side="left", padx=4)
+        self.offset_lbl = ttk.Label(ctl, text="", width=4,
+                                    style="Muted.TLabel")
+        sc = ttk.Scale(ctl, from_=0.0, to=3.0, variable=self.offset_var,
+                       orient="horizontal", length=72,
+                       command=self._on_offset)
+        sc.pack(side="left", padx=(6, 2))
+        self.offset_lbl.pack(side="left", padx=(0, 10))
+        tip(sc, "Vertical gap between stacked spectra. 0 overlays them.")
+        self.offset_lbl.config(text=f"{self.offset_var.get():.1f}×")
 
-        self.reverse = tk.BooleanVar(value=False)
-        ttk.Checkbutton(ctl, text="Reverse", variable=self.reverse,
-                        command=self._schedule_render).pack(side="left",
-                                                            padx=6)
-        self.hint = ttk.Label(ctl, style="Hint.TLabel", font=("", 9))
-        self.hint.pack(side="right", padx=8)
-
-        # row 2: how many, and scrolling
-        vw = ttk.Frame(parent)
-        vw.pack(side="top", fill="x", padx=6, pady=(2, 0))
-        ttk.Label(vw, text="Panels per page").pack(side="left")
+        # canvas + toolbar + contextual footer (bottom widgets are packed in
+        # _layout_bottom so they can be shown and hidden in order)
+        self.fig = self.canvas = self.toolbar = None
+        self._trace_bar_on = False
+        self._sb_on = False
+        self.footer = ttk.Frame(parent)
+        ttk.Label(self.footer, text="Panels").pack(side="left")
         self.panels_var = tk.StringVar(value=cfg.get("panels_per_page", "Auto"))
-        pb = ttk.Combobox(vw, textvariable=self.panels_var, width=5,
+        pb = ttk.Combobox(self.footer, textvariable=self.panels_var, width=5,
                           state="readonly", values=self.PANEL_CHOICES)
-        pb.pack(side="left", padx=(2, 10))
+        pb.pack(side="left", padx=(6, 14))
         pb.bind("<<ComboboxSelected>>",
                 lambda e: self._schedule_render(reset_page=True))
-
-        ttk.Label(vw, text="Traces per panel").pack(side="left")
+        tip(pb, "How many panels to show at once. The mouse wheel scrolls "
+                "through the rest.")
+        ttk.Label(self.footer, text="Traces").pack(side="left")
         self.traces_var = tk.StringVar(value=cfg.get("traces_per_panel", "All"))
-        tbx = ttk.Combobox(vw, textvariable=self.traces_var, width=5,
+        tbx = ttk.Combobox(self.footer, textvariable=self.traces_var, width=5,
                            values=self.TRACE_CHOICES)
-        tbx.pack(side="left", padx=(2, 10))
+        tbx.pack(side="left", padx=(6, 14))
         tbx.bind("<<ComboboxSelected>>", lambda e: self._on_traces_changed())
         tbx.bind("<Return>", lambda e: self._on_traces_changed())
         tbx.bind("<FocusOut>", lambda e: self._on_traces_changed())
-
-        self.prev_btn = ttk.Button(vw, text="◀ Prev", width=7,
+        tip(tbx, "Show only this many spectra per stack (type your own "
+                 "number). Shift + mouse wheel scrolls through the rest.")
+        self.reverse = tk.BooleanVar(value=False)
+        rv = ttk.Checkbutton(self.footer, text="Reverse stack",
+                             variable=self.reverse,
+                             command=self._schedule_render)
+        rv.pack(side="left", padx=(0, 14))
+        tip(rv, "Stack the spectra in the opposite order.")
+        self.prev_btn = ttk.Button(self.footer, text="◀", width=3,
+                                   style="Tool.TButton",
                                    command=self.prev_page, state="disabled")
         self.prev_btn.pack(side="left")
-        self.next_btn = ttk.Button(vw, text="Next ▶", width=7,
+        self.next_btn = ttk.Button(self.footer, text="▶", width=3,
+                                   style="Tool.TButton",
                                    command=self.next_page, state="disabled")
-        self.next_btn.pack(side="left", padx=(4, 8))
-        self.page_lbl = ttk.Label(vw, text="")
+        self.next_btn.pack(side="left", padx=(2, 8))
+        tip(self.prev_btn, "Previous panels")
+        tip(self.next_btn, "Next panels")
+        self.page_lbl = ttk.Label(self.footer, text="", style="Muted.TLabel")
         self.page_lbl.pack(side="left")
-        self.count_lbl = ttk.Label(vw, text="")
-        self.count_lbl.pack(side="right")
+        self.hint = ttk.Label(self.footer, style="Hint.TLabel")
+        self.hint.pack(side="right")
 
-        self.fig = self.canvas = self.toolbar = None
         if HAVE_MPL:
             self.fig = Figure(figsize=(6, 3.5), dpi=100)
             self.canvas = FigureCanvasTkAgg(self.fig, master=parent)
-            self._make_toolbar()
-            # trace-window slider (under the plot)
             self.trace_bar = ttk.Frame(parent)
-            self.trace_bar.pack(side="bottom", fill="x", padx=6)
-            self.trace_lbl = ttk.Label(self.trace_bar, text="", width=22)
+            self.trace_lbl = ttk.Label(self.trace_bar, text="", width=22,
+                                       style="Muted.TLabel")
             self.trace_lbl.pack(side="left")
-            self.trace_var = tk.IntVar(value=0)
             self.trace_scale = ttk.Scale(
                 self.trace_bar, from_=0, to=1, orient="horizontal",
-                command=self._on_trace_scale, state="disabled")
+                command=self._on_trace_scale)
             self.trace_scale.pack(side="left", fill="x", expand=True)
-            ttk.Label(self.trace_bar, text="wheel: panels · Shift+wheel: traces",
-                      font=("", 8)).pack(side="right", padx=(8, 0))
             self.panel_sb = ttk.Scrollbar(parent, orient="vertical",
                                           command=self._panel_scroll)
-            self.panel_sb.pack(side="right", fill="y")
+            self._make_toolbar()
             w = self.canvas.get_tk_widget()
             w.pack(side="top", expand=True, fill="both")
             self.canvas.mpl_connect("button_press_event", self._on_plot_click)
@@ -814,49 +966,85 @@ class Workspace:
                             ("<End>", lambda: self._jump(10 ** 9))):
                 w.bind(key, lambda e, fn=fn: fn())
         else:
+            self.footer.pack(side="bottom", fill="x", padx=10, pady=(2, 6))
             ttk.Label(parent, justify="left", padding=20,
                       text="matplotlib is not installed, so spectra cannot be "
                            "plotted.\n\n    pip install matplotlib").pack()
 
+    def _on_offset(self, value):
+        self.offset_lbl.config(text=f"{float(value):.1f}×")
+        self._schedule_render()
+
+    def _layout_bottom(self):
+        """(Re)pack the widgets under the plot in order: matplotlib toolbar
+        (lowest), trace slider (only when it can act), footer."""
+        for w in (self.toolbar, self.trace_bar, self.footer):
+            w.pack_forget()
+        self.toolbar.pack(side="bottom", fill="x")
+        if self._trace_bar_on:
+            self.trace_bar.pack(side="bottom", fill="x", padx=10)
+        self.footer.pack(side="bottom", fill="x", padx=10, pady=(2, 6))
+
+    def _set_scrollbar(self, on):
+        if on == self._sb_on:
+            return
+        self._sb_on = on
+        if on:
+            self.panel_sb.pack(side="right", fill="y",
+                               before=self.canvas.get_tk_widget())
+        else:
+            self.panel_sb.pack_forget()
+
     def _make_toolbar(self):
-        """(Re)create the matplotlib navigation toolbar at the very bottom of
-        the plot pane, coloured for the current theme."""
+        """(Re)create the matplotlib navigation toolbar under the plot,
+        coloured for the current theme."""
         if self.toolbar is not None:
             self.toolbar.destroy()
         self.toolbar = NavigationToolbar2Tk(self.canvas, self.plot_pane,
                                             pack_toolbar=False)
-        kw = ({"before": self.trace_bar}
-              if getattr(self, "trace_bar", None) else {})
-        self.toolbar.pack(side="bottom", fill="x", **kw)
+        # Windows paints disabled image buttons in the system grey, which
+        # breaks dark themes: keep Back/Forward enabled (no-ops when empty)
+        self.toolbar.set_history_buttons = lambda: None
+        for name in ("Back", "Forward"):
+            btn = self.toolbar._buttons.get(name)
+            if btn is not None:
+                btn.configure(state="normal")
         self.themes.recolor_mpl_toolbar(self.toolbar)
+        self._layout_bottom()
 
     def _build_meta_table(self, parent):
-        self.meta = ttk.Treeview(parent, columns=("field", "value"),
-                                 show="headings", selectmode="extended",
-                                 height=8)
-        self.meta.heading("field", text="Field")
-        self.meta.heading("value", text="Value")
-        self.meta.column("field", width=125, stretch=False, minwidth=60)
-        self.meta.column("value", width=200, stretch=True, minwidth=60)
-        self.meta.tag_configure("head", font=("TkDefaultFont", 9, "bold"))
-        sb = ttk.Scrollbar(parent, command=self.meta.yview)
+        ttk.Label(parent, text="Details", style="Section.TLabel").pack(
+            side="top", anchor="w", padx=12, pady=(8, 2))
+        body = ttk.Frame(parent)
+        body.pack(side="top", fill="both", expand=True)
+        indent = 132                          # px: field names | values
+        self.meta = tk.Text(body, wrap="word", relief="flat", borderwidth=0,
+                            highlightthickness=0, padx=12, pady=2,
+                            cursor="arrow", exportselection=False,
+                            state="disabled", width=30, height=8,
+                            font="TkDefaultFont")
+        self.meta.configure(tabs=(indent + 12,))
+        self.meta.tag_configure("row", lmargin1=0, lmargin2=indent + 12,
+                                spacing1=3)
+        self.meta.tag_configure("h", spacing1=12, spacing3=2,
+                                font="AppSection")
+        sb = ttk.Scrollbar(body, command=self.meta.yview)
         self.meta.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         self.meta.pack(side="left", expand=True, fill="both")
-        self.meta.bind("<Control-c>", self._copy_meta)
         self.meta_hint = ttk.Label(
-            parent, style="Muted.TLabel", wraplength=300, justify="left",
-            text="Select a sample or spectrum in the tree to see its "
-                 "acquisition metadata.\n\nTicking a box plots a spectrum; "
-                 "selecting a row shows its details here.")
+            body, style="Muted.TLabel", wraplength=300, justify="left",
+            text="Select a spectrum in the tree to see how it was acquired.\n\n"
+                 "Ticking its box plots it.")
+        self._restyle_details()
         self._update_metadata()
 
-    def _copy_meta(self, _e=None):
-        rows = self.meta.selection() or self.meta.get_children()
-        text = "\n".join("\t".join(str(v) for v in self.meta.item(i, "values"))
-                         for i in rows)
-        self.root.clipboard_clear()
-        self.root.clipboard_append(text)
+    def _restyle_details(self):
+        p = self.palette
+        self.meta.configure(bg=p["bg"], fg=p["fg"], insertbackground=p["fg"],
+                            selectbackground=p["select_bg"],
+                            selectforeground=p["select_fg"])
+        self.meta.tag_configure("k", foreground=p["muted"])
 
     def _build_side_tabs(self):
         self.tab_images = ttk.Frame(self.nb)
@@ -957,6 +1145,7 @@ class Workspace:
         self.docs.append(parser)
         for r in parser.regions:
             self.region_parser[id(r)] = parser
+        self._recompute_colours()
         self._populate_tree()
         self._refresh_images()
         self._schedule_render(reset_page=True)
@@ -966,11 +1155,26 @@ class Workspace:
         problems += [f"{name}: {w}" for w in parser.warnings]
         return problems
 
+    def _recompute_colours(self):
+        self.color_slot = colour_slots(self.docs)
+
+    def trace_colours(self, regs, pal=None):
+        pal = pal or self.palette
+        return stack_colours([self.color_slot.get(id(r), 0) for r in regs],
+                             pal["cycle"], pal["plot_bg"])
+
+    def _assign_colours(self, groups):
+        self.trace_color = {}
+        for _key, rs in groups:
+            for r, c in zip(rs, self.trace_colours(rs)):
+                self.trace_color[id(r)] = c
+
     def _remove_doc(self, parser):
         for r in parser.regions:
             self.checked.discard(id(r))
             self.region_parser.pop(id(r), None)
         self.docs.remove(parser)
+        self._recompute_colours()
         self.sel_regions = []
         if self._cur_image and self._cur_image[0] is parser:
             self._cur_image = None
@@ -988,6 +1192,7 @@ class Workspace:
         self.tree.delete(*self.tree.get_children())
         self.node_map.clear()
         self.leaf_ids.clear()
+        self.leaf_region.clear()
         self.box_state.clear()
         flt = self.filter_var.get().strip().lower()
 
@@ -1006,13 +1211,18 @@ class Workspace:
                 id(node), depth == 0 or (depth == 1 and n_samples <= 3))
             cols = tuple(node.cols) if node.cols else ("", "", "", "")
             state = tick_state(ids, self.checked)
+            colour = (self.trace_color.get(id(node.region))
+                      if state == 2 and node.region is not None else None)
             iid = self.tree.insert(
                 parent, "end", text=" " + node.label, open=opened, values=cols,
-                image=self.box_imgs[state] if ids else self.blank_img)
+                image=self.swatches.get(state, colour) if ids
+                else self.blank_img)
             self.node_map[iid] = (parser, node)
             if ids:
                 self.leaf_ids[iid] = ids
-                self.box_state[iid] = state
+                self.box_state[iid] = (state, colour)
+                if node.region is not None:
+                    self.leaf_region[iid] = node.region
             for c in node.children:
                 add(iid, parser, c, depth + 1, n_samples)
 
@@ -1038,9 +1248,12 @@ class Workspace:
     def _refresh_boxes(self):
         for iid, ids in self.leaf_ids.items():
             st = tick_state(ids, self.checked)
-            if self.box_state.get(iid) != st:
-                self.box_state[iid] = st
-                self.tree.item(iid, image=self.box_imgs[st])
+            colour = None
+            if st == 2 and iid in self.leaf_region:
+                colour = self.trace_color.get(id(self.leaf_region[iid]))
+            if self.box_state.get(iid) != (st, colour):
+                self.box_state[iid] = (st, colour)
+                self.tree.item(iid, image=self.swatches.get(st, colour))
 
     def _toggle(self, iids, force=None):
         ids = set()
@@ -1237,20 +1450,22 @@ class Workspace:
         try:
             self.trace_scale.configure(to=max(1, max_start))
             self.trace_scale.set(self.trace_start)
-            self.trace_scale.state(["!disabled"] if max_start > 0
-                                   else ["disabled"])
         finally:
             self._scale_guard = False
-        if limit and longest > limit:
+        on = max_start > 0
+        if on:
             a = self.trace_start + 1
             self.trace_lbl.config(
                 text=f"Traces {a}–{min(a + limit - 1, longest)} of {longest}")
-        else:
-            self.trace_lbl.config(text="All traces shown")
+        if on != self._trace_bar_on:
+            self._trace_bar_on = on
+            self._layout_bottom()
 
     def _render(self):
         self._render_job = None
         groups = self._groups()
+        self._assign_colours(groups)
+        self._refresh_boxes()
         n_groups = len(groups)
         n_spec = sum(len(rs) for _k, rs in groups)
         npp = self._panels_per_page(n_groups)
@@ -1262,10 +1477,7 @@ class Workspace:
         limit = self._traces_limit()
         self._update_trace_controls(
             limit, max((len(rs) for _k, rs in groups), default=0))
-        self.count_lbl.config(
-            text="Nothing ticked" if not n_spec else
-            f"{n_spec} spectr{'um' if n_spec == 1 else 'a'} in "
-            f"{n_groups} panel{'' if n_groups == 1 else 's'}")
+        self._counts = (n_spec, n_groups)
         self.prev_btn.config(
             state="normal" if self.panel_start > 0 else "disabled")
         self.next_btn.config(
@@ -1275,8 +1487,9 @@ class Workspace:
             text=(f"Panels {self.panel_start + 1}–{self.panel_start + shown} "
                   f"of {n_groups}") if n_groups > npp else "")
         self.hint.config(
-            text="Click a panel to set the normalisation energy."
+            text="Click a panel to set the energy to match at."
             if self.norm_var.get() == "At cursor" and n_spec else "")
+        self._set_scrollbar(HAVE_MPL and n_groups > npp)
         if HAVE_MPL:
             self.fig.clear()
             self._axmap = {}
@@ -1300,36 +1513,48 @@ class Workspace:
         self._update_status()
         self._refresh_side()
 
-    def _draw_page(self, fig, chunk, limit=None, start=0):
+    def _draw_page(self, fig, chunk, limit=None, start=0, pal=None):
         """Draw one page of panels onto fig; returns {axes: group key}.
-        ``limit``/``start`` show a window of long stacks."""
+        ``limit``/``start`` show a window of long stacks; ``pal`` overrides the
+        colours (PDFs pass the white 'print' palette)."""
+        pal = pal or self.palette
         rows, cols = _grid_dims(len(chunk))
-        compact = len(chunk) > 1
-        with_source = len(self.docs) > 1
+        multi = len(self.docs) > 1
         norm = self.norm_var.get()
         offset = float(self.offset_var.get())
-        axmap = {}
+        selected = {id(r) for r in self.sel_regions}
+        axmap, stacked_axes = {}, []
         for i, (key, rs) in enumerate(chunk):
             ax = fig.add_subplot(rows, cols, i + 1)
-            vis, span = rs, ""
-            if limit and len(rs) > limit:
-                s = min(start, len(rs) - limit)
-                vis = rs[s:s + limit]
-                span = f" ({s + 1}–{s + limit} of {len(rs)})"
+            s = min(start, len(rs) - limit) if limit and len(rs) > limit else 0
+            vis = rs[s:s + limit] if limit and len(rs) > limit else rs
+            colours = self.trace_colours(rs, pal)[s:s + len(vis)]
             cur = None
             if norm == "At cursor":
                 cur = self.cursors.get(key)
                 if cur is None:
                     e = vis[0].energy
                     cur = self.cursors[key] = (e[0] + e[-1]) / 2.0
-            r = vis[0]
             if len(rs) == 1:
-                title = f"{r.sample} — {r.name}" if r.sample else r.name
+                title = rs[0].name
+                subtitle = rs[0].sample
             else:
-                title = f"{key} — {len(vis)} spectra{span}"
-            draw_stack(ax, vis, offset, norm, cur, with_source, title, compact)
+                title = key
+                subtitle = (f"{len(rs)} spectra" if len(vis) == len(rs)
+                            else f"{s + 1}–{s + len(vis)} of {len(rs)}")
+            draw_stack(ax, vis, offset, norm, cur, colours, title, subtitle,
+                       selected, multi, first_col=(i % cols == 0),
+                       bottom_row=(i + cols >= len(chunk)),
+                       accent=pal["accent"], muted=pal["muted"])
             axmap[ax] = key
+            if len(vis) > 1:
+                stacked_axes.append(ax)
         fig.tight_layout()
+        # make room for the end-of-trace labels to the right of stacked axes
+        gutter = 78 / 72.0 / fig.get_figwidth()
+        for ax in stacked_axes:
+            b = ax.get_position()
+            ax.set_position([b.x0, b.y0, max(0.05, b.width - gutter), b.height])
         return axmap
 
     def _on_plot_click(self, event):
@@ -1361,7 +1586,7 @@ class Workspace:
             for p in range((len(groups) + per_page - 1) // per_page):
                 fig = Figure(figsize=size, dpi=150)
                 self._draw_page(fig, groups[p * per_page:(p + 1) * per_page],
-                                limit, self.trace_start)
+                                limit, self.trace_start, pal=PRINT)
                 pdf.savefig(fig)
         return len(groups)
 
@@ -1417,12 +1642,12 @@ class Workspace:
         cb = ttk.Combobox(pv.options, textvariable=self._pv_panels, width=4,
                           state="readonly",
                           values=["1", "2", "4", "6", "9", "12", "16"])
-        cb.pack(side="left", padx=(2, 10))
+        cb.pack(side="left", padx=(6, 16))
         cb.bind("<<ComboboxSelected>>", lambda e: self._regen_spectra_preview())
         ttk.Label(pv.options, text="Page").pack(side="left")
         ob = ttk.Combobox(pv.options, textvariable=self._pv_orient, width=9,
                           state="readonly", values=["Landscape", "Portrait"])
-        ob.pack(side="left", padx=(2, 10))
+        ob.pack(side="left", padx=(6, 16))
         ob.bind("<<ComboboxSelected>>", lambda e: self._regen_spectra_preview())
         if self._traces_limit():
             ttk.Checkbutton(
@@ -1486,13 +1711,18 @@ class Workspace:
 
     def _update_status(self):
         if not self.docs:
-            self.status.config(text="Open a spectra file to begin.")
+            self.status.config(text="No files loaded. Use Open to add spectra.")
             return
-        nreg = sum(len(p.regions) for p in self.docs)
-        nimg = sum(len(p.images) for p in self.docs)
-        self.status.config(
-            text=f"{len(self.docs)} file(s) — {nreg} regions, {nimg} image(s) "
-                 f"— {len(self.checked)} ticked")
+        n_spec, n_groups = getattr(self, "_counts", (0, 0))
+        nf = len(self.docs)
+        text = f"{nf} {'file' if nf == 1 else 'files'} loaded, "
+        if n_spec:
+            text += (f"{n_spec} {'spectrum' if n_spec == 1 else 'spectra'} "
+                     f"ticked on {n_groups} "
+                     f"{'panel' if n_groups == 1 else 'panels'}")
+        else:
+            text += "nothing ticked"
+        self.status.config(text=text)
 
     # -- side panels ----------------------------------------------------
     def _current_tab(self):
@@ -1514,70 +1744,95 @@ class Workspace:
 
     def _update_metadata(self):
         t = self.meta
-        t.delete(*t.get_children())
+        t.config(state="normal")
+        t.delete("1.0", "end")
         regs = self.sel_regions
         if not regs:
-            self.meta_hint.place(relx=0.02, rely=0.02, relwidth=0.9)
+            self.meta_hint.place(x=12, y=8)
+            t.config(state="disabled")
             return
         self.meta_hint.place_forget()
 
         def head(txt):
-            t.insert("", "end", values=(txt, ""), tags=("head",))
+            t.insert("end", txt + "\n", "h")
 
         def row(k, v):
-            t.insert("", "end", values=(k, v))
+            t.insert("end", k, ("row", "k"))
+            t.insert("end", f"\t{v}\n", "row")
 
         parser = self.region_parser.get(id(regs[0]))
         samples = sorted({(r.source, r.sample) for r in regs})
         if len(regs) == 1 or len(samples) == 1:
             base = parser.region_metadata(regs[0])
-            order = ["Sample", "Source file", "File format", "Date acquired",
-                     "Etch level", "Etch time (s)", "Instrument", "Operator",
-                     "Acquisition computer", "X-ray source", "Anode",
-                     "Photon energy (eV)", "Source power (W)",
-                     "Charge neutraliser", "Ion gun / sputtering"]
-            for k in order:
-                if base.get(k):
-                    row(k, base[k])
+
+            def section(title, keys):
+                items = [(k, base[k]) for k in keys if base.get(k)]
+                if items:
+                    head(title)
+                    for k, v in items:
+                        row(k, v)
+
+            section("Sample", ["Sample", "Source file", "File format"])
+            section("Acquisition", [
+                "Date acquired", "Etch level", "Etch time (s)", "Instrument",
+                "Operator", "Acquisition computer", "X-ray source", "Anode",
+                "Photon energy (eV)", "Source power (W)", "Charge neutraliser",
+                "Ion gun / sputtering"])
             if len(regs) == 1:
                 r = regs[0]
-                head("Region")
-                for k in ["Region", "Pass energy (eV)", "Lens mode", "Aperture",
-                          "BE start (eV)", "BE end (eV)", "Step (eV)",
-                          "Dwell (s)", "Points", "Quality"]:
-                    if base.get(k):
-                        row(k, base[k])
+                section("Region", [
+                    "Region", "Pass energy (eV)", "Lens mode", "Aperture",
+                    "BE start (eV)", "BE end (eV)", "Step (eV)", "Dwell (s)",
+                    "Points", "Quality"])
                 if r.note:
                     row("Note", r.note)
             else:
                 head(f"{len(regs)} regions")
                 for r in regs[:60]:
-                    pe = f"PE {r.pass_energy:g} eV" if r.pass_energy else ""
-                    row(r.name, pe)
+                    row(r.name, f"pass {r.pass_energy:g} eV"
+                        if r.pass_energy else "")
                 if len(regs) > 60:
                     row("…", f"and {len(regs) - 60} more")
         else:
-            head(f"{len(regs)} spectra, {len(samples)} samples")
+            head(f"{len(regs)} spectra from {len(samples)} samples")
             for src, s in samples[:80]:
                 rs = [r for r in regs if (r.source, r.sample) == (src, s)]
                 label = s or src or "(unnamed)"
                 if len(self.docs) > 1 and s:
-                    label = f"{s} — {src}"
+                    label = f"{s} in {src}"
                 row(label, ", ".join(dict.fromkeys(r.name for r in rs)))
             if len(samples) > 80:
                 row("…", f"and {len(samples) - 80} more samples")
+        t.config(state="disabled")
 
     # -- images tab -----------------------------------------------------
+    def _refresh_info(self):
+        """Show the Images / Stage-map notebook only when a loaded file has
+        images or stage positions; otherwise Details gets the full height."""
+        has_img = any(p.images for p in self.docs)
+        has_pos = any(p.sample_positions() for p in self.docs)
+        show = has_img or has_pos
+        on = str(self.nb) in [str(x) for x in self.info_pane.panes()]
+        if show and not on:
+            self.info_pane.add(self.nb, weight=2)
+        elif on and not show:
+            self.info_pane.forget(self.nb)
+        self.nb.tab(self.tab_images, state="normal" if has_img else "hidden")
+        self.nb.tab(self.tab_map, state="normal" if has_pos else "hidden")
+        if has_pos and not has_img:
+            self.nb.select(self.tab_map)
+        elif has_img:
+            self.nb.select(self.tab_images)
+
     def _refresh_images(self):
         for w in self.thumb_inner.winfo_children():
             w.destroy()
         self._thumb_imgs = []
         items = [(p, b) for p in self.docs for b in p.images]
         if not items:
-            ttk.Label(self.thumb_inner, text="(no images loaded)",
-                      padding=8).pack()
             self._cur_image = None
             self._redraw_viewer()
+            self._refresh_info()
             return
         multi = len(self.docs) > 1
         for n, (p, blob) in enumerate(items, 1):
@@ -1599,6 +1854,7 @@ class Workspace:
                       wraplength=170).pack()
         if self._cur_image is None:
             self._redraw_viewer()
+        self._refresh_info()
 
     def _make_thumb(self, parser, blob, size=(150, 100)):
         if not HAVE_PIL:
@@ -1625,8 +1881,7 @@ class Workspace:
         if not self._cur_image:
             self.overlay_cb.config(state="disabled")
             ttk.Label(self.viewer, padding=20,
-                      text="Click an image on the left, or select an image "
-                           "node in the tree.").pack()
+                      text="Select an image above to view it.").pack()
             return
         parser, blob = self._cur_image
         positions = parser.sample_positions()
@@ -1737,8 +1992,7 @@ class Workspace:
         positions = parser.sample_positions() if parser else {}
         if not positions:
             ttk.Label(parent, padding=20,
-                      text="No stage positions recorded. Load a file (and "
-                           "select or tick its spectra) to see where each "
+                      text="Select or tick a spectrum to see where its "
                            "sample sat on the holder.").pack()
             return
         hot_samples = self._highlight_samples(parser)
@@ -1831,17 +2085,6 @@ class Workspace:
                             "to the file whose metadata you want, then try "
                             "again.")
         return None
-
-    def open_metadata(self):
-        if self._metadata_doc() is None:
-            return
-        choice = MetadataDialog(self.root)
-        self.themes.recolor_tk(self.root)
-        self.root.wait_window(choice)
-        if choice.result == "csv":
-            self.export_meta_csv()
-        elif choice.result == "pdf":
-            self.export_meta_pdf()
 
     def export_meta_csv(self):
         parser = self._metadata_doc()
@@ -2081,31 +2324,8 @@ class ExportDialog(tk.Toplevel):
             self.destroy()
 
 
-class MetadataDialog(tk.Toplevel):
-    """Tiny chooser: export metadata as CSV or PDF."""
-
-    def __init__(self, master):
-        super().__init__(master)
-        self.result = None
-        self.title("Export metadata")
-        self.resizable(False, False)
-        self.transient(master)
-        self.grab_set()
-        ttk.Label(self, text="Export per-sample acquisition metadata as:",
-                  padding=12).pack()
-        btns = ttk.Frame(self)
-        btns.pack(padx=12, pady=(0, 12))
-        ttk.Button(btns, text="CSV", width=12,
-                   command=lambda: self._pick("csv")).pack(side="left", padx=6)
-        ttk.Button(btns, text="Formatted PDF", width=14,
-                   command=lambda: self._pick("pdf")).pack(side="left", padx=6)
-
-    def _pick(self, value):
-        self.result = value
-        self.destroy()
-
-
 def main():
+    fonts.register_process_fonts()          # before Tk enumerates fonts
     root = tk.Tk()
     Workspace(root)
     root.mainloop()

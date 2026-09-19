@@ -1,9 +1,11 @@
-"""Colour themes for the whole UI: ttk widgets, classic Tk widgets, tick-box
-icons and matplotlib figures.
+"""Design tokens and colour themes for the whole UI: ttk widgets, classic Tk
+widgets, tick-box swatches and matplotlib figures.
 
-"Light" keeps the platform-native look (it is the original colour scheme);
-every other theme uses ttk's fully recolourable ``clam`` engine. PDFs always
-render with :data:`PRINT` (white paper) whatever theme is active.
+Chrome is deliberately quiet (cool greys, one desaturated accent used only for
+focus, selection and primary actions); the **data palette** is the loud part.
+Every theme except "System" uses ttk's fully recolourable ``clam`` engine;
+"System" keeps the platform-native look. PDFs always render with
+:data:`PRINT` (white paper) whatever theme is active.
 """
 
 from __future__ import annotations
@@ -11,74 +13,142 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-NATIVE = "Light"
+NATIVE = "System"
+DEFAULT = "Light"
 
 # Every palette must define every key (checked by tests/test_themes.py).
 KEYS = ("bg", "panel", "fg", "muted", "accent", "entry", "select_bg",
         "select_fg", "border", "hint", "plot_bg", "plot_fg", "plot_grid",
         "cycle", "box_edge", "box_fill", "box_mark")
 
-_TAB10 = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-          "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf"]
+# Colour-blind-safe categorical data colours (Okabe-Ito derived); a
+# luminance-lifted set for dark backgrounds.
+DATA_LIGHT = ["#0072B2", "#D55E00", "#009E73", "#CC79A7", "#B07A00",
+              "#8A5CD1", "#6B6B6B"]
+DATA_DARK = ["#5AB4EE", "#FF8A50", "#2FCB9E", "#E68FC0", "#F2B33D",
+             "#B49CF2", "#B8C2CC"]
+DATA_SOLARIZED = ["#268bd2", "#dc322f", "#859900", "#b58900", "#6c71c4",
+                  "#2aa198", "#d33682", "#cb4b16"]
+DATA_CONTRAST = ["#FFFF00", "#00FFFF", "#FF00FF", "#00FF00", "#FF8000",
+                 "#FFFFFF", "#FF5555"]
 
 PALETTES = {
     "Light": {
-        "bg": "#f0f0f0", "panel": "#e6e6e6", "fg": "#1a1a1a", "muted": "#666666",
-        "accent": "#2a6fdb", "entry": "#ffffff", "select_bg": "#cde0f7",
-        "select_fg": "#000000", "border": "#b5b5b5", "hint": "#aa0000",
-        "plot_bg": "#ffffff", "plot_fg": "#222222", "plot_grid": "#cccccc",
-        "cycle": _TAB10, "box_edge": "#4a4a4a", "box_fill": "#ffffff",
-        "box_mark": "#2a6fdb"},
-    "Dark": {
-        "bg": "#1e1f22", "panel": "#2b2d30", "fg": "#dcdcdc", "muted": "#9a9a9a",
-        "accent": "#4c9aff", "entry": "#2b2d30", "select_bg": "#2f65ca",
-        "select_fg": "#ffffff", "border": "#43454a", "hint": "#ff8a80",
-        "plot_bg": "#1e1f22", "plot_fg": "#dcdcdc", "plot_grid": "#3a3c40",
-        "cycle": ["#4fc3f7", "#ffb74d", "#81c784", "#e57373", "#ba68c8",
-                  "#a1887f", "#f06292", "#b0bec5", "#dce775", "#4dd0e1"],
-        "box_edge": "#9a9a9a", "box_fill": "#2b2d30", "box_mark": "#4c9aff"},
+        "bg": "#ECEFF1", "panel": "#E1E6E9", "fg": "#1A2127", "muted": "#56636E",
+        "accent": "#0F6B8C", "entry": "#FFFFFF", "select_bg": "#CFE6EE",
+        "select_fg": "#0A2530", "border": "#C5CDD3", "hint": "#A8321F",
+        "plot_bg": "#FFFFFF", "plot_fg": "#1A2127", "plot_grid": "#DDE3E7",
+        "cycle": DATA_LIGHT, "box_edge": "#56636E", "box_fill": "#FFFFFF",
+        "box_mark": "#1A2127"},
+    "Dark": {                                    # plot = recessed instrument screen
+        "bg": "#12161A", "panel": "#1A2026", "fg": "#D7DEE4", "muted": "#8E9AA5",
+        "accent": "#4CC2E0", "entry": "#0F1418", "select_bg": "#21495A",
+        "select_fg": "#FFFFFF", "border": "#2A333B", "hint": "#FF8A80",
+        "plot_bg": "#0C1014", "plot_fg": "#D7DEE4", "plot_grid": "#232B32",
+        "cycle": DATA_DARK, "box_edge": "#8E9AA5", "box_fill": "#0F1418",
+        "box_mark": "#D7DEE4"},
     "Midnight": {
-        "bg": "#0f172a", "panel": "#1e293b", "fg": "#e2e8f0", "muted": "#94a3b8",
-        "accent": "#38bdf8", "entry": "#16213a", "select_bg": "#1d4ed8",
-        "select_fg": "#ffffff", "border": "#334155", "hint": "#fca5a5",
-        "plot_bg": "#0f172a", "plot_fg": "#e2e8f0", "plot_grid": "#26344d",
-        "cycle": ["#38bdf8", "#fbbf24", "#34d399", "#f87171", "#a78bfa",
-                  "#fb923c", "#f472b6", "#94a3b8", "#a3e635", "#22d3ee"],
-        "box_edge": "#94a3b8", "box_fill": "#16213a", "box_mark": "#38bdf8"},
+        "bg": "#0F172A", "panel": "#1E293B", "fg": "#E2E8F0", "muted": "#94A3B8",
+        "accent": "#38BDF8", "entry": "#0B1224", "select_bg": "#1D4ED8",
+        "select_fg": "#FFFFFF", "border": "#334155", "hint": "#FCA5A5",
+        "plot_bg": "#0A1020", "plot_fg": "#E2E8F0", "plot_grid": "#1E2A44",
+        "cycle": DATA_DARK, "box_edge": "#94A3B8", "box_fill": "#0B1224",
+        "box_mark": "#E2E8F0"},
     "Solarized Light": {
-        "bg": "#fdf6e3", "panel": "#eee8d5", "fg": "#586e75", "muted": "#93a1a1",
-        "accent": "#268bd2", "entry": "#fffdf5", "select_bg": "#d5e6ee",
-        "select_fg": "#073642", "border": "#d3cbb6", "hint": "#dc322f",
-        "plot_bg": "#fdf6e3", "plot_fg": "#586e75", "plot_grid": "#e3dcc6",
-        "cycle": ["#268bd2", "#dc322f", "#859900", "#b58900", "#6c71c4",
-                  "#2aa198", "#d33682", "#cb4b16"],
-        "box_edge": "#657b83", "box_fill": "#fffdf5", "box_mark": "#268bd2"},
+        "bg": "#FDF6E3", "panel": "#EEE8D5", "fg": "#073642", "muted": "#586E75",
+        "accent": "#268BD2", "entry": "#FFFDF5", "select_bg": "#D5E6EE",
+        "select_fg": "#073642", "border": "#D3CBB6", "hint": "#C02A27",
+        "plot_bg": "#FFFDF5", "plot_fg": "#073642", "plot_grid": "#E3DCC6",
+        "cycle": DATA_SOLARIZED, "box_edge": "#586E75", "box_fill": "#FFFDF5",
+        "box_mark": "#073642"},
     "High contrast": {
-        "bg": "#000000", "panel": "#101010", "fg": "#ffffff", "muted": "#cccccc",
-        "accent": "#ffff00", "entry": "#000000", "select_bg": "#ffff00",
-        "select_fg": "#000000", "border": "#ffffff", "hint": "#ff6060",
-        "plot_bg": "#000000", "plot_fg": "#ffffff", "plot_grid": "#555555",
-        "cycle": ["#ffff00", "#00ffff", "#ff00ff", "#00ff00", "#ff8000",
-                  "#ffffff", "#ff5555", "#55aaff"],
-        "box_edge": "#ffffff", "box_fill": "#000000", "box_mark": "#ffff00"},
+        "bg": "#000000", "panel": "#101010", "fg": "#FFFFFF", "muted": "#CCCCCC",
+        "accent": "#FFFF00", "entry": "#000000", "select_bg": "#FFFF00",
+        "select_fg": "#000000", "border": "#FFFFFF", "hint": "#FF6060",
+        "plot_bg": "#000000", "plot_fg": "#FFFFFF", "plot_grid": "#555555",
+        "cycle": DATA_CONTRAST, "box_edge": "#FFFFFF", "box_fill": "#000000",
+        "box_mark": "#FFFF00"},
+    "System": {                                  # native ttk theme (Windows/macOS/Linux)
+        "bg": "#F0F0F0", "panel": "#E6E6E6", "fg": "#1A1A1A", "muted": "#595959",
+        "accent": "#0F6B8C", "entry": "#FFFFFF", "select_bg": "#CDE0F7",
+        "select_fg": "#000000", "border": "#B5B5B5", "hint": "#AA0000",
+        "plot_bg": "#FFFFFF", "plot_fg": "#222222", "plot_grid": "#CCCCCC",
+        "cycle": DATA_LIGHT, "box_edge": "#4A4A4A", "box_fill": "#FFFFFF",
+        "box_mark": "#1A1A1A"},
 }
 THEME_NAMES = list(PALETTES)
 
 # white "paper" style used for every PDF
-PRINT = dict(PALETTES["Light"], plot_bg="#ffffff", plot_fg="#000000",
-             plot_grid="#cccccc")
+PRINT = dict(PALETTES["Light"], plot_bg="#FFFFFF", plot_fg="#000000",
+             plot_grid="#CCCCCC")
+
+# Font family for matplotlib (set by the app once the bundled font is added)
+MPL_FAMILY: str | None = None
 
 
-def mpl_rc(pal) -> dict:
+# -- colour maths --------------------------------------------------------------
+def _rgb(h):
+    h = h.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) / 255.0 for i in (0, 2, 4))
+
+
+def _hex(rgb):
+    return "#" + "".join(f"{max(0, min(255, round(c * 255))):02X}" for c in rgb)
+
+
+def luminance(h) -> float:
+    """WCAG relative luminance of a #RRGGBB colour."""
+    def lin(c):
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (lin(c) for c in _rgb(h))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(a, b) -> float:
+    """WCAG contrast ratio between two colours (1 = none, 21 = black/white)."""
+    la, lb = luminance(a), luminance(b)
+    hi, lo = max(la, lb), min(la, lb)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def mix(a, b, t) -> str:
+    """Blend colour ``a`` toward ``b`` by fraction ``t`` (0 = a, 1 = b)."""
+    ra, rb = _rgb(a), _rgb(b)
+    return _hex(tuple(x + (y - x) * t for x, y in zip(ra, rb)))
+
+
+def ramp(colour, n, background):
+    """``n`` shades of one hue, strongest first, fading toward the background.
+    The fade grows with the stack (10 % per step, capped at 62 %, so every
+    trace stays visible): a pair or trio is barely tinted, a long depth
+    profile spans the whole range."""
+    if n <= 1:
+        return [colour]
+    top = min(0.62, 0.10 * (n - 1))
+    return [mix(colour, background, top * i / (n - 1)) for i in range(n)]
+
+
+def mpl_rc(pal, family=None) -> dict:
     """matplotlib rcParams for a palette (use with ``matplotlib.rc_context``)."""
+    fam = family or MPL_FAMILY
     rc = {
         "figure.facecolor": pal["plot_bg"], "savefig.facecolor": pal["plot_bg"],
-        "axes.facecolor": pal["plot_bg"], "axes.edgecolor": pal["plot_fg"],
+        "axes.facecolor": pal["plot_bg"], "axes.edgecolor": pal["muted"],
         "axes.labelcolor": pal["plot_fg"], "axes.titlecolor": pal["plot_fg"],
-        "text.color": pal["plot_fg"], "xtick.color": pal["plot_fg"],
-        "ytick.color": pal["plot_fg"], "grid.color": pal["plot_grid"],
+        "text.color": pal["plot_fg"], "xtick.color": pal["muted"],
+        "ytick.color": pal["muted"], "grid.color": pal["plot_grid"],
         "legend.facecolor": pal["plot_bg"], "legend.edgecolor": pal["plot_grid"],
+        # design: open frame, small quiet type
+        "axes.spines.top": False, "axes.spines.right": False,
+        "axes.linewidth": 0.8, "xtick.major.width": 0.8,
+        "ytick.major.width": 0.8, "xtick.major.size": 3.5,
+        "ytick.major.size": 3.5, "axes.titlelocation": "left",
+        "axes.titleweight": "bold", "axes.titlesize": 10,
+        "axes.labelsize": 9, "xtick.labelsize": 8, "ytick.labelsize": 8,
+        "font.size": 9, "lines.linewidth": 1.1,
     }
+    if fam:
+        rc["font.family"] = [fam, "DejaVu Sans"]
     try:
         from cycler import cycler
         rc["axes.prop_cycle"] = cycler(color=list(pal["cycle"]))
@@ -87,22 +157,59 @@ def mpl_rc(pal) -> dict:
     return rc
 
 
-def make_box_images(pal):
-    """Tiny tick-box icons for the tree: ([unticked, partial, ticked], blank)."""
-    def build(state):
-        img = tk.PhotoImage(width=16, height=16)
-        img.put(pal["box_fill"], to=(2, 2, 14, 14))
-        for box in ((2, 2, 14, 3), (2, 13, 14, 14), (2, 2, 3, 14),
-                    (13, 2, 14, 14)):
-            img.put(pal["box_edge"], to=box)
-        if state == 2:
-            img.put(pal["box_mark"], to=(5, 5, 11, 11))
-        elif state == 1:
-            img.put(pal["box_mark"], to=(5, 7, 11, 9))
+# -- tick boxes / swatches --------------------------------------------------------
+def _fill(img, colour, x0, y0, x1, y1, rounded=True):
+    """Filled rectangle [x0,x1) x [y0,y1); corners trimmed when ``rounded``."""
+    for y in range(y0, y1):
+        if rounded and y in (y0, y1 - 1):
+            img.put(colour, to=(x0 + 1, y, x1 - 1, y + 1))
+        else:
+            img.put(colour, to=(x0, y, x1, y + 1))
+
+
+class SwatchCache:
+    """Tree tick boxes drawn as small rounded squares.
+
+    A ticked spectrum is a *filled swatch in its trace colour* (so the tree is
+    also the plot's legend); unticked is an outline; a partly ticked parent
+    shows a bar. Images are generated lazily and cached per colour.
+    """
+
+    def __init__(self, pal):
+        self.pal = pal
+        self._cache = {}
+        self.blank = tk.PhotoImage(width=16, height=16)
+
+    def get(self, state, colour=None):
+        """state: 0 none, 1 some, 2 all. ``colour`` only matters for state 2."""
+        key = (state, colour if state == 2 else None)
+        img = self._cache.get(key)
+        if img is None:
+            img = self._cache[key] = self._build(*key)
         return img
-    return [build(0), build(1), build(2)], tk.PhotoImage(width=16, height=16)
+
+    def _build(self, state, colour):
+        p = self.pal
+        img = tk.PhotoImage(width=16, height=16)
+        if state == 2 and colour:                # ticked spectrum: trace colour
+            _fill(img, colour, 2, 2, 14, 14)
+            return img
+        _fill(img, p["box_edge"], 2, 2, 14, 14)
+        _fill(img, p["box_fill"], 3, 3, 13, 13, rounded=False)
+        if state == 2:                           # parent, everything ticked
+            _fill(img, p["box_mark"], 5, 5, 11, 11, rounded=False)
+        elif state == 1:                         # parent, some ticked
+            _fill(img, p["box_mark"], 5, 7, 11, 9, rounded=False)
+        return img
 
 
+def make_box_images(pal):
+    """Legacy helper: ([unticked, partial, ticked], blank) neutral swatches."""
+    sw = SwatchCache(pal)
+    return [sw.get(0), sw.get(1), sw.get(2)], sw.blank
+
+
+# -- theme manager ---------------------------------------------------------------
 class ThemeManager:
     """Applies a named palette to a Tk application."""
 
@@ -110,8 +217,8 @@ class ThemeManager:
         self.root = root
         self.style = ttk.Style(root)
         self.native = self.style.theme_use()
-        self.name = NATIVE
-        self.palette = dict(PALETTES[NATIVE])
+        self.name = DEFAULT
+        self.palette = dict(PALETTES[DEFAULT])
         self._menus = []
         self._defaults = self._probe_defaults()
 
@@ -121,10 +228,12 @@ class ThemeManager:
     # -- ttk -------------------------------------------------------------
     def apply(self, name):
         """Switch theme; returns the palette (with the widget bg resolved)."""
-        pal = dict(PALETTES.get(name, PALETTES[NATIVE]))
-        self.name = name if name in PALETTES else NATIVE
+        if name not in PALETTES:
+            name = DEFAULT
+        pal = dict(PALETTES[name])
+        self.name = name
         st = self.style
-        if self.name == NATIVE:
+        if name == NATIVE:
             st.theme_use(self.native)
             pal["bg"] = st.lookup("TFrame", "background") or pal["bg"]
             pal["fg"] = st.lookup("TLabel", "foreground") or pal["fg"]
@@ -133,77 +242,118 @@ class ThemeManager:
             self._style_clam(pal)
         st.configure("Hint.TLabel", foreground=pal["hint"])
         st.configure("Muted.TLabel", foreground=pal["muted"])
+        try:                                     # named font made by the app
+            st.configure("Section.TLabel", font="AppSection")
+        except tk.TclError:
+            pass
         self.palette = pal
         self.root.configure(bg=(self._defaults["frame"][0]
-                                if self.name == NATIVE else pal["bg"]))
+                                if name == NATIVE else pal["bg"]))
         self.recolor_tk(self.root)
         return pal
+
+    def _row_height(self):
+        try:
+            import tkinter.font as tkfont
+            return tkfont.nametofont("TkDefaultFont").metrics("linespace") + 9
+        except Exception:
+            return 22
 
     def _style_clam(self, p):
         st = self.style
         bg, panel, fg, muted, entry, border = (
             p["bg"], p["panel"], p["fg"], p["muted"], p["entry"], p["border"])
+        acc = p["accent"]
         st.configure(".", background=bg, foreground=fg, fieldbackground=entry,
-                     bordercolor=border, lightcolor=panel, darkcolor=panel,
-                     troughcolor=panel, focuscolor=p["accent"],
+                     bordercolor=border, lightcolor=bg, darkcolor=bg,
+                     troughcolor=panel, focuscolor=acc,
                      selectbackground=p["select_bg"],
                      selectforeground=p["select_fg"], insertcolor=fg)
         st.map(".", foreground=[("disabled", muted)],
                background=[("disabled", bg)])
-        st.configure("TButton", background=panel, foreground=fg, padding=(6, 2))
-        st.map("TButton", background=[("active", p["select_bg"]),
-                                      ("pressed", p["select_bg"])],
-               foreground=[("active", p["select_fg"]),
-                           ("disabled", muted)])
+        # buttons: flat, one padding rhythm (10 x 5)
+        st.configure("TButton", background=panel, foreground=fg,
+                     padding=(10, 4), borderwidth=1, relief="flat",
+                     bordercolor=border)
+        st.map("TButton", background=[("pressed", p["select_bg"]),
+                                      ("active", border)],
+               foreground=[("disabled", muted)],
+               bordercolor=[("focus", acc)])
+        st.configure("Tool.TButton", background=bg, padding=(9, 4),
+                     borderwidth=0)
+        st.map("Tool.TButton", background=[("pressed", p["select_bg"]),
+                                           ("active", panel)])
+        st.configure("Toggle.TButton", background=bg, padding=(9, 4),
+                     borderwidth=0)
+        st.map("Toggle.TButton",
+               background=[("pressed", p["select_bg"]), ("active", panel)])
+        st.configure("Tool.TMenubutton", background=bg, foreground=fg,
+                     padding=(9, 4), arrowcolor=muted, borderwidth=0)
+        st.map("Tool.TMenubutton", background=[("active", panel)])
         st.configure("TMenubutton", background=panel, foreground=fg,
-                     arrowcolor=fg)
-        st.map("TMenubutton", background=[("active", p["select_bg"])],
-               foreground=[("active", p["select_fg"])])
+                     arrowcolor=muted, padding=(8, 4))
+        st.map("TMenubutton", background=[("active", border)])
         st.configure("TEntry", fieldbackground=entry, foreground=fg,
-                     insertcolor=fg)
+                     insertcolor=fg, padding=(4, 3), bordercolor=border)
+        st.map("TEntry", bordercolor=[("focus", acc)])
         st.configure("TCombobox", fieldbackground=entry, background=panel,
-                     foreground=fg, arrowcolor=fg, selectbackground=entry,
+                     foreground=fg, arrowcolor=muted, padding=(4, 3),
+                     bordercolor=border, selectbackground=entry,
                      selectforeground=fg)
         st.map("TCombobox", fieldbackground=[("readonly", entry)],
                foreground=[("readonly", fg)],
                selectbackground=[("readonly", entry)],
-               selectforeground=[("readonly", fg)])
+               selectforeground=[("readonly", fg)],
+               bordercolor=[("focus", acc)])
         st.configure("TSpinbox", fieldbackground=entry, foreground=fg,
-                     arrowcolor=fg)
+                     arrowcolor=muted)
         for w in ("TCheckbutton", "TRadiobutton"):
             st.configure(w, background=bg, foreground=fg,
                          indicatorbackground=entry, indicatorforeground=fg)
             st.map(w, background=[("active", bg)],
-                   indicatorbackground=[("selected", p["accent"]),
-                                        ("active", entry)],
+                   indicatorbackground=[("selected", acc), ("active", entry)],
                    foreground=[("disabled", muted)])
         st.configure("TLabelframe", background=bg, bordercolor=border)
-        st.configure("TLabelframe.Label", background=bg, foreground=fg)
+        st.configure("TLabelframe.Label", background=bg, foreground=muted)
         st.configure("TNotebook", background=bg, bordercolor=border)
-        st.configure("TNotebook.Tab", background=panel, foreground=fg,
-                     padding=(8, 2))
+        st.configure("TNotebook.Tab", background=bg, foreground=muted,
+                     padding=(12, 5), borderwidth=0)
         st.map("TNotebook.Tab", background=[("selected", bg)],
-               foreground=[("selected", p["accent"])])
+               foreground=[("selected", fg)])
+        # tree + tables: airy rows, quiet flat headings
         st.configure("Treeview", background=entry, fieldbackground=entry,
-                     foreground=fg, bordercolor=border)
+                     foreground=fg, bordercolor=border, rowheight=self._row_height(),
+                     borderwidth=0)
         st.map("Treeview", background=[("selected", p["select_bg"])],
                foreground=[("selected", p["select_fg"])])
-        st.configure("Treeview.Heading", background=panel, foreground=fg,
-                     bordercolor=border, relief="flat")
-        st.map("Treeview.Heading", background=[("active", p["select_bg"])])
+        st.configure("Treeview.Heading", background=bg, foreground=muted,
+                     bordercolor=border, relief="flat", padding=(6, 4))
+        st.map("Treeview.Heading", background=[("active", panel)])
         for o in ("Vertical", "Horizontal"):
             st.configure(f"{o}.TScrollbar", background=panel, troughcolor=bg,
-                         bordercolor=border, arrowcolor=fg)
-            st.map(f"{o}.TScrollbar", background=[("active", p["select_bg"])])
-        st.configure("TScale", background=bg, troughcolor=panel,
-                     bordercolor=border)
-        st.configure("Sash", background=border, bordercolor=border)
+                         bordercolor=bg, arrowcolor=muted, relief="flat",
+                         gripcount=0)
+            st.map(f"{o}.TScrollbar", background=[("active", border)])
+        st.configure("Horizontal.TScale", background=acc, troughcolor=border,
+                     bordercolor=border, lightcolor=acc, darkcolor=acc)
+        st.configure("Toolbutton", background=bg, padding=(9, 4),
+                     borderwidth=0, relief="flat")
+        st.map("Toolbutton", background=[("selected", p["select_bg"]),
+                                         ("pressed", p["select_bg"]),
+                                         ("active", panel)],
+               foreground=[("selected", p["select_fg"])])
+        # thin sashes without grip dots
+        st.configure("Sash", sashthickness=5, gripcount=0, background=border,
+                     bordercolor=border, lightcolor=border, darkcolor=border)
         st.configure("TPanedwindow", background=border)
         st.configure("TSeparator", background=border)
+        st.configure("Status.TLabel", background=bg, foreground=muted,
+                     padding=(10, 5))
+        st.configure("Strong.TLabel", font="TkDefaultFont")
 
     # -- classic Tk widgets ------------------------------------------------
     def _probe_defaults(self):
-        """Platform-native colours of classic Tk widgets (to restore Light)."""
+        """Platform-native colours of classic Tk widgets (to restore System)."""
         d = {}
         for key, cls in (("frame", tk.Frame), ("label", tk.Label),
                          ("text", tk.Text)):
@@ -241,7 +391,8 @@ class ThemeManager:
                 else:
                     m.configure(bg=p["panel"], fg=p["fg"],
                                 activebackground=p["select_bg"],
-                                activeforeground=p["select_fg"])
+                                activeforeground=p["select_fg"],
+                                relief="flat", borderwidth=0)
             except tk.TclError:
                 pass
 
@@ -273,13 +424,15 @@ class ThemeManager:
         cfg(toolbar, bg=bg)
         for b in getattr(toolbar, "_buttons", {}).values():
             cfg(b, bg=bg, fg=fg, activebackground=p["panel"],
-                highlightbackground=bg, selectcolor=p["panel"])
+                highlightbackground=bg, selectcolor=p["panel"],
+                relief="flat", borderwidth=0)
             try:
                 toolbar._set_image_for_button(b)      # recolours the icon
             except Exception:
                 pass
-        if hasattr(toolbar, "_message_label"):
-            cfg(toolbar._message_label, bg=bg, fg=fg)
         for w in toolbar.winfo_children():
-            if w.winfo_class() == "Frame":            # separators
+            cls = w.winfo_class()
+            if cls == "Frame":                        # separators
                 cfg(w, bg=p["border"])
+            elif cls == "Label":                      # spacer + coordinate readout
+                cfg(w, bg=bg, fg=p["muted"] if not native else fg)

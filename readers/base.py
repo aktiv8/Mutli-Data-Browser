@@ -276,6 +276,18 @@ class SpectrumFile:
                            TreeNode(sample_name or "(unnamed)",
                                     "sample", cols=(pstr, "", "", "")))
 
+            if (not is_profile and not flat
+                    and len(groups[sample_name]) == 1):
+                # one spectrum in this sample: a single row, not three levels
+                r = groups[sample_name][0]
+                tag = "" if r.decodable else "  [no data]"
+                root.children.append(TreeNode(
+                    f"{r.name} ({sample_name}){tag}", "EscaSpectrum", r.offset,
+                    region=r,
+                    cols=(self._be_str(r), str(r.n_points), self._pe_str(r),
+                          "")))
+                continue
+
             if is_profile:
                 # Sample -> Region type -> per-level leaves
                 byname, rorder = {}, []

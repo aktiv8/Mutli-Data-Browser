@@ -52,31 +52,36 @@ class PdfPreview(ttk.Frame):
         self._job = None
 
         bar = ttk.Frame(self)
-        bar.pack(side="top", fill="x", padx=6, pady=(4, 2))
+        bar.pack(side="top", fill="x", padx=10, pady=(8, 2))
         self.title_lbl = ttk.Label(bar, text="PDF preview",
-                                   font=("TkDefaultFont", 10, "bold"))
+                                   style="Section.TLabel")
         self.title_lbl.pack(side="left", padx=(0, 12))
-        self.prev_btn = ttk.Button(bar, text="◀", width=3, command=self.prev)
+        self.prev_btn = ttk.Button(bar, text="◀", width=3, command=self.prev,
+                                   style="Tool.TButton")
         self.prev_btn.pack(side="left")
         self.page_lbl = ttk.Label(bar, text="", width=11, anchor="center")
         self.page_lbl.pack(side="left")
-        self.next_btn = ttk.Button(bar, text="▶", width=3, command=self.next)
-        self.next_btn.pack(side="left", padx=(0, 10))
-        ttk.Label(bar, text="Zoom").pack(side="left")
-        self.zoom_var = tk.StringVar(value="Fit page")
-        zb = ttk.Combobox(bar, textvariable=self.zoom_var, width=9,
-                          state="readonly", values=ZOOMS)
-        zb.pack(side="left", padx=(2, 0))
-        zb.bind("<<ComboboxSelected>>", lambda e: self._schedule())
-        ttk.Button(bar, text="✕ Close preview", command=self._close).pack(
-            side="right")
-        ttk.Button(bar, text="Open in viewer", command=self.open_viewer).pack(
-            side="right", padx=6)
-        ttk.Button(bar, text="Save as…", command=self.save_as).pack(side="right")
+        self.next_btn = ttk.Button(bar, text="▶", width=3, command=self.next,
+                                   style="Tool.TButton")
+        self.next_btn.pack(side="left")
+        ttk.Button(bar, text="Close", style="Tool.TButton",
+                   command=self._close).pack(side="right")
+        ttk.Button(bar, text="Open in viewer", style="Tool.TButton",
+                   command=self.open_viewer).pack(side="right")
+        ttk.Button(bar, text="Save as…", style="Tool.TButton",
+                   command=self.save_as).pack(side="right")
 
-        # the caller puts its option widgets (panels per page, …) here
-        self.options = ttk.Frame(self)
-        self.options.pack(side="top", fill="x", padx=6, pady=(0, 2))
+        # second row: zoom, then the caller's options (panels per page, …)
+        row = ttk.Frame(self)
+        row.pack(side="top", fill="x", padx=10, pady=(0, 6))
+        ttk.Label(row, text="Zoom").pack(side="left")
+        self.zoom_var = tk.StringVar(value="Fit page")
+        zb = ttk.Combobox(row, textvariable=self.zoom_var, width=9,
+                          state="readonly", values=ZOOMS)
+        zb.pack(side="left", padx=(6, 16))
+        zb.bind("<<ComboboxSelected>>", lambda e: self._schedule())
+        self.options = ttk.Frame(row)
+        self.options.pack(side="left", fill="x")
 
         body = ttk.Frame(self)
         body.pack(side="top", fill="both", expand=True)
