@@ -31,6 +31,10 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `escape_explorer.py` | the application window and dialogs |
 | `readers/` | one reader per format plus the registry that picks one (`readers/__init__.py`) |
 | `exporters.py` | CSV, VAMAS and metadata (CSV/PDF) writers |
+| `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
+| `report.py` | the experiment report PDF |
+| `importplan.py` | choosing between `.avg` / `.vgd` copies of the same data |
+| `viewdata.py`, `metasummary.py` | plot-view and metadata-tidying helpers |
 | `themes.py` | design tokens and colour themes |
 | `fonts.py`, `assets/fonts/` | bundled IBM Plex Sans (SIL Open Font License) |
 | `pdf_preview.py` | in-app PDF preview (PyMuPDF) |
@@ -82,7 +86,10 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
 
 1. **Open** (or File menu) → *Spectra files…* to load several files of any
    supported format, or *Folder…* to load every recognised file in a folder.
-   Each file is a top-level node in the tree.
+   Each file is a top-level node in the tree. If a selection or folder holds
+   the same dataset as both `.avg` and `.vgd`, you are asked which to import
+   (`.avg` is pre-selected; *Remember my choice* stops the question, and
+   File → *Ask about .avg / .vgd duplicates again* brings it back).
 2. Every node that holds spectra has a **tick box** (click it, or press
    **Space**). Ticking a sample, region folder or whole file ticks everything
    under it; a partly-ticked parent shows a bar. **Filter** narrows the tree
@@ -168,6 +175,34 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
    **Transmission** function as corresponding variables (toggle it off in the
    dialog). *Metadata to CSV / PDF* saves per-sample acquisition metadata; with
    several files open, select a row of the file you want first.
+
+## Experiment workbooks (`.xpscontainer`)
+
+The **Workbook** menu saves everything about an experiment in one file that
+you can reopen at any time (or double-click / pass on the command line):
+
+* the **original data files**, byte-for-byte (so the workbook is
+  self-contained and the originals can be moved or deleted), with SHA-256
+  hashes as provenance; files are re-read on opening, so reader improvements
+  apply to old workbooks;
+* the **look**: what is ticked, view, grouping, normalisation, energy scale,
+  colour scale, axis colour, panels/traces and "At cursor" energies;
+* **Details and notes** — title, customer, reference, operator, date, a free
+  text summary and a letterhead logo;
+* **Figures** — any number of named looks with captions (*Add current view…*,
+  then recall, update, rename, reorder or delete them);
+* a snapshot of the acquisition metadata and a preview image.
+
+Save with **Ctrl+S**; the title bar shows `*` for unsaved changes and closing
+asks whether to save. The file is a ZIP archive with JSON and the original
+files inside, so it can be inspected with any zip tool and never runs code.
+
+**Experiment report** (Workbook menu → *preview…* / *save PDF…*) builds a PDF
+you can hand to a customer as a report or appendix: a cover page (logo, title,
+details, your summary, the list of data files with hashes), the tidied
+metadata of every file, and one page set per saved figure (drawn on white with
+its caption). Tick the sections to include in the preview bar. With no saved
+figures the current view is used. It needs `reportlab` and `pymupdf`.
 
 ## Stacked / waterfall / heatmap plots
 

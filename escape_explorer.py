@@ -33,9 +33,14 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import csv
+import copy
+import io
 import shutil
 import tempfile
+import textwrap
+import contextlib
 import json
 import math
 
@@ -70,6 +75,10 @@ import fonts
 import themes
 import viewdata
 import metasummary
+import workbook as wbk
+import report
+import importplan
+import workbook_ui
 from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
                     ramp)
 from pdf_preview import PdfPreview, HAVE_PDF, open_external
@@ -455,7 +464,9 @@ def draw_heatmap(fig, ax, regs, zi, norm="None", cmap=None, title="",
                 min(viewdata.edges(list(zi.values))))     # first trace on top
     if a0.invert:
         ax.invert_xaxis()
-    if zi.mode in ("Trace order", "Etch level"):
+    if len(regs) == 1:
+        ax.set_yticks([zi.values[0]])
+    elif zi.mode in ("Trace order", "Etch level"):
         ax.yaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_ylabel(zi.label)
     _titles(ax, title, subtitle, muted)
@@ -681,6 +692,19 @@ class Workspace:
         self.trace_color = {}       # id(region) -> colour used on the plot
         self.color_slot = {}        # id(region) -> stable palette slot
         self.leaf_region = {}       # tree iid -> its Region (leaf rows)
+        # experiment workbook (.xpscontainer) session
+        self.details = {k: "" for k in wbk.DETAIL_FIELDS}
+        self.logo = ""              # letterhead image (local path)
+        self.figures = []           # [{id, name, caption, state}]
+        self.wb_path = None         # file the workbook was opened from/saved to
+        self.wb_dir = None          # temp folder holding an opened workbook
+        self.wb_extra = {}          # unknown manifest keys, kept on re-save
+        self.wb_created = ""
+        self._wb_sig = None         # signature at the last save / open
+        self.file_ids = {}          # id(parser) -> workbook file id
+        self.file_origin = {}       # id(parser) -> path it was first added from
+        self._fid_used = set()      # file ids handed out this session
+        self._sha_cache = {}
 
         self._build_menu()
         self._build_body()
@@ -697,6 +721,8 @@ class Workspace:
                           command=self.open_files)
         filem.add_command(label="Open folder…", command=self.open_folder)
         filem.add_command(label="Close all files", command=self.close_all)
+        filem.add_command(label="Ask about .avg / .vgd duplicates again",
+                          command=self._forget_dup_choice)
         filem.add_separator()
         filem.add_command(label="Export ticked spectra → CSV…",
                           command=lambda: self.export_ticked("csv"))
@@ -717,6 +743,23 @@ class Workspace:
         filem.add_separator()
         filem.add_command(label="Quit", command=self._on_close)
         bar.add_cascade(label="File", menu=filem)
+        wbm = tk.Menu(bar, tearoff=0)
+        self.themes.register_menu(wbm)
+        wbm.add_command(label="New workbook", command=self.new_workbook)
+        wbm.add_command(label="Open workbook…", command=self.open_workbook)
+        wbm.add_command(label="Save workbook   (Ctrl+S)",
+                        command=self.save_workbook)
+        wbm.add_command(label="Save workbook as…",
+                        command=lambda: self.save_workbook(as_new=True))
+        wbm.add_separator()
+        wbm.add_command(label="Details and notes…", command=self.edit_details)
+        wbm.add_command(label="Figures…", command=self.edit_figures)
+        wbm.add_separator()
+        wbm.add_command(label="Experiment report — preview…",
+                        command=self.preview_report)
+        wbm.add_command(label="Experiment report — save PDF…",
+                        command=self.save_report)
+        bar.add_cascade(label="Workbook", menu=wbm)
         viewm = tk.Menu(bar, tearoff=0)
         self.themes.register_menu(viewm)
         viewm.add_command(label="Expand all", command=lambda: self._expand(True))
@@ -779,6 +822,7 @@ class Workspace:
         self._hidden = {}           # pane name -> width when hidden
         self._restore_widths = {}   # pane name -> width to re-apply once shown
         self.root.bind("<F11>", lambda e: self.toggle_focus())
+        self.root.bind("<Control-s>", lambda e: self.save_workbook())
 
     def _build_toolbar(self):
         tb = ttk.Frame(self.root)
@@ -952,6 +996,9 @@ class Workspace:
             pass
 
     def _on_close(self):
+        if not self._confirm_discard():
+            return
+        self._drop_wb_dir()
         cfg = self.cfg
         try:
             cfg["geometry"] = self.root.winfo_geometry()
@@ -1371,12 +1418,22 @@ class Workspace:
     def _open_filetypes():
         fmts = supported_patterns()
         allpats = " ".join(p for _n, pats in fmts for p in pats)
-        return ([("All supported spectra files", allpats)]
+        return ([("All supported spectra files", allpats + " *" + wbk.EXT),
+                 ("Experiment workbook", "*" + wbk.EXT)]
                 + [(n, " ".join(p)) for n, p in fmts]
                 + [("All files", "*.*")])
 
     def open_files(self):
         paths = filedialog.askopenfilenames(filetypes=self._open_filetypes())
+        books = [p for p in paths if p.lower().endswith(wbk.EXT)]
+        if books:
+            if len(books) == 1 and len(paths) == 1:
+                self.open_workbook(books[0])
+            else:
+                messagebox.showinfo(
+                    "Open", "Open an experiment workbook on its own, not "
+                            "together with other files.")
+            return
         self._add_files(paths)
 
     def open_folder(self):
@@ -1400,6 +1457,9 @@ class Workspace:
 
     def _add_files(self, paths):
         """Load several files, reporting problems once at the end."""
+        paths = self._resolve_duplicate_formats(list(paths))
+        if paths is None:                       # import cancelled
+            return
         problems = []
         for path in paths:
             problems += self._add_file(path)
@@ -1409,7 +1469,34 @@ class Workspace:
             messagebox.showwarning("Some files need attention",
                                    "\n\n".join(shown) + more)
 
-    def _add_file(self, path):
+    def _resolve_duplicate_formats(self, paths):
+        """Drop the redundant copy when a dataset is present as both .avg and
+        .vgd (the data are the same). Asks unless a choice was remembered;
+        returns the paths to load, or None if the user cancelled."""
+        pairs = importplan.find_pairs(paths)
+        if not pairs:
+            return paths
+        pref = self.cfg.get("dup_format")
+        if pref in importplan.CHOICES:
+            return importplan.apply_choice(paths, pairs, pref)
+        dlg = workbook_ui.DuplicateFormatDialog(self.root, self, pairs, "avg")
+        self.root.wait_window(dlg)
+        if dlg.result is None:
+            return None
+        choice, remember = dlg.result
+        if remember and isinstance(choice, str):
+            self.cfg["dup_format"] = choice
+            save_config(self.cfg)
+        return importplan.apply_choice(paths, pairs, choice)
+
+    def _forget_dup_choice(self):
+        self.cfg.pop("dup_format", None)
+        save_config(self.cfg)
+        messagebox.showinfo("Duplicate formats",
+                            "You will be asked again when a folder holds the "
+                            "same data as .avg and .vgd.")
+
+    def _add_file(self, path, file_id=None, origin=""):
         """Load one file into the tree. Returns a list of problem strings."""
         name = os.path.basename(path)
         if any(p.path == path for p in self.docs):
@@ -1421,6 +1508,10 @@ class Workspace:
         except Exception as exc:
             return [f"{name}: could not be read ({exc})"]
         self.docs.append(parser)
+        fid = file_id or wbk.new_id(self._fid_used, "f")
+        self._fid_used.add(fid)
+        self.file_ids[id(parser)] = fid
+        self.file_origin[id(parser)] = origin or path
         for r in parser.regions:
             self.region_parser[id(r)] = parser
         self._recompute_colours()
@@ -1458,6 +1549,8 @@ class Workspace:
             self.checked.discard(id(r))
             self.region_parser.pop(id(r), None)
         self.docs.remove(parser)
+        self.file_ids.pop(id(parser), None)
+        self.file_origin.pop(id(parser), None)
         self._recompute_colours()
         self.sel_regions = []
         if self._cur_image and self._cur_image[0] is parser:
@@ -1809,8 +1902,10 @@ class Workspace:
                 self.panel_sb.set(0, 1)
         self._update_status()
         self._refresh_side()
+        self._update_title()
 
-    def _draw_page(self, fig, chunk, limit=None, start=0, pal=None):
+    def _draw_page(self, fig, chunk, limit=None, start=0, pal=None,
+                   rect=None):
         """Draw one page of panels onto fig; returns {axes: group key}.
         ``limit``/``start`` show a window of long stacks; ``pal`` overrides the
         colours (PDFs pass the white 'print' palette)."""
@@ -1894,7 +1989,10 @@ class Workspace:
                 stacked_axes.append(ax)
         if fig is self.fig:
             self._axhv = axhv
-        fig.tight_layout()
+        if rect is not None:            # leave room for a heading / caption
+            fig.tight_layout(rect=rect)
+        else:
+            fig.tight_layout()
         # make room for the end-of-trace labels to the right of stacked axes
         gutter = 78 / 72.0 / fig.get_figwidth()
         for ax in stacked_axes:
@@ -1916,6 +2014,424 @@ class Workspace:
                 x = hv - x              # cursors are kept as binding energy
             self.cursors[key] = x
             self._schedule_render()
+
+    # -- experiment workbook (.xpscontainer) --------------------------------
+    STATE_CHOICES = {
+        "group_by": ("group_var", None), "norm": ("norm_var", None),
+        "view_mode": ("view_var", None), "energy_scale": ("scale_var", None),
+        "z_axis": ("z_var", None), "colour_scale": ("colscale_var", None),
+        "panels_per_page": ("panels_var", None),
+    }
+
+    def capture_state(self):
+        """The current look as JSON-able data: view settings plus the ticked
+        spectra as stable references (not ``id(region)``)."""
+        ticked = []
+        for p in self.docs:
+            fid = self.file_ids.get(id(p))
+            for pos, r in enumerate(p.regions):
+                if id(r) in self.checked:
+                    ticked.append(wbk.region_ref(fid, pos, r))
+        return {
+            "group_by": self.group_var.get(), "norm": self.norm_var.get(),
+            "offset": round(float(self.offset_var.get()), 4),
+            "reverse": bool(self.reverse.get()),
+            "view_mode": self.view_var.get(),
+            "energy_scale": self.scale_var.get(),
+            "ke_top": bool(self.ke_var.get()), "z_axis": self.z_var.get(),
+            "colour_scale": self.colscale_var.get(),
+            "colour_reverse": bool(self.colrev_var.get()),
+            "axis_colour": self.axis_choice,
+            "axis_colour_custom": self.axis_custom,
+            "panels_per_page": self.panels_var.get(),
+            "traces_per_panel": self.traces_var.get(),
+            "panel_start": int(self.panel_start),
+            "trace_start": int(self.trace_start),
+            "cursors": {k: float(v) for k, v in self.cursors.items()},
+            "ticked": ticked,
+        }
+
+    def apply_state(self, st, render=True):
+        """Restore a look saved by ``capture_state``. Unknown or invalid
+        values keep the current setting. Returns how many saved spectra could
+        not be found in the loaded files."""
+        allowed = {
+            "group_by": self.GROUP_MODES, "norm": self.NORM_MODES,
+            "view_mode": self.VIEW_MODES,
+            "energy_scale": viewdata.ENERGY_SCALES,
+            "z_axis": viewdata.Z_MODES, "colour_scale": themes.SCALE_NAMES,
+            "panels_per_page": self.PANEL_CHOICES,
+        }
+        for key, (var, _x) in self.STATE_CHOICES.items():
+            v = st.get(key)
+            if v in allowed[key]:
+                getattr(self, var).set(v)
+        try:
+            self.offset_var.set(max(0.0, min(3.0, float(st["offset"]))))
+            self.offset_lbl.config(text=f"{self.offset_var.get():.1f}×")
+        except (KeyError, TypeError, ValueError):
+            pass
+        for key, var in (("reverse", self.reverse), ("ke_top", self.ke_var),
+                         ("colour_reverse", self.colrev_var)):
+            if isinstance(st.get(key), bool):
+                var.set(st[key])
+        tr = str(st.get("traces_per_panel", "")).strip()
+        if tr == "All" or (tr.isdigit() and int(tr) > 0):
+            self.traces_var.set(tr)
+        ax = st.get("axis_colour")
+        if ax in themes.AXIS_CHOICES:
+            self.axis_choice = ax
+            self.axis_var.set(ax)
+        custom = st.get("axis_colour_custom")
+        if custom is None or re.fullmatch(r"#[0-9A-Fa-f]{6}", str(custom)):
+            self.axis_custom = custom
+        for key, attr in (("panel_start", "panel_start"),
+                          ("trace_start", "trace_start")):
+            if isinstance(st.get(key), int) and st[key] >= 0:
+                setattr(self, attr, st[key])
+        cur = st.get("cursors")
+        if isinstance(cur, dict):
+            self.cursors = {str(k): float(v) for k, v in cur.items()
+                            if isinstance(v, (int, float))}
+        missing = 0
+        if isinstance(st.get("ticked"), list):
+            by_file = {self.file_ids.get(id(p)): p.regions for p in self.docs}
+            regs, missing = wbk.resolve_refs(st["ticked"], by_file)
+            self.checked = {id(r) for r in regs}
+        self._apply_mpl_theme()
+        self._sync_view_controls()
+        if render:
+            self._schedule_render()
+        return missing
+
+    @contextlib.contextmanager
+    def _temp_state(self, st):
+        """Apply a saved look for a moment (e.g. to draw a report figure),
+        then put the live view back exactly as it was."""
+        keep = self.capture_state()
+        keep_checked, keep_cursors = set(self.checked), dict(self.cursors)
+        self.apply_state(st, render=False)
+        try:
+            yield
+        finally:
+            self.apply_state(keep, render=False)
+            self.checked, self.cursors = keep_checked, keep_cursors
+
+    def _wb_active(self):
+        return bool(self.wb_path or self.figures or self.logo
+                    or any(self.details.values()))
+
+    def _signature(self):
+        st = self.capture_state()
+        st.pop("panel_start", None)         # scrolling is not an edit
+        st.pop("trace_start", None)
+        files = sorted(f"{self.file_ids.get(id(p))}:{os.path.basename(p.path)}"
+                       for p in self.docs)
+        return json.dumps({"d": self.details, "l": self.logo,
+                           "f": self.figures, "s": st, "files": files},
+                          sort_keys=True, default=str)
+
+    def _wb_dirty(self):
+        return self._wb_active() and self._signature() != self._wb_sig
+
+    def _update_title(self):
+        title = "ESCApe Explorer"
+        if self._wb_active():
+            name = (os.path.basename(self.wb_path) if self.wb_path
+                    else "Unsaved workbook")
+            title = f"{'* ' if self._wb_dirty() else ''}{name} — {title}"
+        if self.root.title() != title:
+            self.root.title(title)
+
+    def wb_touch(self):
+        self._update_title()
+
+    def _confirm_discard(self):
+        """Before leaving the current workbook: offer to save unsaved changes.
+        Returns False if the user cancelled."""
+        if not self._wb_dirty():
+            return True
+        name = (os.path.basename(self.wb_path) if self.wb_path
+                else "the workbook")
+        ans = messagebox.askyesnocancel(
+            "Unsaved changes", f"Save changes to {name} before continuing?")
+        if ans is None:
+            return False
+        if ans:
+            return self.save_workbook()
+        return True
+
+    def _drop_wb_dir(self):
+        if self.wb_dir:
+            shutil.rmtree(self.wb_dir, ignore_errors=True)
+            self.wb_dir = None
+
+    def _reset_workbook(self):
+        self.details = {k: "" for k in wbk.DETAIL_FIELDS}
+        self.logo, self.figures = "", []
+        self.wb_path, self.wb_extra, self.wb_created = None, {}, ""
+        self._fid_used = set()
+
+    def new_workbook(self):
+        if not self._confirm_discard():
+            return
+        self.close_all()
+        self.untick_all()
+        self._reset_workbook()
+        self._drop_wb_dir()
+        self._wb_sig = self._signature()
+        self._update_title()
+
+    def _metadata_snapshot(self):
+        snap = {}
+        for p in self.docs:
+            fid = self.file_ids.get(id(p))
+            snap[fid] = {"file": os.path.basename(p.path or ""),
+                         "format": p.format_name,
+                         "samples": [{"sample": s, "regions": rows}
+                                     for s, rows in p.samples_metadata()]}
+        return snap
+
+    def save_workbook(self, as_new=False):
+        """Write the workbook. Returns True on success."""
+        path = self.wb_path
+        if as_new or not path:
+            stem = re.sub(r"[^\w.\- ]+", "_",
+                          self.details.get("title") or "experiment").strip()
+            path = filedialog.asksaveasfilename(
+                title="Save experiment workbook",
+                defaultextension=wbk.EXT, initialfile=(stem or "experiment")
+                + wbk.EXT,
+                filetypes=[("Experiment workbook", "*" + wbk.EXT)])
+            if not path:
+                return False
+        entries = []
+        for p in self.docs:
+            entries.append(wbk.FileEntry(
+                id=self.file_ids[id(p)], name=os.path.basename(p.path),
+                path=p.path, original_path=self.file_origin.get(id(p), p.path)))
+        total = sum(os.path.getsize(e.path) for e in entries
+                    if os.path.isfile(e.path))
+        if total > 500 * 1024 * 1024 and not messagebox.askokcancel(
+                "Large workbook",
+                f"The data files add up to {total / 1048576:.0f} MB and will "
+                f"be copied into the workbook. Continue?"):
+            return False
+        preview = None
+        if HAVE_MPL and self.fig is not None:
+            try:
+                buf = io.BytesIO()
+                self.fig.savefig(buf, format="png", dpi=60)
+                preview = buf.getvalue()
+            except Exception:
+                preview = None
+        book = wbk.Workbook(
+            details=dict(self.details), state=self.capture_state(),
+            figures=copy.deepcopy(self.figures), files=entries,
+            logo=self.logo, metadata=self._metadata_snapshot(),
+            created=self.wb_created, extra=dict(self.wb_extra))
+        self.root.config(cursor="watch")
+        self.root.update_idletasks()
+        try:
+            wbk.save(path, book, preview)
+        except (wbk.WorkbookError, OSError) as exc:
+            messagebox.showerror("Could not save workbook", str(exc))
+            return False
+        finally:
+            self.root.config(cursor="")
+        self.wb_path, self.wb_created = path, book.created
+        self._wb_sig = self._signature()
+        self._update_title()
+        return True
+
+    def open_workbook(self, path=None):
+        if not self._confirm_discard():
+            return
+        path = path or filedialog.askopenfilename(
+            title="Open experiment workbook",
+            filetypes=[("Experiment workbook", "*" + wbk.EXT),
+                       ("All files", "*.*")])
+        if not path:
+            return
+        folder = tempfile.mkdtemp(prefix="xpsc_")
+        self.root.config(cursor="watch")
+        self.root.update_idletasks()
+        try:
+            book = wbk.load(path, folder)
+        except wbk.WorkbookError as exc:
+            shutil.rmtree(folder, ignore_errors=True)
+            messagebox.showerror("Could not open workbook", str(exc))
+            return
+        finally:
+            self.root.config(cursor="")
+        self.close_all()
+        self.untick_all()
+        self._drop_wb_dir()
+        self._reset_workbook()
+        self.wb_dir = folder
+        self._fid_used = {f.id for f in book.files}
+        problems = list(book.warnings)
+        for f in book.files:
+            problems += self._add_file(f.path, file_id=f.id,
+                                       origin=f.original_path)
+        self.details, self.logo = book.details, book.logo
+        self.figures = book.figures
+        self.wb_path, self.wb_extra = path, book.extra
+        self.wb_created = book.created
+        missing = self.apply_state(book.state)
+        if missing:
+            problems.append(f"{missing} ticked spectrum(s) could not be "
+                            f"found in the loaded files.")
+        self._wb_sig = self._signature()
+        self._update_title()
+        if problems:
+            messagebox.showwarning("Workbook opened with warnings",
+                                   "\n\n".join(problems[:12]))
+
+    def edit_details(self):
+        def apply(details, logo):
+            self.details, self.logo = details, logo
+            self.wb_touch()
+        workbook_ui.DetailsDialog(self.root, self, self.details, self.logo,
+                                  apply)
+
+    def edit_figures(self):
+        workbook_ui.FiguresDialog(self.root, self)
+
+    # -- experiment report ---------------------------------------------------
+    def _sha(self, path):
+        try:
+            st = os.stat(path)
+        except OSError:
+            return ""
+        key = (path, st.st_mtime_ns, st.st_size)
+        if key not in self._sha_cache:
+            self._sha_cache[key] = wbk.sha256_file(path)
+        return self._sha_cache[key]
+
+    def _report_file_rows(self):
+        rows = []
+        for p in self.docs:
+            try:
+                size = os.path.getsize(p.path)
+            except OSError:
+                size = 0
+            rows.append({"name": os.path.basename(p.path or ""),
+                         "format": p.format_name, "regions": len(p.regions),
+                         "size": size, "sha256": self._sha(p.path)})
+        return rows
+
+    def _report_figure_pages(self, pdf, number, fig):
+        """Draw one saved figure (all its pages) onto a PdfPages."""
+        with self._temp_state(fig["state"]):
+            groups = self._groups()
+            if not groups:
+                return 0
+            per = self._pdf_per_page()
+            limit, start = self._traces_limit(), self.trace_start
+            pages = (len(groups) + per - 1) // per
+            paper = self._plot_palette(PRINT, paper=True)[0]
+            caption = textwrap.fill((fig.get("caption") or "").strip(), 150,
+                                    replace_whitespace=False)
+            with matplotlib.rc_context(mpl_rc(paper)):
+                for pg in range(pages):
+                    page = Figure(figsize=(11.7, 8.3), dpi=150)
+                    self._draw_page(page, groups[pg * per:(pg + 1) * per],
+                                    limit, start, pal=PRINT,
+                                    rect=(0.0, 0.17, 1.0, 0.94))
+                    head = f"Figure {number} — {fig.get('name', '')}"
+                    if pg:
+                        head += " (continued)"
+                    page.text(0.03, 0.975, head, fontsize=12,
+                              fontweight="bold", va="top")
+                    if caption and pg == 0:
+                        page.text(0.03, 0.145, caption, fontsize=9, va="top",
+                                  linespacing=1.4)
+                    pdf.savefig(page)
+        return pages
+
+    def _build_report(self, path, sections):
+        figures = self.figures or ([{
+            "name": "Current view", "caption": "",
+            "state": self.capture_state()}] if self._groups() else [])
+        if not HAVE_MPL:
+            sections = tuple(s for s in sections if s != "figures")
+        return report.build_report(
+            path, self.details, self.logo, self._report_file_rows(),
+            self.docs, figures, self._report_figure_pages, sections)
+
+    def _report_ready(self):
+        if not self.docs:
+            messagebox.showinfo("Experiment report", "Open some spectra "
+                                                     "files first.")
+            return False
+        return True
+
+    def save_report(self):
+        if not self._report_ready():
+            return
+        stem = re.sub(r"[^\w.\- ]+", "_",
+                      self.details.get("title") or "experiment report").strip()
+        path = filedialog.asksaveasfilename(
+            title="Save experiment report", defaultextension=".pdf",
+            initialfile=(stem or "experiment report") + ".pdf",
+            filetypes=[("PDF", "*.pdf")])
+        if not path:
+            return
+        self.root.config(cursor="watch")
+        self.root.update_idletasks()
+        try:
+            n = self._build_report(path, report.SECTIONS)
+        except report.ReportError as exc:
+            messagebox.showerror("Report", str(exc))
+            return
+        except Exception as exc:
+            messagebox.showerror("Report failed", str(exc))
+            return
+        finally:
+            self.root.config(cursor="")
+        messagebox.showinfo("Saved", f"Report ({n} pages) saved to\n{path}")
+
+    def preview_report(self):
+        if not self._report_ready():
+            return
+        pv = self.preview
+        pv.clear_options()
+        self._rp_sections = {
+            "cover": tk.BooleanVar(value=True),
+            "metadata": tk.BooleanVar(value=True),
+            "figures": tk.BooleanVar(value=True)}
+        ttk.Label(pv.options, text="Include").pack(side="left")
+        for key, text in (("cover", "Cover and notes"),
+                          ("metadata", "Metadata"), ("figures", "Figures")):
+            ttk.Checkbutton(pv.options, text=text, variable=self._rp_sections[
+                key], command=self._regen_report_preview).pack(
+                side="left", padx=(10, 0))
+        self.themes.recolor_tk(pv)
+        if not self._regen_report_preview():
+            return
+        self._show_preview()
+
+    def _regen_report_preview(self):
+        chosen = tuple(k for k, v in self._rp_sections.items() if v.get())
+        if not chosen:
+            messagebox.showinfo("Report", "Choose at least one section.")
+            return False
+        path = self._pdf_tmp("report.pdf")
+        self.root.config(cursor="watch")
+        self.root.update_idletasks()
+        try:
+            self._build_report(path, chosen)
+        except report.ReportError as exc:
+            messagebox.showerror("Report", str(exc))
+            return False
+        except Exception as exc:
+            messagebox.showerror("Report failed", str(exc))
+            return False
+        finally:
+            self.root.config(cursor="")
+        return self._open_preview(path, "Experiment report",
+                                  "experiment_report.pdf", keep_page=True)
 
     # -- PDF output: shared builder, save, and in-app preview --------------
     def _pdf_per_page(self):
@@ -2716,7 +3232,10 @@ class ExportDialog(tk.Toplevel):
 def main():
     fonts.register_process_fonts()          # before Tk enumerates fonts
     root = tk.Tk()
-    Workspace(root)
+    app = Workspace(root)
+    args = [a for a in sys.argv[1:] if a.lower().endswith(wbk.EXT)]
+    if args:                                 # e.g. double-clicking a workbook
+        root.after(300, lambda: app.open_workbook(os.path.abspath(args[0])))
     root.mainloop()
 
 

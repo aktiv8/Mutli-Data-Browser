@@ -247,29 +247,27 @@ def export_metadata_pdf(parser, path):
         return _metadata_pdf_matplotlib(parser, samples, path)
 
 
-def _metadata_pdf_reportlab(parser, samples, path):
+def _metadata_story(parser, samples, title="ESCApe Acquisition Metadata",
+                    level=1, fname=None):
+    """Flowables for one file's metadata report. Shared by the metadata PDF
+    and the experiment report (which nests it one heading level down)."""
     from xml.sax.saxutils import escape as xml_escape
     from reportlab.lib import colors
-    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import mm
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak)
+        Paragraph, Spacer, Table, TableStyle, PageBreak)
 
     styles = getSampleStyleSheet()
-    h1 = styles["Heading1"]
-    h2 = styles["Heading2"]
+    h1 = styles["Heading%d" % level]
+    h2 = styles["Heading%d" % (level + 1)]
     small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8,
                            leading=10)
-    doc = SimpleDocTemplate(path, pagesize=landscape(A4),
-                            leftMargin=14 * mm, rightMargin=14 * mm,
-                            topMargin=14 * mm, bottomMargin=12 * mm,
-                            title="ESCApe acquisition metadata")
     story = []
-    fname = os.path.basename(parser.path or "experiment")
-    story.append(Paragraph("ESCApe Acquisition Metadata", h1))
+    fname = fname or os.path.basename(parser.path or "experiment")
+    story.append(Paragraph(xml_escape(title), h1))
     story.append(Paragraph(
-        f"File: {fname} &nbsp;&nbsp; Samples: {len(samples)} &nbsp;&nbsp; "
+        f"File: {xml_escape(fname)} &nbsp;&nbsp; Samples: {len(samples)} &nbsp;&nbsp; "
         f"Regions: {parser.summary['n_regions']} &nbsp;&nbsp; "
         f"Generated: {datetime.datetime.now():%Y-%m-%d %H:%M}", small))
     if parser.corruption["corrupted"]:
@@ -318,8 +316,19 @@ def _metadata_pdf_reportlab(parser, samples, path):
         t = Table(table, repeatRows=1)
         t.setStyle(hdr_style)
         story.append(t)
+    return story
 
-    doc.build(story)
+
+def _metadata_pdf_reportlab(parser, samples, path):
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.units import mm
+    from reportlab.platypus import SimpleDocTemplate
+
+    doc = SimpleDocTemplate(path, pagesize=landscape(A4),
+                            leftMargin=14 * mm, rightMargin=14 * mm,
+                            topMargin=14 * mm, bottomMargin=12 * mm,
+                            title="ESCApe acquisition metadata")
+    doc.build(_metadata_story(parser, samples))
     return len(samples)
 
 
