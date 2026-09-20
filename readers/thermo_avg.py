@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import os
 import re
+from array import array
 
-from .base import Region, SpectrumFile, canon_region_name, read_bytes
+from .base import (Region, ImageBlob, SpectrumFile, canon_region_name,
+                   read_bytes)
 
 _PROP_RE = re.compile(r"^(DS_\w+(?:\[\d+\])?)\s*:\s*(VT_\w+)\s*=\s*(.*)$")
 _AXISVALUE_RE = re.compile(
@@ -22,6 +24,16 @@ _AXISVALUE_RE = re.compile(
 _INT_TYPES = ("VT_I1", "VT_I2", "VT_I4", "VT_I8", "VT_UI1", "VT_UI2", "VT_UI4",
               "VT_UI8", "VT_INT", "VT_UINT")
 K_ENERGY = "DS_SOPROPID_ENERGY"
+K_VALUE_TYPE = "DS_GEPROPID_VALUE_TYPE"
+VALUE_RGB = 13                       # a camera image: one packed colour per pixel
+# axis type codes of the binary VGSpaceAxes stream (the .avg dump spells them out)
+AXIS_CODES = {1: "ENERGY", 3: "X", 4: "Y", 6: "ETCHLEVEL", 8: "ETCHTIME",
+              10: "POSITION"}
+AXIS_DEFAULTS = {          # symbol, unit, label the dump would print
+    "ENERGY": ("E", "eV", "Energy"), "X": ("X", "µm", "X"),
+    "Y": ("Y", "µm", "Y"), "ETCHTIME": ("EtchTime", "s", "Etch Time"),
+    "ETCHLEVEL": ("EtchLevel", "", "Etch Level"),
+    "POSITION": ("Pos", "", "Position")}
 
 
 def typed_value(vt: str, raw: str):
@@ -50,10 +62,47 @@ class DataSpace:
         self.data_axes = []      # (start, end, n_space_axes) per data axis
         self.space_axes = []     # dict(start,width,n,type,linear,symbol,unit,label)
         self.blocks = []         # dict(index=tuple, labels={space_idx: value}, values=[..])
+        self.pixels = None       # camera images: callable -> packed pixels, row by row
 
     @property
     def n_energy(self):
         return self.space_axes[0]["n"] if self.space_axes else 0
+
+    def axis_types(self):
+        return [a["type"].upper() for a in self.space_axes]
+
+    def space_of_data_axis(self):
+        """[[space axis indices]] for every data axis (a multi-point axis
+        drives Position, X and Y together)."""
+        out, first = [], 0
+        for (_s, _e, nsp) in self.data_axes:
+            out.append(list(range(first, first + nsp)))
+            first += nsp
+        return out
+
+
+def dataspace_kind(ds: DataSpace) -> str:
+    """What a DataSpace holds: ``spectrum``, ``position`` (one spectrum per
+    analysis point), ``levels`` (a depth profile), ``map`` (a SnapMap: a
+    spectrum per pixel), ``image`` (a camera picture), ``table`` (one value
+    per point, e.g. the auto-height Z values) or ``other``."""
+    types = ds.axis_types()
+    if not types:
+        return "other"
+    if types[0] != "ENERGY":
+        if (ds.props.get(K_VALUE_TYPE) == VALUE_RGB
+                or (types[:2] == ["X", "Y"] and len(ds.data_axes) == 2)):
+            return "image"
+        return "table" if "POSITION" in types else "other"
+    extra = ds.space_of_data_axis()[1:]
+    if not extra:
+        return "spectrum"
+    kinds = {types[i] for sp in extra for i in sp if i < len(types)}
+    if "POSITION" in kinds:
+        return "position"
+    if kinds <= {"X", "Y"}:
+        return "map"
+    return "levels"
 
 
 def sniff(head: bytes, ext: str) -> bool:
@@ -160,15 +209,32 @@ def region_name_from_title(title: str) -> str:
 class ThermoDataSpaceFile(SpectrumFile):
     """Shared logic: DataSpace -> Regions + metadata."""
 
+    kind = "spectrum"            # what dataspace_kind() found in the file
+    value_table = None           # {"label", "unit", "rows": [(label, x_mm, y_mm, value)]}
+
+    @staticmethod
+    def _stage(p):
+        """Stage position in mm from the property block (stored in nm)."""
+        x, y = p.get("DS_STPROPID_POS_X"), p.get("DS_STPROPID_POS_Y")
+        if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+            return x / 1e6, y / 1e6
+        return None
+
     def _from_dataspace(self, ds: DataSpace):
         p = ds.props
+        if not ds.space_axes:
+            raise ValueError("this DataSpace is empty (no axes or data)")
+        self.kind = dataspace_kind(ds)
+        self._instrument_from(p)
+        if self.kind == "image":
+            return self._image_from(ds)
+        if self.kind == "table":
+            return self._table_from(ds)
         hv = p.get(K_ENERGY)
         hv = round(float(hv), 3) if hv else None    # stored as float32
         title = p.get("DS_EXT_SUPROPID_TITLE") or os.path.splitext(
             os.path.basename(self.path or ""))[0]
         name = region_name_from_title(title)
-        if not ds.space_axes:
-            raise ValueError("no space axes found in this DataSpace")
         ax0 = ds.space_axes[0]
         if ax0["type"].upper() != "ENERGY":
             self.warnings.append(
@@ -189,21 +255,10 @@ class ThermoDataSpaceFile(SpectrumFile):
         else:
             energy, e_label = native, ax0["label"] or "Energy"
 
-        # classify the extra (non-energy) data axes
-        extra_kind, extra_space = "none", []
-        if len(ds.data_axes) > 1:
-            first = ds.data_axes[0][2]
-            for (start, end, nsp) in ds.data_axes[1:]:
-                extra_space += list(range(first, first + nsp))
-                first += nsp
-            types = [ds.space_axes[i]["type"].upper() for i in extra_space
-                     if i < len(ds.space_axes)]
-            if "POSITION" in types:
-                extra_kind = "position"
-            elif types and all(t in ("X", "Y") for t in types):
-                extra_kind = "map"
-            else:
-                extra_kind = "levels"
+        extra_kind = {"spectrum": "none"}.get(self.kind, self.kind)
+        types = ds.axis_types()
+        extra_space = [i for sp in ds.space_of_data_axis()[1:] for i in sp]
+        stage = self._stage(p)
 
         regions = []
 
@@ -236,26 +291,22 @@ class ThermoDataSpaceFile(SpectrumFile):
             v, i_ = p.get("DS_SOPROPID_VOLTAGE"), p.get("DS_SOPROPID_CURRENT")
             if v and i_:
                 r.conditions["X-ray Power"] = f"{v * i_:.1f} W"
+            spot = p.get("DS_SOPROPID_WIDTH")
+            if spot:
+                r.conditions["X-ray spot (µm)"] = f"{spot:g}"
             if pos:
                 r.pos_x, r.pos_y = pos
+            elif stage:
+                r.pos_x, r.pos_y = stage
             r.extra["props"] = p
             regions.append(r)
+            return r
 
         blocks = ds.blocks or [{"index": (), "labels": {}, "values": []}]
         if extra_kind == "none" or len(blocks) == 1 and extra_kind != "position":
             make(0, blocks[0]["values"])
         elif extra_kind == "map":
-            n = ds.n_energy
-            tot = [0.0] * n
-            seen = False
-            for b in blocks:
-                for i, v in enumerate(b["values"]):
-                    if v is not None:
-                        tot[i] += v
-                        seen = True
-            make(0, tot if seen else None,
-                 note=f"Map/image data ({len(blocks)} pixels): shown as the "
-                      "summed spectrum.")
+            self._map_from(ds, blocks, make, stage)
         else:
             for k, b in enumerate(blocks):
                 labels = b["labels"]
@@ -265,19 +316,17 @@ class ThermoDataSpaceFile(SpectrumFile):
                                 if i in labels and isinstance(labels[i], str)),
                                f"Pt {k + 1}")
                     sample = str(lab)
-                    xy = []
+                    xy = {}
                     for i in extra_space:
-                        t = ds.space_axes[i]["type"].upper()
+                        t = types[i] if i < len(types) else ""
                         if t in ("X", "Y") and isinstance(labels.get(i), float):
-                            xy.append((t, labels[i] / 1000.0))    # µm -> mm
-                    d = dict(xy)
-                    if "X" in d and "Y" in d:
-                        pos = (d["X"], d["Y"])
+                            xy[t] = labels[i] / 1000.0            # um -> mm
+                    if "X" in xy and "Y" in xy:
+                        pos = (xy["X"], xy["Y"])
                 else:
                     for i in extra_space:
-                        lab = ds.space_axes[i]["label"].lower()
-                        if isinstance(labels.get(i), float) and re.search(
-                                r"time|etch", lab):
+                        if (types[i] == "ETCHTIME"
+                                and isinstance(labels.get(i), float)):
                             etch = labels[i]
                 make(k, b["values"], sample=sample, pos=pos,
                      level=k if extra_kind == "levels" else None,
@@ -286,6 +335,18 @@ class ThermoDataSpaceFile(SpectrumFile):
                     self._sample_pos[sample] = pos
 
         self.regions = regions
+        if extra_kind == "levels":
+            times = sorted({r.etch_time for r in regions
+                            if r.etch_time is not None})
+            self.depth_profile = {
+                "is_profile": True, "n_levels": len(regions),
+                "regions_per_level": 1, "etch_per_level": 0.0,
+                "total_etch_time": times[-1] if times else 0.0,
+                "cumulative": times, "etch_source": "data axis"}
+
+    def _instrument_from(self, p):
+        hv = p.get(K_ENERGY)
+        hv = round(float(hv), 3) if hv else None
         instr = {"Instrument": p.get("DS_GEPROPID_INSTRUMENT", ""),
                  "Operator": p.get("DS_EXT_SUPROPID_AUTHOR", ""),
                  "Lens mode": p.get("DS_ANPROPID_LENS_MODE_NAME", "")}
@@ -301,14 +362,93 @@ class ThermoDataSpaceFile(SpectrumFile):
         self.instrument = {k: v for k, v in instr.items() if v}
         import sputter
         self.sputter_hint = sputter.from_properties(p)
-        if extra_kind == "levels":
-            times = sorted({r.etch_time for r in regions
-                            if r.etch_time is not None})
-            self.depth_profile = {
-                "is_profile": True, "n_levels": len(regions),
-                "regions_per_level": 1, "etch_per_level": 0.0,
-                "total_etch_time": times[-1] if times else 0.0,
-                "cumulative": times, "etch_source": "data axis"}
+
+    # -- SnapMap -----------------------------------------------------------------
+    def _map_from(self, ds, blocks, make, stage):
+        """A spectrum at every pixel: the summed spectrum is the region, the
+        pixels ride along as ``extra["cube"]`` (see snapmap.py)."""
+        import snapmap
+        types = ds.axis_types()
+        xi, yi = types.index("X"), types.index("Y")
+        ax_x, ax_y = ds.space_axes[xi], ds.space_axes[yi]
+        dax = ds.space_of_data_axis()
+        pos_x = next(k for k, sp in enumerate(dax[1:]) if xi in sp)
+        pos_y = next(k for k, sp in enumerate(dax[1:]) if yi in sp)
+        nx, ny = ax_x["n"], ax_y["n"]
+        n = ds.n_energy
+        tot = [0.0] * n
+        seen = False
+        for b in blocks:
+            for i, v in enumerate(b["values"]):
+                if v is not None:
+                    tot[i] += v
+                    seen = True
+        r = make(0, tot if seen else None,
+                 note=f"SnapMap ({nx} x {ny} pixels): the summed spectrum is "
+                      "shown; open the map to see where the signal comes from.")
+        if seen and r.energy:
+            cube = snapmap.build(
+                r.energy, nx, ny, ax_x["start"], ax_x["width"], ax_y["start"],
+                ax_y["width"],
+                (((b["index"][pos_x], b["index"][pos_y]), b["values"])
+                 for b in blocks if len(b["index"]) > max(pos_x, pos_y)),
+                label=r.count_label)
+            if stage:
+                cube.stage_x_mm, cube.stage_y_mm = stage
+            r.extra["cube"] = cube
+
+    # -- camera images and value tables -----------------------------------------
+    def _image_from(self, ds):
+        p = ds.props
+        ax_x, ax_y = ds.space_axes[0], ds.space_axes[1]
+        w, h = ax_x["n"], ax_y["n"]
+        stage = self._stage(p)
+        calib = {"width": w, "height": h,
+                 "um_per_px_x": abs(ax_x["width"]),
+                 "um_per_px_y": abs(ax_y["width"])}
+        if stage:
+            calib["x_mm"], calib["y_mm"] = stage
+        pixels = ds.pixels
+
+        def decode():
+            from .imaging import encode_png, unpack_rgb
+            return encode_png(w, h, unpack_rgb(pixels()))
+
+        stem = os.path.splitext(os.path.basename(self.path or ""))[0]
+        self.images = [ImageBlob(
+            name=stem or "Image", offset=0, data=b"", is_jpeg_intact=False,
+            fmt="png", loader=decode if pixels else None,
+            taken=_dmy(p.get("DS_ACPROPID_START_TIME")
+                       or p.get("DS_EXT_SUPROPID_CREATED")),
+            calib=calib, note=f"Sample-view camera image, {w} x {h} pixels.")]
+        self.regions = []
+
+    def _table_from(self, ds):
+        """One value per analysis point (e.g. the auto-height Z), kept as a
+        table; there is no spectrum in it."""
+        p = ds.props
+        idx = {t: i for i, t in enumerate(ds.axis_types())}
+        first = ds.blocks[0] if ds.blocks else None
+        vals = first["values"] if first else []
+        rows = []
+        for k, v in enumerate(vals):
+            def lab(t):
+                i = idx.get(t)
+                if i is None:
+                    return None
+                a = ds.space_axes[i]
+                if a.get("values") and k < len(a["values"]):
+                    return a["values"][k]
+                if a["linear"] != "LINEAR":
+                    return None            # a text dump does not list them
+                return a["start"] + k * a["width"]
+            x, y = lab("X"), lab("Y")
+            rows.append((f"Pt {k + 1}", None if x is None else x / 1000.0,
+                         None if y is None else y / 1000.0, v))
+        self.value_table = {
+            "label": p.get("DS_GEPROPID_VALUE_LABEL") or "Value",
+            "unit": p.get("DS_GEPROPID_VALUE_UNIT") or "", "rows": rows}
+        self.regions = []
 
 
 class ThermoAvgFile(ThermoDataSpaceFile):
@@ -319,5 +459,9 @@ class ThermoAvgFile(ThermoDataSpaceFile):
         raw = read_bytes(path)
         text = raw.decode("latin-1").replace("\r\n", "\n").replace("\r", "\n")
         ds = parse_avg(text)
+        if ds.axis_types()[:1] != ["ENERGY"] and ds.blocks:
+            packed = array("d", (0.0 if v is None else v
+                                 for b in ds.blocks for v in b["values"]))
+            ds.pixels = lambda: packed
         self._from_dataspace(ds)
         return self._finish()

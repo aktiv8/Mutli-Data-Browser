@@ -6,7 +6,9 @@
 
 Skipped when XPS_CORPUS is not set. Files that no reader recognises (readmes,
 licences, ...) are ignored; recognised files must load, with a matching number
-of points in every decodable region.
+of points in every decodable region. A camera image or a value table has no
+regions (that is fine), and an acquisition that was aborted before any data
+existed is reported as empty rather than failing.
 """
 
 import os
@@ -38,11 +40,17 @@ class TestCorpus(unittest.TestCase):
                     continue
                 try:
                     f = load_file(path)
-                    self.assertTrue(f.regions, "no regions")
+                    self.assertTrue(f.regions or f.images
+                                    or getattr(f, "value_table", None),
+                                    "no regions")
                     for r in f.regions:
                         if r.decodable:
                             self.assertEqual(r.n_points, len(r.energy))
                     loaded += 1
+                except ValueError as exc:
+                    if "is empty" in str(exc):
+                        continue                    # aborted acquisition
+                    failures.append(f"{path}: {exc!r}")
                 except Exception as exc:            # noqa: BLE001
                     failures.append(f"{path}: {exc!r}")
         self.assertFalse(failures, "\n".join(failures[:20]))

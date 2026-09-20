@@ -172,6 +172,26 @@ class ImageBlob:
     data: bytes
     is_jpeg_intact: bool
     note: str = ""
+    fmt: str = "jpeg"             # "jpeg" or "png": what ``data`` holds
+    loader: object = None         # callable -> bytes, for images decoded on demand
+    sample: str = ""              # the sample / point this picture belongs to
+    taken: str = ""               # acquisition date/time (display string)
+    # sample-view camera images carry their own stage calibration:
+    #   {"x_mm", "y_mm": stage position of the image centre,
+    #    "um_per_px_x", "um_per_px_y", "width", "height"}
+    # (see snapshot.py for the pixel <-> stage mapping)
+    calib: Optional[dict] = None
+
+    def get_bytes(self):
+        """The image file bytes (decoding them first when they were left for
+        later); None if there is nothing to show."""
+        if not self.data and self.loader is not None:
+            try:
+                self.data = self.loader() or b""
+            except Exception as exc:          # a broken file must not crash the GUI
+                self.note = f"{self.note} Could not decode: {exc}".strip()
+                self.loader = None
+        return self.data or None
 
 
 @dataclass
@@ -218,7 +238,7 @@ class SpectrumFile:
         """Stamp the source file name, then build the tree and summary."""
         name = os.path.basename(self.path or "")
         for r in self.regions:
-            r.source = name
+            r.source = r.source or name     # a session reader sets its own
         self._pos = {id(r): i for i, r in enumerate(self.regions)}
         self._build_tree()
         self._build_summary()
@@ -252,6 +272,9 @@ class SpectrumFile:
         return dict(getattr(self, "_sample_pos", {}))
 
     def extract_jpeg(self, blob):
+        """Bytes of an image Pillow can open (JPEG or PNG), or None."""
+        if blob.fmt == "png" or blob.loader is not None:
+            return blob.get_bytes()
         if not blob.is_jpeg_intact:
             return None
         d = blob.data

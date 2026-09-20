@@ -25,11 +25,14 @@ import struct
 
 from .base import read_bytes
 from .ole2 import OleFile, OleError, is_ole
-from .thermo_avg import DataSpace, ThermoDataSpaceFile
+from .thermo_avg import (AXIS_CODES, AXIS_DEFAULTS, DataSpace,
+                         ThermoDataSpaceFile, dataspace_kind)
 
 # property id -> DS_* name (verified against sibling .avg dumps)
 PID_NAMES = {
     0x06: "DS_GEPROPID_INSTRUMENT",
+    0x0C: "DS_GEPROPID_VALUE_TYPE", 0x0D: "DS_GEPROPID_VALUE_LABEL",
+    0x0E: "DS_GEPROPID_VALUE_SYMBOL", 0x0F: "DS_GEPROPID_VALUE_UNIT",
     0x67: "DS_SOPROPID_STYPE", 0x68: "DS_SOPROPID_MONO",
     0x69: "DS_SOPROPID_ENERGY", 0x6A: "DS_SOPROPID_VOLTAGE",
     0x6B: "DS_SOPROPID_CURRENT", 0x6C: "DS_SOPROPID_WIDTH",
@@ -47,9 +50,17 @@ PID_NAMES = {
     0x25B: "DS_SOURCE_FLOODGUNPROPID_CURRENT",
     0x25C: "DS_SOURCE_FLOODGUNPROPID_ENERGY",
     0x25D: "DS_SOURCE_FLOODGUNPROPID_DESCRIPTION",
+    0x2BF: "DS_DEPTHPROFILE_IONGUNPROPID_CURRENT",
+    0x2C0: "DS_DEPTHPROFILE_IONGUNPROPID_ENERGY",
+    0x2C1: "DS_DEPTHPROFILE_IONGUNPROPID_RASTER_WIDTH",
+    0x2C2: "DS_DEPTHPROFILE_IONGUNPROPID_RASTER_HEIGHT",
+    0x2C3: "DS_DEPTHPROFILE_IONGUNPROPID_ANGLETOSURFACE",
+    0x2C4: "DS_DEPTHPROFILE_IONGUNPROPID_IONTYPE",
+    0x2C5: "DS_DEPTHPROFILE_IONGUNPROPID_DESCRIPTION",
+    0x2C6: "DS_DEPTHPROFILE_PROPS_ROTATION",
+    0x2C7: "DS_DEPTHPROFILE_IONGUNPROPID_SPUTTERRATE",
 }
 _TXFN_BASE = 100000
-_AXIS_TYPES = {2: "ENERGY", 1: "POSITION"}
 
 
 def sniff(head: bytes, ext: str) -> bool:
@@ -64,6 +75,14 @@ def _filetime(v: int) -> str:
         return dt.strftime("%d/%m/%Y   %H:%M:%S")      # same D/M/Y form as .avg
     except (OverflowError, ValueError):
         return ""
+
+
+def _read_doubles(path):
+    """The VGData stream of a ``.vgd`` as an array of doubles."""
+    from array import array
+    out = array("d")
+    out.frombytes(OleFile(read_bytes(path)).read("VGData"))
+    return out
 
 
 def parse_property_set(b: bytes):
@@ -145,9 +164,12 @@ def parse_space_axes(b: bytes, counts):
         if flag == 0:                            # non-linear: explicit values
             values = list(struct.unpack_from(f"<{n}d", b, end))
             end += 8 * n
-        atype = struct.unpack_from("<i", b, pos)[0] if k else 2
+        code = 0
+        if end + 4 <= len(b):                    # the axis type follows the axis
+            code = struct.unpack_from("<i", b, end)[0]
+            end += 4
         axes.append({"n": n, "start": start, "width": width,
-                     "linear": flag == 1, "values": values, "code": atype})
+                     "linear": flag == 1, "values": values, "code": code})
         pos = end
     return axes
 
@@ -168,42 +190,42 @@ class ThermoVgdFile(ThermoDataSpaceFile):
         for (s, e, nsp) in ds.data_axes:
             counts += [e - s + 1] * nsp
         axes = parse_space_axes(ole.read("VGSpaceAxes"), counts)
-        nonlin = 0
         for i, a in enumerate(axes):
-            if i == 0:
-                typ, sym, unit, label = "ENERGY", "E", "eV", "Energy"
-            elif i == 1 and len(ds.data_axes) > 1 and not a["linear"] is False \
-                    and a["linear"]:
-                typ, sym, unit, label = "POSITION", "Pos", "", "Position"
-            elif not a["linear"]:
-                typ = "X" if nonlin == 0 else "Y"
-                sym, unit, label = typ, "µm", typ
-                nonlin += 1
-            else:
-                typ, sym, unit, label = "AXIS", "?", "", f"Axis {i}"
+            typ = AXIS_CODES.get(a["code"]) or (
+                "ENERGY" if i == 0 else f"AXIS{a['code']}")
+            sym, unit, label = AXIS_DEFAULTS.get(typ, ("?", "", f"Axis {i}"))
             ds.space_axes.append({
                 "start": a["start"], "width": a["width"], "n": a["n"],
                 "type": typ, "linear": "LINEAR" if a["linear"] else "NON-LINEAR",
                 "symbol": sym, "unit": unit, "label": label,
                 "values": a["values"]})
+        if not ds.space_axes:
+            raise ValueError("this DataSpace is empty (no axes or data)")
+        if dataspace_kind(ds) == "image":          # decoded when it is shown
+            ds.pixels = lambda: _read_doubles(path)
+            self._from_dataspace(ds)
+            return self._finish()
         raw = ole.read("VGData")
         n_e = ds.space_axes[0]["n"]
         total = len(raw) // 8
         vals = struct.unpack(f"<{total}d", raw[:total * 8])
         n_blocks = max(1, total // n_e)
         extra_ns = [e - s + 1 for (s, e, _n) in ds.data_axes[1:]]
+        dax = ds.space_of_data_axis()
         labels = self._point_labels(ole)
         for k in range(n_blocks):
             idx = self._unravel(k, extra_ns)
             lab = {}
-            for si, a in enumerate(ds.space_axes):
-                if si == 0 or a["type"] not in ("POSITION", "X", "Y"):
-                    continue
-                pt = idx[0] if idx else 0
-                if a["type"] == "POSITION":
-                    lab[si] = labels.get(pt, f"Pt #{pt + 1:03d}")
-                elif a["values"] and pt < len(a["values"]):
-                    lab[si] = a["values"][pt]
+            for d, spaces in enumerate(dax[1:]):
+                i = idx[d] if d < len(idx) else 0
+                for si in spaces:
+                    a = ds.space_axes[si]
+                    if a["type"] == "POSITION":
+                        lab[si] = labels.get(i, f"Pt #{i + 1:03d}")
+                    elif a["values"] and i < len(a["values"]):
+                        lab[si] = a["values"][i]
+                    else:
+                        lab[si] = a["start"] + i * a["width"]
             ds.blocks.append({"index": tuple(idx), "labels": lab,
                               "values": list(vals[k * n_e:(k + 1) * n_e])})
         self._from_dataspace(ds)
