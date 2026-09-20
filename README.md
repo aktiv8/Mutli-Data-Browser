@@ -12,8 +12,9 @@ previewed before it is saved.
 | Format | Extension | Notes |
 |--------|-----------|-------|
 | **VAMAS (ISO 14976)** | `.vms` `.vamas` | From any vendor (Kratos/CasaXPS, PHI, SPECS, Thermo, …). Field-by-field parser; handles `NORM`/`MAP`/`SDPSV` modes, regular and irregular scans, several corresponding variables (intensity + transmission) and vendor comment blocks. |
-| **Thermo Avantage text dump** | `.avg` (`.avx` text dumps) | Multi-position scans give one region per position; image/map files load as the summed spectrum; header-only dumps (`#empty#`) show as "no data". |
+| **Thermo Avantage text dump** | `.avg` (`.avx` text dumps) | Multi-position scans give one region per position; a SnapMap loads as its summed spectrum with the pixels behind it; camera images become pictures, not spectra; header-only dumps (`#empty#`) show as "no data". |
 | **Thermo Avantage binary** | `.vgd` (`.avx` binary) | Reverse-engineered OLE2 container (no extra library). Matches the `.avg` of the same data exactly. |
+| **Thermo Avantage experiment** | a folder, or `.VGX` | Opens the whole experiment as one session (samples, analysis points, scans in run order, camera images, SnapMaps): see [Avantage experiments](#avantage-experiments-camera-images-and-snapmaps). |
 | **PHI / ULVAC-PHI MultiPak** | `.spe` | Intensities are counts per second, as stored. |
 | **Scienta Omicron SES** | `.txt` | Detector/angle columns are summed to one spectrum. |
 | **Kratos Vision** | `.kal` | Includes the transmission function. Files that don't record the X-ray source stay on a kinetic-energy axis (a warning says so). |
@@ -29,7 +30,9 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | File | Purpose |
 |------|---------|
 | `spectradeck.py` | the application window and dialogs |
-| `readers/` | one reader per format plus the registry that picks one (`readers/__init__.py`) |
+| `readers/` | one reader per format plus the registry that picks one (`readers/__init__.py`); `thermo_experiment.py` / `thermo_vgx.py` open an Avantage experiment folder |
+| `snapmap.py`, `snapmap_ui.py` | SnapMap pixels (a spectrum at every pixel), the map viewer and its dialog |
+| `snapshot.py` | camera-image geometry: stage position ↔ picture pixel |
 | `exporters.py` | CSV, VAMAS and metadata (CSV/PDF) writers |
 | `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
 | `report.py` | the experiment report PDF |
@@ -97,7 +100,8 @@ Images / Stage map notebook). Drag any splitter; sizes are remembered.
 
 1. **Open** (or File menu) → *Spectra files…* to load several files of any
    supported format, or *Folder…* to load every recognised file in a folder.
-   Each file is a top-level node in the tree. If a selection or folder holds
+   Each file is a top-level node in the tree. (A folder from a Thermo Avantage
+   experiment, or its `.VGX`, opens as **one experiment**: see below.) If a selection or folder holds
    the same dataset as both `.avg` and `.vgd`, you are asked which to import
    (`.avg` is pre-selected; *Remember my choice* stops the question, and
    File → *Ask about .avg / .vgd duplicates again* brings it back).
@@ -231,7 +235,10 @@ you can reopen at any time (or double-click / pass on the command line):
 * the **original data files**, byte-for-byte (so the workbook is
   self-contained and the originals can be moved or deleted), with SHA-256
   hashes as provenance; files are re-read on opening, so reader improvements
-  apply to old workbooks;
+  apply to old workbooks. An Avantage experiment is kept as its whole folder
+  layout (it can be large: the camera images and SnapMaps are the bulk, and
+  you are warned above 500 MB); workbooks without one are still readable by
+  older copies of the app;
 * the **look**: what is ticked, view, grouping, normalisation, energy scale,
   colour scale, axis colour, panels/traces and "At cursor" energies;
 * **Details and notes** — title, customer, reference, operator, date, a free
@@ -408,6 +415,51 @@ one), whatever its energy axis.
   written into the spectrum's metadata. Points that do not give a positive
   gap are explained rather than stored as a result.
 
+## Avantage experiments, camera images and SnapMaps
+
+Avantage writes one `.VGD` per scan into `<experiment>/<source configuration>/
+<sample>/…` next to `<experiment>.VGX`. **Open → Folder…** on that folder (or
+on the `.VGX`, or on a single sample folder inside it) loads everything as one
+experiment, with a progress box you can cancel:
+
+* the tree runs **experiment → sample → analysis point → scan**, in the order
+  the `.VGX` says they were run; scans of the same core level line up across
+  points, and two scans of one line in a sample (say at 20 and 50 eV pass
+  energy) are told apart by the scan name;
+* the `.VGX` supplies the experiment, project and platter names and the run
+  order; the sample names come from the folder names. When a scan exists as
+  both `.VGD` and `.avg`, the binary one is used;
+* files that cannot be read are listed once at the end and the rest still
+  loads; an acquisition that was aborted before any data existed and the
+  auto-height (Z) tables are set aside, not treated as errors;
+* a scan of two lines (*Si2p Al2p Scan*) is named for both (*Si 2p Al 2p*), and
+  *Cu2p3* reads as *Cu 2p3/2*.
+
+**Camera images.** The sample-view pictures Avantage takes at each point
+(before and after each pass) are attached to their points; select a point and
+its picture appears in the **Images** tab. Each picture carries its own stage
+calibration, so no holder photo or manual calibration is needed: the analysis
+points that fall inside it are drawn, with the outline of any SnapMap taken
+there and a scale bar. Click a point to select it in the tree. (On the
+K-Alpha+ the image's *x* runs against the stage X and *y* with the stage Y; this
+was measured by registering neighbouring pictures against each other.)
+
+**SnapMaps** (a spectrum at every pixel) are one region each in the tree,
+marked *(SnapMap)*, showing the summed spectrum like any scan. **Double-click**
+one (or right-click → *Open SnapMap…*, or Tools → *SnapMap viewer…*) to see
+where the signal comes from:
+
+* **Drag across the spectrum** to choose the energy window; the map shows the
+  counts in it (*Remove background* takes a straight line off first, so a
+  sloping baseline does not show as contrast). The window starts on the
+  strongest peak.
+* **Drag a box on the map** (or click one pixel) to see that area's spectrum
+  next to the whole map's; *Whole map* clears it. Switching element keeps the
+  area.
+* **On camera image** lays the map over the picture taken at the same spot
+  (the slider sets how much of the picture shows through).
+* **Save…** writes the picture (PNG), the map values (CSV) or the spectra (CSV).
+
 ## Depth profiles
 
 Sputter depth profiles are detected automatically (from the Kratos file's
@@ -439,7 +491,12 @@ written into each VAMAS block as comment lines.
 * The `.experiment`, `.vgd` and `.kal` readers are reverse-engineered. The
   `.vgd` and `.kal` readers were checked against the `.avg` / VAMAS exports of
   the same data (identical energies and counts); cross-check anything critical
-  against the vendor software.
+  against the vendor software. The `.VGX` reader takes only names and run
+  order from it; camera images were compared pixel for pixel with Avantage's
+  own PNG export.
+* The acquisition times stored inside Avantage files appear to be UTC (they
+  differ from the local time in the file name by the UTC offset), and are shown
+  as stored; the camera-image labels use the local time from the file name.
 * If a `.experiment` file was transferred as text rather than binary it can be
   silently corrupted; the app detects this and refuses to export noise.
 * Testing on your own data: set `XPS_CORPUS` to a folder of spectra files and

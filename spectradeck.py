@@ -71,7 +71,7 @@ except Exception:
 from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
                      load_file, reader_for, supported_patterns,
                      UnsupportedFormat, ThermoExperiment, LoadCancelled,
-                     looks_like_experiment)
+                     looks_like_experiment, experiment_roots)
 import fonts
 import holder
 import plotstyle
@@ -1519,7 +1519,9 @@ class Workspace:
     def _open_folder_path(self, folder):
         self._add_recent(folder)
         if looks_like_experiment(folder):       # an Avantage experiment
-            problems = self._add_file(folder)
+            problems = []
+            for root in experiment_roots(folder):    # several -> several sessions
+                problems += self._add_file(root)
             if problems:
                 messagebox.showwarning("Some files need attention",
                                        "\n\n".join(problems[:12]))
@@ -2932,10 +2934,11 @@ class Workspace:
         entries = []
         for p in self.docs:
             entries.append(wbk.FileEntry(
-                id=self.file_ids[id(p)], name=os.path.basename(p.path),
-                path=p.path, original_path=self.file_origin.get(id(p), p.path)))
-        total = sum(os.path.getsize(e.path) for e in entries
-                    if os.path.isfile(e.path))
+                id=self.file_ids[id(p)],
+                name=os.path.basename(p.path.rstrip("\\/")),
+                path=p.path, original_path=self.file_origin.get(id(p), p.path),
+                members=list(getattr(p, "members", None) or [])))
+        total = sum(p._file_size() for p in self.docs)
         preview = None
         if HAVE_MPL and self.fig is not None:
             try:
@@ -3057,16 +3060,25 @@ class Workspace:
             self._sha_cache[key] = wbk.sha256_file(path)
         return self._sha_cache[key]
 
+    def _doc_sha(self, p):
+        """SHA-256 of a loaded file, or of a whole session (its files' hashes
+        by path)."""
+        members = getattr(p, "members", None)
+        if not members:
+            return self._sha(p.path)
+        key = tuple((path, rel, os.stat(path).st_mtime_ns) for path, rel
+                    in members if os.path.exists(path))
+        if key not in self._sha_cache:
+            self._sha_cache[key] = wbk.sha256_members(
+                [(a, b) for a, b, _t in key])
+        return self._sha_cache[key]
+
     def _report_file_rows(self):
         rows = []
         for p in self.docs:
-            try:
-                size = os.path.getsize(p.path)
-            except OSError:
-                size = 0
-            rows.append({"name": os.path.basename(p.path or ""),
+            rows.append({"name": os.path.basename((p.path or "").rstrip("\\/")),
                          "format": p.format_name, "regions": len(p.regions),
-                         "size": size, "sha256": self._sha(p.path)})
+                         "size": p._file_size(), "sha256": self._doc_sha(p)})
         return rows
 
     def _render_figure_pages(self, fig, consume, size=(11.7, 8.3),

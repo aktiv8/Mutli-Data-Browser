@@ -258,6 +258,53 @@ class TestSession(Base):
         self.assertEqual(len(rels), 5)
         self.assertGreater(f.summary["size"], 0)
 
+    def test_a_folder_of_experiments_opens_as_several_sessions(self):
+        from readers.thermo_experiment import experiment_roots
+        cfg = self.build()                       # Trial/ is one experiment
+        parent = os.path.join(self.tmp.name, "Study")
+        for name in ("Alpha", "Beta"):
+            d = os.path.join(parent, name)
+            os.makedirs(os.path.join(d, cfg, "S"))
+            with open(os.path.join(d, name + ".VGX"), "wb") as fh:
+                fh.write(make_vgx())
+            with open(os.path.join(d, cfg, "S", "C1s Scan.avg"), "w",
+                      encoding="latin-1", newline="") as fh:
+                fh.write(spectrum("C1s Scan"))
+        self.assertEqual(experiment_roots(parent),
+                         [os.path.join(parent, "Alpha"),
+                          os.path.join(parent, "Beta")])
+        # an experiment, or a folder inside one, is a single session
+        self.assertEqual(experiment_roots(os.path.join(parent, "Alpha")),
+                         [os.path.join(parent, "Alpha")])
+        self.assertEqual(experiment_roots(os.path.join(parent, "Alpha", cfg)),
+                         [os.path.join(parent, "Alpha", cfg)])
+        # no .VGX anywhere: the folder itself, whatever it holds
+        bare = os.path.join(self.tmp.name, "bare")
+        os.makedirs(bare)
+        self.assertEqual(experiment_roots(bare), [bare])
+
+    def test_a_session_survives_a_workbook(self):
+        import workbook as wbk
+        cfg = self.build()
+        self.put(f"{cfg}/Sample A/Sample A_Pt #001a  (10-51-15 24-08-2026).avg",
+                 camera("x"))
+        f = readers.load_file(self.root)
+        entry = wbk.FileEntry("f1", "Trial", f.path, original_path=f.path,
+                              members=list(f.members))
+        book = os.path.join(self.tmp.name, "s.xpscontainer")
+        wbk.save(book, wbk.Workbook(files=[entry]))
+        # the originals are gone: only the workbook is left
+        import shutil
+        shutil.rmtree(self.root)
+        out = wbk.load(book, os.path.join(self.tmp.name, "x"))
+        again = readers.load_file(out.files[0].path)
+        key = lambda d: [(r.sample, r.name, r.extra["scan"], r.counts)      # noqa: E731
+                         for r in d.regions]
+        self.assertEqual(key(again), key(f))
+        self.assertEqual(again.experiment, f.experiment)
+        self.assertEqual([b.name for b in again.images], [b.name for b in f.images])
+        self.assertEqual(os.path.basename(again.path), "Trial")
+
     def test_what_counts_as_an_experiment_folder(self):
         cfg = self.build(vgx=False)
         # loose data next to nothing else: the old per-file open applies

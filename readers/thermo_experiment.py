@@ -79,6 +79,29 @@ def data_files(scope: str):
     return sorted(found.values(), key=lambda p: _natural(p))
 
 
+def experiment_roots(folder: str, depth: int = 3):
+    """The folders to open as sessions when the user opens ``folder``.
+
+    ``folder`` itself when a ``.VGX`` is in or above it (or none is found below
+    it); otherwise every folder within ``depth`` levels that holds one, so a
+    folder of several experiments opens as several sessions instead of one
+    session whose "samples" would be source configurations."""
+    if find_vgx(folder):
+        return [folder]
+    base = os.path.abspath(folder)
+    found = []
+    for dp, dirs, files in os.walk(base):
+        level = 0 if dp == base else dp[len(base):].count(os.sep)
+        if any(f.lower().endswith(".vgx") for f in files):
+            found.append(dp)
+            dirs[:] = []                     # its own sub-folders belong to it
+        elif level >= depth:
+            dirs[:] = []
+        else:
+            dirs.sort(key=_natural)
+    return found or [folder]
+
+
 def looks_like_experiment(folder: str) -> bool:
     """True when opening ``folder`` should give one session: a ``.VGX`` in or
     above it, or Avantage data only in sub-folders (the per-file open would find

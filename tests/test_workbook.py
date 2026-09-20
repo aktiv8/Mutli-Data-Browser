@@ -401,5 +401,127 @@ class TestImportPlan(unittest.TestCase):
                                     importplan.find_pairs(self.PATHS), "zip")
 
 
+
+class TestSessionEntries(Tmp):
+    """An experiment folder stored in a workbook keeps its layout."""
+
+    def session(self):
+        files = {"Trial.VGX": b"vgx bytes",
+                 "cfg/Sample A/C1s Scan.avg": b"aaa" * 50,
+                 "cfg/Sample A/Depth Profile/Al2p Snap.avg": b"bbb" * 60,
+                 "cfg/Sample B/O1s Scan.avg": b"ccc"}
+        members = []
+        for rel, data in files.items():
+            # as the readers give them: the OS's own separators
+            members.append((self.write("in/Trial/" + rel, data),
+                            rel.replace("/", os.sep)))
+        entry = wbk.FileEntry("f1", "Trial", os.path.join(self.dir, "in", "Trial"),
+                              original_path=os.path.join(self.dir, "in", "Trial"),
+                              members=members)
+        return wbk.Workbook(files=[entry]), files
+
+    def manifest(self, path):
+        with zipfile.ZipFile(path) as zf:
+            return json.loads(zf.read("manifest.json"))
+
+    def test_layout_and_bytes_survive(self):
+        wb, files = self.session()
+        path = os.path.join(self.dir, "s" + wbk.EXT)
+        wbk.save(path, wb)
+        out = wbk.load(path, os.path.join(self.dir, "x"))
+        (f,) = out.files
+        self.assertEqual(f.name, "Trial")
+        self.assertTrue(os.path.isdir(f.path))
+        self.assertEqual(os.path.basename(f.path), "Trial")     # the reader sees the name
+        self.assertEqual(sorted(rel for _p, rel in f.members), sorted(files))
+        for p, rel in f.members:
+            self.assertEqual(read(p), files[rel])
+            self.assertTrue(os.path.normpath(p).startswith(os.path.normpath(f.path)))
+        self.assertEqual(f.size, sum(len(v) for v in files.values()))
+        self.assertEqual(out.warnings, [])
+
+    def test_only_a_workbook_with_a_session_needs_format_two(self):
+        wb, _files = self.session()
+        p2 = os.path.join(self.dir, "s" + wbk.EXT)
+        wbk.save(p2, wb)
+        self.assertEqual(self.manifest(p2)["format_version"], 2)
+        plain, _a, _b = self.workbook()
+        p1 = os.path.join(self.dir, "p" + wbk.EXT)
+        wbk.save(p1, plain)
+        self.assertEqual(self.manifest(p1)["format_version"], 1)
+
+    def test_resave_from_the_extracted_copy(self):
+        wb, files = self.session()
+        p1 = os.path.join(self.dir, "one" + wbk.EXT)
+        wbk.save(p1, wb)
+        out = wbk.load(p1, os.path.join(self.dir, "x"))
+        p2 = os.path.join(self.dir, "two" + wbk.EXT)
+        wbk.save(p2, out)
+        again = wbk.load(p2, os.path.join(self.dir, "y"))
+        self.assertEqual(again.files[0].sha256, wb.files[0].sha256)
+        self.assertEqual(sorted(r for _p, r in again.files[0].members),
+                         sorted(files))
+
+    def test_a_missing_file_stops_the_save(self):
+        wb, _files = self.session()
+        os.remove(wb.files[0].members[1][0])
+        with self.assertRaises(wbk.WorkbookError) as cm:
+            wbk.save(os.path.join(self.dir, "s" + wbk.EXT), wb)
+        self.assertIn("Sample A", str(cm.exception))
+
+    def test_names_that_climb_out_are_kept_inside(self):
+        wb, _files = self.session()
+        good = os.path.join(self.dir, "g" + wbk.EXT)
+        wbk.save(good, wb)
+        crafted = os.path.join(self.dir, "c" + wbk.EXT)
+        with zipfile.ZipFile(good) as zin, zipfile.ZipFile(crafted, "w") as zout:
+            for item in zin.namelist():
+                data = zin.read(item)
+                if item == "manifest.json":
+                    m = json.loads(data)
+                    m["files"][0]["members"][0]["path"] = "../../../evil.txt"
+                    data = json.dumps(m).encode()
+                zout.writestr(item, data)
+        out = wbk.load(crafted, os.path.join(self.dir, "x"))
+        root = os.path.realpath(out.files[0].path)
+        for p, _rel in out.files[0].members:
+            self.assertTrue(os.path.realpath(p).startswith(root + os.sep))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "evil.txt")))
+
+    def test_a_changed_member_is_a_warning(self):
+        wb, _files = self.session()
+        good = os.path.join(self.dir, "g" + wbk.EXT)
+        wbk.save(good, wb)
+        tampered = os.path.join(self.dir, "t" + wbk.EXT)
+        with zipfile.ZipFile(good) as zin, zipfile.ZipFile(tampered, "w") as zout:
+            for item in zin.namelist():
+                data = zin.read(item)
+                if item.endswith("O1s Scan.avg"):
+                    data = b"changed"
+                zout.writestr(item, data)
+        out = wbk.load(tampered, os.path.join(self.dir, "x"))
+        self.assertEqual(len(out.warnings), 1)
+        self.assertIn("Trial", out.warnings[0])
+
+    def test_a_member_named_but_absent(self):
+        wb, _files = self.session()
+        good = os.path.join(self.dir, "g" + wbk.EXT)
+        wbk.save(good, wb)
+        cut = os.path.join(self.dir, "c" + wbk.EXT)
+        with zipfile.ZipFile(good) as zin, zipfile.ZipFile(cut, "w") as zout:
+            for item in zin.namelist():
+                if not item.endswith("C1s Scan.avg"):
+                    zout.writestr(item, zin.read(item))
+        with self.assertRaises(wbk.WorkbookError) as cm:
+            wbk.load(cut, os.path.join(self.dir, "x"))
+        self.assertIn("C1s Scan.avg", str(cm.exception))
+
+    def test_safe_rel(self):
+        self.assertEqual(wbk.safe_rel("a/b\\c.avg"), "a/b/c.avg")
+        self.assertEqual(wbk.safe_rel("../../x/../y"), "x/y")
+        self.assertEqual(wbk.safe_rel("C:/win/x"), "C_/win/x")
+        self.assertEqual(wbk.safe_rel(""), "file")
+
+
 if __name__ == "__main__":
     unittest.main()

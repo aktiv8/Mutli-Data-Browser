@@ -103,6 +103,8 @@ def _holder_views(docs, calib, label_of):
     out = []
     for p in docs:
         for blob in getattr(p, "images", []) or []:
+            if blob.fmt != "jpeg" or blob.calib:      # camera pictures: not a holder
+                continue                              # photo, and slow to decode
             jpeg = p.extract_jpeg(blob)
             size = jpeg_size(jpeg) if jpeg else None
             if not jpeg or not size or len(jpeg) > MAX_PHOTO_BYTES:

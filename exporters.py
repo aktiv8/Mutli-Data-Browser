@@ -232,7 +232,9 @@ def export_metadata_csv(parser, path):
         for k in row:
             if k not in fields:
                 fields.append(k)
-    with open(path, "w", newline="") as fh:
+    # UTF-8 with a BOM (Excel opens it as such): the Windows default codec
+    # cannot hold the "Kα" of "Al Kα" that every Avantage file carries
+    with open(path, "w", newline="", encoding="utf-8-sig") as fh:
         w = csv.DictWriter(fh, fieldnames=fields, restval="")
         w.writeheader()
         for row in rows:

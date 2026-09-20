@@ -9,7 +9,7 @@ from .kratos_experiment import EscapeParser
 from . import (vamas, thermo_avg, thermo_vgd, phi_spe, scienta_txt,
                kratos_kal, thermo_vgx)
 from .thermo_experiment import (ThermoExperiment, LoadCancelled,
-                                looks_like_experiment)
+                                looks_like_experiment, experiment_roots)
 
 
 class UnsupportedFormat(Exception):

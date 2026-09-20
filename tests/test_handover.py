@@ -132,6 +132,18 @@ class TestSpectra(unittest.TestCase):
                          ["metadata/a.csv", "metadata/a_2.csv"])
         self.assertIn(b"C 1s", parts[0].data)
 
+    def test_metadata_survives_the_alpha_of_al_k_alpha(self):
+        # every Avantage file says "Al Kα": the Windows default codec
+        # cannot write it, which used to drop the metadata CSV silently
+        r = region()
+        r.anode = "Al Kα (mono)"
+        f = doc("/x/a.vgd", [r], {"Instrument": "K-Alpha+",
+                                  "X-ray source": "Al Kα, monochromated"})
+        (part,) = ho.metadata_parts([f])
+        text = part.read().decode("utf-8-sig")
+        self.assertIn("Al Kα (mono)", text)
+        self.assertIn("Al Kα, monochromated", text)
+
     def test_figure_parts(self):
         figs = [{"name": "Depth / profile"}, {"name": "Depth / profile"}]
         parts = ho.figure_parts(figs, [[b"1"], [b"1", b"2"]])
