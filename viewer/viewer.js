@@ -639,7 +639,8 @@
     ctx.save();
     ctx.beginPath(); ctx.rect(lay.l, lay.t, lay.w, lay.h); ctx.clip();
     marks.forEach(function (m) {
-      var v = ax0.invert ? m.be : (items[0].reg.hv ? items[0].reg.hv - m.be : null);
+      var hvv = items[0].reg.hv, fromHv = hvv ? hvv - m.be : null;
+      var v = m.kin ? (ax0.invert ? fromHv : m.be) : (ax0.invert ? m.be : fromHv);
       if (v === null || v < lo || v > hi) return;
       var x = X(v);
       ctx.strokeStyle = C.muted; ctx.setLineDash([2, 3]); ctx.beginPath();

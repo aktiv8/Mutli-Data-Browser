@@ -871,7 +871,9 @@ class IdentifyDialog(tk.Toplevel):
     def _refresh_markers(self):
         self.mark_list.delete(0, "end")
         for m in self.app.identify_markers(self._region()):
-            self.mark_list.insert("end", f"{m['label']:<12} @ {m['be']:.2f} eV")
+            self.mark_list.insert(
+                "end", f"{m['label']:<12} @ {m['be']:.2f} eV"
+                       f"{' (KE)' if m.get('kin') else ''}")
 
     def _remove(self):
         sel = self.mark_list.curselection()

@@ -45,6 +45,7 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `lineshapes.py`, `casafit.py` | CasaXPS fits from VAMAS: line shapes, backgrounds, parsing and reconstruction |
 | `sputter.py`, `sputter_ui.py` | sputter settings, fluence and depth axes |
 | `vamasmeta.py` | metadata carried in VAMAS comments |
+| `elements.py`, `reels.py`, `iss_ui.py` | ISS element identification, REELS band gap and their dialog |
 | `holder.py` | holder-photo geometry: stage position → photo pixel, calibration nudges, marker picking |
 | `fonts.py`, `assets/fonts/` | bundled IBM Plex Sans (SIL Open Font License) |
 | `pdf_preview.py` | in-app PDF preview (PyMuPDF) |
@@ -382,6 +383,30 @@ state and one colour.
   own fit); CSV export adds the background, each component and the envelope as
   columns. The metadata lists the number of components and the calibration.
 * The fit is read, not edited: fit in CasaXPS, review it here.
+
+## ISS and REELS
+
+**Tools → ISS / REELS…** works on the spectrum you have ticked (tick only that
+one), whatever its energy axis.
+
+* **ISS peaks.** Give the ion (H⁺, He⁺, Ne⁺, Ar⁺), the beam energy and the
+  scattering angle (the beam energy is taken from the file where it states
+  it; the angle is your instrument's). Click a peak on the plot and the
+  elements that scatter the ion to that energy are listed, nearest first, from
+  the single-collision model E₁/E₀ = [(cos θ + √(A² − sin²θ)) / (1 + A)]²
+  with A = M_target / M_ion (a projectile cannot backscatter from a lighter
+  atom). *Add marker* labels the peak; or type the elements you expect
+  (*Cu Au Ni*) and *Mark* puts each at its predicted energy. Masses are those
+  of the most abundant isotope. ISS markers are at **kinetic energies**, so an
+  energy calibration never moves them, and they show on either energy axis
+  and in the HTML data browser.
+* **REELS band gap.** Find the elastic peak (*Find the maximum*, type it, or
+  click it), then click two points on the **rising edge** of the loss
+  spectrum. The straight line through them meets the baseline (the flat level
+  between the elastic peak and the onset) at the band gap, which is drawn on
+  the plot (points, tangent, baseline, *Eg = …*), stored in the workbook and
+  written into the spectrum's metadata. Points that do not give a positive
+  gap are explained rather than stored as a result.
 
 ## Depth profiles
 

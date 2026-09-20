@@ -113,7 +113,8 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
                title="", subtitle="", selected=(), multi_file=False,
                first_col=True, bottom_row=True, accent="#0F6B8C",
                muted="#56636E", scale="Binding", ke_top=False,
-               top_row=False, markers=(), style=None, fit=None):
+               top_row=False, markers=(), style=None, fit=None,
+               reels=None):
     """Draw one panel: a single spectrum plain, several stacked by y offset.
 
     Stacked panels drop the (meaningless) y ticks for a scale bar and label
@@ -196,12 +197,21 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
             plotstyle.with_unit(r0.count_label,
                                 plotstyle.y_unit(st, r0.count_units))
             if norm == "None" else f"{r0.count_label} (normalised)"))
-    if markers:                        # element labels: (binding energy, text)
+    if reels and n == 1:               # a REELS band-gap construction
+        draw_reels(ax, a0, r0.photon_energy, reels,
+                   1.0 / norm_factor(r0, norm, cursor), muted, accent,
+                   note_size=small)
+    if markers:      # peak labels: (energy, text[, True if a kinetic energy])
         lo, hi = ax.get_xlim()
         xtf = ax.get_xaxis_transform()       # x in data, y as axes fraction
         hv = r0.photon_energy
-        for be, text in markers:
-            x = be if binding else (hv - be if hv else None)
+        for mk in markers:
+            be, text = mk[0], mk[1]
+            kin = len(mk) > 2 and mk[2]
+            if kin:                          # ISS peaks: a kinetic energy
+                x = (hv - be if hv else None) if binding else be
+            else:
+                x = be if binding else (hv - be if hv else None)
             if x is None or not lo <= x <= hi:
                 continue
             ax.plot([x, x], [0, 1], transform=xtf, color=muted, lw=0.7,
@@ -457,3 +467,48 @@ def draw_fit(ax, x, fit, scale, muted, accent):
         ax.legend(handles=handles, loc="upper left",
                   fontsize=max(6, int(ax.xaxis.label.get_fontsize()) - 2),
                   frameon=False, handlelength=1.0)
+
+
+def draw_reels(ax, a0, hv, reels, scale, muted, accent, note_size=8):
+    """Overlay a REELS band-gap construction on a single-spectrum panel: the
+    elastic peak, the baseline, the tangent through the two picked points and
+    the resulting gap. ``reels`` holds ``elastic`` (kinetic energy), ``p1`` /
+    ``p2`` (loss, intensity), ``gap``, ``base``, ``slope``; ``a0`` is the
+    panel's energy axis (``viewdata.energy_axis``); ``scale`` multiplies
+    intensities (normalisation)."""
+    import reels as rl
+
+    def X(loss):                        # loss -> the panel's x value
+        ke = reels["elastic"] - loss
+        if a0.label == "Kinetic Energy":
+            return ke
+        return hv - ke if hv else None
+    xe = X(0.0)
+    if xe is not None:
+        ax.axvline(xe, color=muted, lw=0.8, ls=":", zorder=1)
+        ax.text(xe, 0.02, " elastic", transform=ax.get_xaxis_transform(),
+                color=muted, fontsize=note_size, rotation=90, va="bottom",
+                ha="right")
+    for key in ("p1", "p2"):
+        x, y = X(reels[key][0]), reels[key][1] * scale
+        if x is not None:
+            ax.plot([x], [y], "o", color=accent, ms=5, zorder=4)
+    if "gap" not in reels or reels["gap"] is None:
+        return
+    (xa, ya), (xb, yb) = rl.tangent_points(reels, reels["p1"], reels["p2"])
+    pts = [(X(xa), ya * scale), (X(xb), yb * scale)]
+    if None in (pts[0][0], pts[1][0]):
+        return
+    ax.plot([pts[0][0], pts[1][0]], [pts[0][1], pts[1][1]], color=accent,
+            lw=1.3, zorder=3.5)
+    x0 = X(0.0)
+    if x0 is not None:
+        ax.plot([x0, pts[0][0]], [reels["base"] * scale] * 2, color=accent,
+                lw=0.9, ls="--", zorder=3.4)
+    ax.plot([pts[0][0]], [reels["base"] * scale], "s", color=accent, ms=4,
+            zorder=4)
+    ax.annotate(f"Eg = {reels['gap']:.2f} eV",
+                (pts[0][0], reels["base"] * scale), xytext=(8, 14),
+                textcoords="offset points", color=accent,
+                fontsize=note_size + 1, fontweight="bold",
+                arrowprops={"arrowstyle": "-", "color": accent, "lw": 0.7})

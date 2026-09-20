@@ -83,6 +83,7 @@ import annotations
 import appinfo
 import calibration
 import casafit
+import elements
 import handover
 import htmlbrowser
 import xpslines
@@ -90,6 +91,7 @@ import report
 import pptx_export
 import importplan
 import workbook_ui
+import iss_ui
 import plotstyle_ui
 import sputter_ui
 from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
@@ -622,6 +624,7 @@ class Workspace:
                        command=self.open_identify)
         tm.add_command(label="Sputter settings…",
                        command=self.open_sputter)
+        tm.add_command(label="ISS / REELS…", command=self.open_iss_reels)
         tm.add_command(label="Rename…   (F2)", command=self.rename_selected)
         tm.add_command(label="Notes…", command=self.notes_selected)
         bar.add_cascade(label="Tools", menu=tm)
@@ -1847,9 +1850,60 @@ class Workspace:
     def identify_markers(self, r):
         return self.ann.markers_for(*self._marker_key(r))
 
-    def identify_add(self, r, be_measured, label):
-        self.ann.add_marker(*self._marker_key(r), be_measured, label)
+    def identify_add(self, r, be_measured, label, kin=False):
+        self.ann.add_marker(*self._marker_key(r), be_measured, label, kin=kin)
         self._ann_changed(relabel=False)
+
+    # -- ISS / REELS ------------------------------------------------------------
+    def spectrum_regions(self):
+        """Spectra the ISS / REELS tools can work on: what is selected, else
+        what is ticked (any energy axis)."""
+        regs = [r for r in (self.sel_regions or self._ticked_regions())
+                if r.decodable and r.counts]
+        return regs[:60]
+
+    def kinetic_from_event(self, r, event):
+        """Kinetic energy under a click on a panel showing ``r``, whichever
+        energy axis is drawn (None when it cannot be told)."""
+        if event.xdata is None:
+            return None
+        d = self._display(r)
+        ax = viewdata.energy_axis(d, self.scale_var.get())
+        if ax.label == "Kinetic Energy":
+            return float(event.xdata)
+        return (d.photon_energy - float(event.xdata)
+                if d.photon_energy else None)
+
+    def data_from_event(self, r, event):
+        """Intensity under a click, in the spectrum's own units (undoing the
+        normalisation the panel applies)."""
+        if event.ydata is None:
+            return None
+        mode = self.norm_var.get()
+        f = 1.0 if mode in ("None", "At cursor") else norm_factor(
+            self._display(r), mode)
+        return float(event.ydata) * f
+
+    def click_panel_spectra(self, event):
+        """How many spectra the clicked panel shows (0 if it is not a
+        spectrum panel)."""
+        info = self._axinfo.get(event.inaxes)
+        return info[2] if info else 0
+
+    def reels_get(self, r):
+        return self.ann.reels_for(*self._marker_key(r))
+
+    def reels_set(self, r, data):
+        self.ann.set_reels(*self._marker_key(r), data)
+        self._ann_changed(relabel=False)
+        self._update_metadata()
+
+    def open_iss_reels(self):
+        if not self.spectrum_regions():
+            messagebox.showinfo("ISS / REELS", "Select or tick the ISS or "
+                                               "REELS spectrum first.")
+            return
+        iss_ui.IssReelsDialog(self.root, self)
 
     def identify_remove(self, r, marker):
         self.ann.remove_marker(*self._marker_key(r), marker["be"],
@@ -2439,15 +2493,19 @@ class Workspace:
             marks = []
             if vis:
                 shift0 = self._marker_shift(vis[0])
-                marks = [(m["be"] + shift0, m["label"])
+                marks = [(m["be"] + (0.0 if m.get("kin") else shift0),
+                          m["label"], bool(m.get("kin")))
                          for m in self.identify_markers(vis[0])]
+            reels_arg = (self.ann.reels_for(*self._marker_key(vis[0]))
+                         if len(vis) == 1 else None)
             fit_arg = self._fit_overlay(vis, disp, base, notes)
             draw_stack(ax, disp, offset, norm, cur, colours, title, subtitle,
                        selected, multi, first_col=(i % cols == 0),
                        bottom_row=(i + cols >= len(chunk)),
                        accent=pal["accent"], muted=pal["muted"],
                        scale=scale, ke_top=ke_top, top_row=top_row,
-                       markers=marks, style=style, fit=fit_arg)
+                       markers=marks, style=style, fit=fit_arg,
+                       reels=reels_arg)
             axmap[ax] = key
             axhv[ax] = viewdata.photon_energy(disp)
             axinfo[ax] = (axhv[ax], "stack", len(disp), "")

@@ -163,8 +163,10 @@ def build_payload(docs, display=None, details=None, methods_text="",
                 rnote = ann.region_notes.get(
                     an.region_key(fid, r.sample, r.name), "")
                 shift = ann.shift_for(fid, r.sample, r.name)
-                marks = [{"be": round(m["be"] + shift, 3),
-                          "label": str(m.get("label", ""))}
+                marks = [{"be": round(m["be"] + (0.0 if m.get("kin") else shift),
+                                      3),
+                          "label": str(m.get("label", "")),
+                          **({"kin": True} if m.get("kin") else {})}
                          for m in ann.markers_for(fid, r.sample, r.name)]
             reg = {
                 "name": d.name, "e": pack_axis(list(d.energy)),

@@ -35,6 +35,30 @@ def meta_key(fid, pos):
     return f"{fid}|{pos}"
 
 
+def _clean_reels(d):
+    """A valid REELS construction ``{elastic, p1, p2, gap, base, slope}``
+    (gap, base and slope may be absent) or None."""
+    import math
+    if not isinstance(d, dict):
+        return None
+    try:
+        out = {"elastic": float(d["elastic"]),
+               "p1": [float(d["p1"][0]), float(d["p1"][1])],
+               "p2": [float(d["p2"][0]), float(d["p2"][1])]}
+    except (KeyError, TypeError, ValueError, IndexError):
+        return None
+    for k in ("gap", "base", "slope"):
+        try:
+            v = float(d[k])
+            out[k] = v if math.isfinite(v) else None
+        except (KeyError, TypeError, ValueError):
+            out[k] = None
+    if not all(math.isfinite(v) for v in (out["elastic"], *out["p1"],
+                                          *out["p2"])):
+        return None
+    return out
+
+
 @dataclass
 class Annotations:
     sample_names: dict = field(default_factory=dict)     # sample key -> name
@@ -48,6 +72,7 @@ class Annotations:
     markers: dict = field(default_factory=dict)          # region key -> [...]
     experiment_notes: str = ""
     sputter: dict = field(default_factory=dict)          # sample key -> settings
+    reels: dict = field(default_factory=dict)            # region key -> band gap
     extra: dict = field(default_factory=dict)            # unknown keys kept
 
     # -- names -----------------------------------------------------------------
@@ -115,6 +140,10 @@ class Annotations:
                 for k, v in sputter_mod.metadata_rows(
                         sset, region.etch_time).items():
                     out[k] = v
+        rl = self.reels.get(region_key(fid, region.sample, region.name))
+        if rl and rl.get("gap") is not None:
+            out["REELS band gap (eV)"] = f"{rl['gap']:.2f}"
+            out["REELS elastic peak (eV KE)"] = f"{rl['elastic']:.2f}"
         note = self.notes_for(fid, region.sample, region.name)
         if note:
             out["Notes"] = note
@@ -145,11 +174,31 @@ class Annotations:
     def markers_for(self, fid, sample, name):
         return list(self.markers.get(region_key(fid, sample, name), []))
 
-    def add_marker(self, fid, sample, name, be, label):
+    def add_marker(self, fid, sample, name, be, label, kin=False):
+        """A peak marker. ``be`` is a binding energy, or with ``kin=True`` a
+        kinetic energy (ISS peaks): it then does not move with an energy
+        calibration."""
         lst = self.markers.setdefault(region_key(fid, sample, name), [])
         if not any(abs(m["be"] - be) < 1e-6 and m["label"] == label
                    for m in lst):
-            lst.append({"be": float(be), "label": label})
+            m = {"be": float(be), "label": label}
+            if kin:
+                m["kin"] = True
+            lst.append(m)
+
+    # -- REELS band gaps (per spectrum) ---------------------------------------
+    def reels_for(self, fid, sample, name):
+        """The stored REELS construction of a spectrum, or None."""
+        d = self.reels.get(region_key(fid, sample, name))
+        return dict(d) if d else None
+
+    def set_reels(self, fid, sample, name, data):
+        key = region_key(fid, sample, name)
+        clean = _clean_reels(data)
+        if clean:
+            self.reels[key] = clean
+        else:
+            self.reels.pop(key, None)
 
     def remove_marker(self, fid, sample, name, be, label):
         key = region_key(fid, sample, name)
@@ -182,7 +231,7 @@ class Annotations:
                     or self.sample_notes or self.region_notes or self.md_edits
                     or self.shifts or self.calibration or self.markers
                     or self.calibration_statement or self.experiment_notes
-                    or self.sputter)
+                    or self.sputter or self.reels)
 
     def copy(self):
         return copy.deepcopy(self)
@@ -192,7 +241,7 @@ class Annotations:
         for name in ("sample_names", "region_names", "sample_notes",
                      "region_notes", "md_edits", "shifts", "calibration",
                      "calibration_statement", "markers", "experiment_notes",
-                     "sputter"):
+                     "sputter", "reels"):
             d[name] = copy.deepcopy(getattr(self, name))
         d.update(self.extra)
         return d
@@ -206,7 +255,7 @@ class Annotations:
         known = {"version", "sample_names", "region_names", "sample_notes",
                  "region_notes", "md_edits", "shifts", "calibration",
                  "calibration_statement", "markers", "experiment_notes",
-                 "sputter"}
+                 "sputter", "reels"}
         for name in ("sample_names", "region_names", "sample_notes",
                      "region_notes"):
             v = data.get(name)
@@ -234,12 +283,20 @@ class Annotations:
                 good = []
                 for m in lst:
                     try:
-                        good.append({"be": float(m["be"]),
-                                     "label": str(m["label"])})
+                        item = {"be": float(m["be"]), "label": str(m["label"])}
+                        if m.get("kin") is True:
+                            item["kin"] = True
+                        good.append(item)
                     except (KeyError, TypeError, ValueError):
                         pass
                 if good:
                     a.markers[str(k)] = good
+        v = data.get("reels")
+        if isinstance(v, dict):
+            for k, x in v.items():
+                clean = _clean_reels(x)
+                if clean:
+                    a.reels[str(k)] = clean
         v = data.get("sputter")
         if isinstance(v, dict):
             a.sputter = {str(k): sputter_mod.sanitise(x) for k, x in v.items()
