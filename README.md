@@ -52,6 +52,8 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `elements.py`, `reels.py`, `iss_ui.py` | ISS element identification, REELS band gap and their dialog |
 | `holder.py` | holder-photo geometry: stage position → photo pixel, calibration nudges, marker picking |
 | `fonts.py`, `assets/fonts/` | bundled IBM Plex Sans (SIL Open Font License) |
+| `splash.py`, `about_ui.py`, `appinfo.py`, `assets/splash.png` | the start-up splash, the About box, the app name / version / link, and the picture you supply |
+| `ribbon.py`, `icons.py` | the tabbed toolbar and the icons drawn in code for it |
 | `pdf_preview.py` | in-app PDF preview (PyMuPDF) |
 | `launch.py` | one-step launcher (creates a venv, installs deps, starts the app) |
 | `requirements.txt` | Python packages (matplotlib, Pillow, reportlab, PyMuPDF, python-pptx) |
@@ -98,6 +100,26 @@ python3 launch.py           # macOS / Linux
 One workspace window: the **file tree** on the left, a large **plot** in the
 middle, and an **info column** on the right (Details above an
 Images / Stage map notebook). Drag any splitter; sizes are remembered.
+
+Under the menu bar is a **tabbed toolbar**: *Home* (open, workbook, save,
+export, image), *Analyse* (calibrate, identify peaks, ISS / REELS, sputter,
+SnapMap, rename, notes), *Report* (details, figures, report PDF, slides,
+hand-over ZIP, HTML browser, PDF previews) and *View* (theme, plot style, the
+Files / Details panes, focus, expand / collapse, untick). Every button is a
+shortcut for a menu command, so the menu bar still holds everything; buttons
+that need spectra are dimmed until a file is open. Double-click a tab (or use
+the arrow at the right) to fold the toolbar down to the tab row and give the
+plot the height back; the tab and fold state are remembered.
+
+**Splash and About.** A splash screen with your picture shows while the
+program starts; click it or press Esc to close it. Put the picture at
+`assets/splash.png` (PNG, JPG or GIF; any size, it is scaled to at most 60 %
+of the screen; the same file is shrunk for the window icon). An optional
+`assets/about.png` replaces it in the **Help → About** box, which also shows the
+version, a link to the project page, the libraries in use and a *Copy version
+info* button for bug reports. Without a picture both show just the name.
+Start with `--no-splash`, or untick *Help → Show splash screen at start*, to
+skip it.
 
 1. **Open** (or File menu) → *Spectra files…* to load several files of any
    supported format, or *Folder…* to load every recognised file in a folder.

@@ -48,6 +48,12 @@ import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+import splash
+if __name__ == "__main__":
+    # the hidden root and the splash screen, before the slow imports below
+    splash.begin(sys.argv)
+    splash.status("Loading the plotting library…")
+
 # Optional dependencies ----------------------------------------------------
 try:
     import matplotlib
@@ -68,12 +74,16 @@ except Exception:
 
 
 
+splash.status("Loading the file readers…")
 from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
                      load_file, reader_for, supported_patterns,
                      UnsupportedFormat, ThermoExperiment, LoadCancelled,
                      looks_like_experiment, experiment_roots)
+import about_ui
 import fonts
 import holder
+import icons
+import ribbon
 import plotstyle
 import themes
 import viewdata
@@ -487,6 +497,7 @@ class Workspace:
             self.theme_name = "Light"
         self.palette = self.themes.apply(self.theme_name)
         self._apply_mpl_theme()
+        self.icon_cache = self._make_icons()
 
         self.docs = []              # loaded SpectrumFile readers
         self.node_map = {}          # tree iid -> (parser, TreeNode)
@@ -592,6 +603,8 @@ class Workspace:
         filem.add_separator()
         filem.add_command(label="Preview spectra PDF…",
                           command=self.preview_spectra)
+        filem.add_command(label="Save spectra as PDF…",
+                          command=self.save_pdf)
         filem.add_command(label="Preview metadata PDF…",
                           command=self.preview_metadata)
         filem.add_separator()
@@ -657,6 +670,19 @@ class Workspace:
         viewm.add_command(label="Plot style…", command=self.edit_plot_style)
         bar.add_cascade(label="View", menu=viewm)
         self.view_menu = viewm
+        helpm = tk.Menu(bar, tearoff=0)
+        self.themes.register_menu(helpm)
+        helpm.add_command(label=f"About {appinfo.NAME}…",
+                          command=self.show_about)
+        helpm.add_command(label="Project page on GitHub",
+                          command=about_ui.open_link)
+        helpm.add_separator()
+        self.splash_var = tk.BooleanVar(
+            value=bool(self.cfg.get("show_splash", True)))
+        helpm.add_checkbutton(label="Show splash screen at start",
+                              variable=self.splash_var,
+                              command=self._on_splash_toggle)
+        bar.add_cascade(label="Help", menu=helpm)
         self.menubar = bar
         self.root.config(menu=bar)
 
@@ -670,7 +696,7 @@ class Workspace:
                                 text="No files loaded. Use Open to add spectra.")
         self.status.pack(side="left", fill="x", expand=True)
         ttk.Separator(self.root).pack(side="bottom", fill="x")
-        self._build_toolbar()
+        self._build_ribbon()
 
         self.outer = ttk.PanedWindow(self.root, orient="horizontal")
         self.outer.pack(fill="both", expand=True)
@@ -703,68 +729,35 @@ class Workspace:
         self.root.bind("<F11>", lambda e: self.toggle_focus())
         self.root.bind("<Control-s>", lambda e: self.save_workbook())
 
-    def _build_toolbar(self):
-        tb = ttk.Frame(self.root)
-        tb.pack(side="top", fill="x", padx=8, pady=(6, 4))
-
-        def menubutton(text, items):
-            btn = ttk.Button(tb, text=f"{text} ▾", style="Tool.TButton")
-            m = tk.Menu(btn, tearoff=0)
-            for it in items:
-                if it is None:
-                    m.add_separator()
-                else:
-                    m.add_command(label=it[0], command=it[1])
-
-            def drop():
-                try:
-                    m.tk_popup(btn.winfo_rootx(),
-                               btn.winfo_rooty() + btn.winfo_height())
-                finally:
-                    m.grab_release()
-            btn.configure(command=drop)
-            btn.pack(side="left", padx=(0, 2))
-            self.themes.register_menu(m)
-
-        menubutton("Open", [("Spectra files…", self.open_files),
-                            ("Folder…", self.open_folder), None,
-                            ("Close all files", self.close_all)])
-        menubutton("Export", [
-            ("Ticked spectra to CSV…", lambda: self.export_ticked("csv")),
-            ("Ticked spectra to VAMAS…", lambda: self.export_ticked("vamas")),
-            ("Regions and levels…", self.open_export), None,
-            ("Metadata to CSV…", self.export_meta_csv),
-            ("Metadata to PDF…", self.export_meta_pdf)])
-        menubutton("PDF", [("Preview spectra", self.preview_spectra),
-                           ("Save spectra as PDF…", self.save_pdf), None,
-                           ("Preview metadata", self.preview_metadata),
-                           ("Save metadata as PDF…", self.export_meta_pdf)])
-
-        right = ttk.Frame(tb)
-        right.pack(side="right")
+    def _build_ribbon(self):
+        """The tabbed toolbar (see ``ribbon.py``)."""
         self.show_vars = {"tree": tk.BooleanVar(value=True),
                           "info": tk.BooleanVar(value=True)}
-        focus = ttk.Button(right, text="Focus", style="Tool.TButton",
-                           command=self.toggle_focus)
-        focus.pack(side="right", padx=(2, 0))
-        Tooltip(focus, "Hide the file tree and details so the plot fills the "
-                       "window (F11).", lambda: self.palette)
-        for key, text, tip in (("info", "Details",
-                                "Show or hide the details column."),
-                               ("tree", "Files",
-                                "Show or hide the file tree.")):
-            cb = ttk.Checkbutton(right, text=text, style="Toolbutton",
-                                 variable=self.show_vars[key],
-                                 command=lambda k=key: self._toggle_pane(k))
-            cb.pack(side="right", padx=(2, 0))
-            Tooltip(cb, tip, lambda: self.palette)
-        tcb = ttk.Combobox(right, width=14, state="readonly",
-                           values=THEME_NAMES, textvariable=self.theme_var)
-        tcb.pack(side="right", padx=(0, 12))
-        tcb.bind("<<ComboboxSelected>>",
-                 lambda e: self.set_theme(self.theme_var.get()))
-        ttk.Label(right, text="Theme", style="Muted.TLabel").pack(
-            side="right", padx=(12, 6))
+        self.ribbon = ribbon.Ribbon(self.root, self, self.icon_cache)
+        self.ribbon.pack(side="top", fill="x")
+
+    def _make_icons(self):
+        """Toolbar icons for the current palette (None without Pillow)."""
+        if not HAVE_PIL:
+            return None
+        try:
+            scale = float(self.root.tk.call("tk", "scaling")) / 1.3333
+        except tk.TclError:
+            scale = 1.0
+        return icons.IconCache(self.palette,
+                               int(round(22 * max(1.0, min(scale, 2.5)))),
+                               master=self.root)
+
+    def _ribbon_state(self):
+        r = getattr(self, "ribbon", None)
+        if r is not None:
+            r.refresh_state()
+
+    def show_about(self):
+        about_ui.AboutDialog(self.root, self)
+
+    def _on_splash_toggle(self):
+        self.cfg["show_splash"] = bool(self.splash_var.get())
 
     # -- theme --------------------------------------------------------------
     def _plot_palette(self, pal=None, paper=False):
@@ -811,6 +804,9 @@ class Workspace:
         self._restyle_details()
         self.swatches = SwatchCache(self.palette)
         self.blank_img = self.swatches.blank
+        self.icon_cache = self._make_icons()
+        if getattr(self, "ribbon", None) is not None:
+            self.ribbon.set_icons(self.icon_cache)
         self.box_state.clear()
         self._populate_tree()
         if HAVE_MPL:
@@ -918,6 +914,8 @@ class Workspace:
         self.preview.close_document()
         if self._pdf_dir:
             shutil.rmtree(self._pdf_dir, ignore_errors=True)
+        self.ribbon.save_state(cfg)
+        cfg["show_splash"] = bool(self.splash_var.get())
         cfg["colour_scale"] = self.colscale_var.get()
         cfg["colour_reverse"] = bool(self.colrev_var.get())
         for k, v in self.fit_vars.items():
@@ -2110,6 +2108,7 @@ class Workspace:
 
     # -- tree -----------------------------------------------------------
     def _populate_tree(self):
+        self._ribbon_state()
         self.tree.delete(*self.tree.get_children())
         self.node_map.clear()
         self.leaf_ids.clear()
@@ -4522,16 +4521,17 @@ class ExportDialog(tk.Toplevel):
 
 
 def main():
-    fonts.register_process_fonts()          # before Tk enumerates fonts
-    try:                                     # drag-and-drop if it is installed
-        from tkinterdnd2 import TkinterDnD
-        root = TkinterDnD.Tk()
-    except Exception:
-        root = tk.Tk()
+    root = splash.take_root()           # made by the prelude when run as a script
+    if root is None:
+        fonts.register_process_fonts()  # before Tk enumerates fonts
+        root = splash.create_root()
+    splash.status("Building the window…")
     app = Workspace(root)
+    splash.set_window_icon(root)
     args = [os.path.abspath(a) for a in sys.argv[1:] if os.path.exists(a)]
     if args:                     # double-clicking a workbook, or "open with"
         root.after(300, lambda: app._open_paths(args))
+    splash.finish(root)
     root.mainloop()
 
 

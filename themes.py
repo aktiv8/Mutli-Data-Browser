@@ -391,6 +391,25 @@ class ThemeManager:
                      borderwidth=0)
         st.map("Tool.TButton", background=[("pressed", p["select_bg"]),
                                            ("active", panel)])
+        # tabbed toolbar: a panel-coloured strip under the tab row
+        st.configure("Ribbon.TFrame", background=panel)
+        st.configure("Ribbon.TButton", background=panel, foreground=fg,
+                     padding=(8, 4, 8, 3), borderwidth=0, relief="flat")
+        st.map("Ribbon.TButton", background=[("pressed", p["select_bg"]),
+                                             ("active", border)],
+               foreground=[("disabled", muted)])
+        st.configure("Ribbon.Toolbutton", background=panel, foreground=fg,
+                     padding=(8, 4, 8, 3), borderwidth=0, relief="flat")
+        st.map("Ribbon.Toolbutton",
+               background=[("selected", p["select_bg"]),
+                           ("pressed", p["select_bg"]), ("active", border)],
+               foreground=[("selected", p["select_fg"]),
+                           ("disabled", muted)])
+        st.configure("Tab.Toolbutton", background=bg, foreground=muted,
+                     padding=(16, 5), borderwidth=0, relief="flat")
+        st.map("Tab.Toolbutton", background=[("selected", panel),
+                                             ("active", panel)],
+               foreground=[("selected", fg), ("active", fg)])
         st.configure("Toggle.TButton", background=bg, padding=(9, 4),
                      borderwidth=0)
         st.map("Toggle.TButton",
