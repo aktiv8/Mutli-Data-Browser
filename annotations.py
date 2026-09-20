@@ -131,7 +131,8 @@ class Annotations:
             out["Sample"] = self.sample_label(fid, region.sample)
         if "Region" in out:
             out["Region"] = self.region_label(fid, region.sample, region.name)
-        shift = self.shift_for(fid, region.sample, region.name)
+        shift = self.shift_for(fid, region.sample, region.name,
+                               getattr(region, "calibration_shift", 0.0))
         if shift:
             out["BE shift (eV)"] = f"{shift:+.3f}"
         if region.etch_level is not None:
@@ -152,14 +153,17 @@ class Annotations:
         return out
 
     # -- binding-energy shifts ---------------------------------------------------
-    def shift_for(self, fid, sample, name):
+    def shift_for(self, fid, sample, name, default=0.0):
         """The BE shift for a region: the most specific scope wins (region,
-        then sample, then the whole file)."""
+        then sample, then the whole file). ``default`` is returned when the
+        user set none: pass the region's ``calibration_shift`` so the charge
+        correction recorded in the file applies until the user's own
+        calibration replaces it (``None`` tells the two cases apart)."""
         for key in (region_key(fid, sample, name), sample_key(fid, sample),
                     str(fid)):
             if key in self.shifts:
                 return float(self.shifts[key])
-        return 0.0
+        return default
 
     def set_shift(self, scope_key, shift, entry=None):
         if abs(shift) < 1e-12:

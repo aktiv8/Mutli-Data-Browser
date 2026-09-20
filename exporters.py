@@ -143,6 +143,12 @@ def export_vamas(regions, path, institution="Not specified",
         a("0")                    # hours in advance of GMT
         # block comment: include etch info for depth profiles
         comment = list(casafit.to_lines(getattr(r, "fit", None)))
+        cc = r.extra.get("casa_calib") if r.calibration_shift else None
+        if cc and not any(str(c).strip().startswith("Calib") for c in comment):
+            # the charge correction the source file recorded travels as a
+            # Calib line (the CasaXPS convention), not in the axis
+            comment.insert(0, casafit.calib_line(cc["measured"],
+                                                 cc["assigned"]))
         if r.etch_level is not None:
             comment.append(f"Etch level : {r.etch_level}")
         if r.etch_time is not None:
@@ -156,7 +162,11 @@ def export_vamas(regions, path, institution="Not specified",
             a(c)
         a("XPS")                  # technique
         a(anode)                  # analysis source label
-        a(f"{hv:.10g}")           # source characteristic energy
+        # A display copy already carries the file's own correction in hv and
+        # the binding energies; the Calib line brings it back on reading, so
+        # the axis keeps only what the user added on top.
+        a(f"{hv - (r.calibration_shift if r.shift_applied else 0.0):.10g}")
+                                  # source characteristic energy
         a(power or SENT)          # source strength (W)
         a(SENT)                   # beam width x
         a(SENT)                   # beam width y

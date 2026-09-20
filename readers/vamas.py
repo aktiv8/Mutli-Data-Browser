@@ -268,9 +268,46 @@ class VamasFile(SpectrumFile):
             if k in vamasmeta.EXPERIMENT_KEYS and v:
                 instr[k] = v
         self.instrument = {k: v for k, v in instr.items() if v}
+        self._share_calibration()
         self._restore_sputter()
         self._detect_profile(h, blocks, counts)
         self._positions_from_comments(blocks)
+
+    @staticmethod
+    def _own_calibration(r, comments):
+        """The charge correction CasaXPS recorded in this block, if any: kept
+        on the region and applied when the spectrum is displayed (the axis in
+        the file is the raw one). Only binding-energy axes are shifted."""
+        cal = casafit.calibration(comments)
+        if cal is None or not cal.shift:
+            return
+        r.extra["casa_calib"] = {
+            "measured": cal.measured, "assigned": cal.assigned,
+            "shift": cal.shift, "inherited": False}
+        if (r.energy_label or "").lower().startswith("binding"):
+            r.calibration_shift = cal.shift
+
+    def _share_calibration(self):
+        """A region with no ``Calib`` line takes the correction of the other
+        regions of its sample (CasaXPS calibrates a sample as a whole and
+        leaves the line out of blocks it was never applied to), provided the
+        sample's own corrections agree; per-level corrections of a depth
+        profile differ, and then each block keeps only its own."""
+        by_sample = {}
+        for r in self.regions:
+            cc = r.extra.get("casa_calib")
+            if cc:
+                by_sample.setdefault(r.sample, []).append(cc)
+        for sample, ccs in by_sample.items():
+            first = ccs[0]
+            if any(abs(c["shift"] - first["shift"]) > 1e-6 for c in ccs):
+                continue
+            for r in self.regions:
+                if r.sample != sample or "casa_calib" in r.extra:
+                    continue
+                r.extra["casa_calib"] = dict(first, inherited=True)
+                if (r.energy_label or "").lower().startswith("binding"):
+                    r.calibration_shift = first["shift"]
 
     @staticmethod
     def _source_text(b):
@@ -356,6 +393,7 @@ class VamasFile(SpectrumFile):
         r.extra["comment_lines"] = list(b["comments"])
         r.extra["n_scans"] = b["n_scans"]
         r.fit = casafit.parse(b["comments"])
+        self._own_calibration(r, b["comments"])
         r.lens_mode = self._lookup("Lens mode", kv)
         r.aperture = self._lookup("Aperture", kv)
         vamasmeta.apply_to_region(r, vamasmeta.decode(b["comments"]))

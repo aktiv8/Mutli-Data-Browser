@@ -188,6 +188,7 @@ class TestBackgrounds(unittest.TestCase):
         self.assertEqual(len(ls.background("Linear", y)), 50)
         self.assertEqual(float(ls.background("None", y).sum()), 0.0)
         self.assertIsNone(ls.background("Tougaard", y))     # not reproduced
+        self.assertIsNone(ls.background("U 3 Tougaard", y))
         self.assertEqual(len(ls.shirley(np.array([1.0, 2.0]))), 2)
 
 
@@ -371,7 +372,9 @@ class TestCurves(unittest.TestCase):
         fit = casafit.parse(lines)
         cv = casafit.curves(fit, be, counts, self.hv, 0.27, 25)[0]
         self.assertIsNone(cv.background)
-        self.assertIsNotNone(cv.envelope)         # components still drawn
+        self.assertFalse(cv.background_known)
+        self.assertTrue(cv.components)            # components still drawn
+        self.assertIsNone(cv.envelope)            # but no envelope on air
 
 
 # ------------------------------------------------------ files and exports

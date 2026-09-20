@@ -445,9 +445,13 @@ def draw_fit(ax, x, fit, scale, muted, accent):
                 key = (f"i{comp.index}" if comp.index >= 0
                        else f"n{comp.name}")
                 if key not in names:
+                    # a group's own name, unless CasaXPS just tagged it with
+                    # the region's label: then the first component names it
+                    grp = comp.group.strip()
+                    named = (comp.index >= 0 and grp and grp.lower()
+                             != (cv.region or "").strip().lower())
                     names[key] = (cols[len(names) % len(cols)],
-                                  comp.group if comp.index >= 0 and comp.group
-                                  else comp.name)
+                                  grp if named else comp.name)
                 col = names[key][0]
                 y = [v * scale for v in vals]
                 lo = base if base is not None else [0.0] * len(y)
@@ -464,9 +468,15 @@ def draw_fit(ax, x, fit, scale, muted, accent):
         from matplotlib.patches import Patch
         handles = [Patch(facecolor=c, alpha=0.5, label=n[:22])
                    for c, n in names.values()]
-        ax.legend(handles=handles, loc="upper left",
-                  fontsize=max(6, int(ax.xaxis.label.get_fontsize()) - 2),
-                  frameon=False, handlelength=1.0)
+        many = len(handles) > 6           # a long list would cover the data:
+        fs = max(6, int(ax.xaxis.label.get_fontsize()) - 2)   # put it below
+        if many:
+            ax.legend(handles=handles, frameon=False, handlelength=1.0,
+                      loc="upper center", bbox_to_anchor=(0.5, -0.2),
+                      ncol=3, fontsize=fs - 1, columnspacing=1.2)
+        else:
+            ax.legend(handles=handles, loc="upper left", fontsize=fs,
+                      frameon=False, handlelength=1.0)
 
 
 def draw_reels(ax, a0, hv, reels, scale, muted, accent, note_size=8):

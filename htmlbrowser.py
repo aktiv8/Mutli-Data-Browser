@@ -341,7 +341,8 @@ def build_payload(docs, display=None, details=None, methods_text="",
             if ann is not None:
                 rnote = ann.region_notes.get(
                     an.region_key(fid, r.sample, r.name), "")
-                shift = ann.shift_for(fid, r.sample, r.name)
+                shift = ann.shift_for(fid, r.sample, r.name,
+                                      r.calibration_shift)
                 marks = [{"be": round(m["be"] + (0.0 if m.get("kin") else shift),
                                       3),
                           "label": str(m.get("label", "")),

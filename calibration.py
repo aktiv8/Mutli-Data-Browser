@@ -69,3 +69,29 @@ def statement(entries, override=""):
             f"{e.get('reference', 0):.2f} eV (measured "
             f"{e.get('measured', 0):.2f} eV).")
     return " ".join(lines)
+
+
+def casa_statement(items) -> str:
+    """One sentence per sample for the charge correction CasaXPS recorded in
+    the files. ``items`` are ``(sample label, measured, assigned)`` in eV;
+    a sample whose regions were corrected differently (per depth level) gets
+    the range of the shifts."""
+    by_sample = {}
+    for label, measured, assigned in items:
+        by_sample.setdefault(label or "", []).append(
+            (float(measured), float(assigned)))
+    out = []
+    for label, pairs in by_sample.items():
+        pairs = sorted(set((round(m, 4), round(a, 4)) for m, a in pairs))
+        where = f"{label} " if label else "the data "
+        shifts = [a - m for m, a in pairs]
+        if len(pairs) == 1:
+            m, a = pairs[0]
+            out.append(f"Binding energies of {where}were charge-corrected in "
+                       f"CasaXPS by {a - m:+.2f} eV (reference peak measured "
+                       f"at {m:.2f} eV, set to {a:.2f} eV).")
+        else:
+            out.append(f"Binding energies of {where}were charge-corrected in "
+                       f"CasaXPS, by {min(shifts):+.2f} to {max(shifts):+.2f} "
+                       f"eV depending on the region or level.")
+    return " ".join(out)

@@ -415,12 +415,27 @@ one fit per level (each block its own), so stepping through levels shows each
 level's fit where it has one. Components that share an INDEX are one chemical
 state and one colour.
 
-* **Correct frame and scale.** CasaXPS stores positions as kinetic energies in
-  its calibrated frame and intensities in counts per second; the curves are
-  reconstructed in the spectrum's own axis and counts, and follow the app's
-  energy calibration.
+* **Charge correction carried over.** CasaXPS records its binding-energy
+  correction in each block as `Calib M = 281.7289 A = 282 BE ADD` (measured
+  peak, assigned value): the spectra are shown shifted by A − M, as in CasaXPS,
+  and the shift appears in the Details ("BE calibration (CasaXPS)") and in the
+  report's calibration statement. A block with no `Calib` line takes the
+  correction of the other blocks of its **sample** when they all agree (a wide
+  scan next to calibrated core levels); depth-profile levels calibrated
+  individually keep their own. Your own **Calibrate…** replaces it.
+* **Correct frame and scale.** CasaXPS stores positions as kinetic energies and
+  intensities in counts per second. Where a `Calib` line carries the
+  `Regions Comps` flags the positions moved with the spectrum (raw frame);
+  without them they are in the calibrated frame. The curves are reconstructed
+  in the spectrum's own axis and counts, and follow the app's energy
+  calibration. When a block holds several overlapping regions with one name,
+  the widest is drawn.
 * **Exact and reconstructed shapes.** `GL` and `SGL` shapes and Shirley / linear
-  backgrounds are computed exactly. CasaXPS does not publish its `LA` and `LF`
+  backgrounds are computed exactly; the two-parameter universal Tougaard
+  background (`U 2 Tougaard`) is reproduced from its stored B and C to 2–5 %
+  of the peak height on the MXene HAXPES/XPS regions we checked. Other
+  Tougaard variants are not reproduced: the components are then drawn without an
+  envelope and the status bar says so. CasaXPS does not publish its `LA` and `LF`
   kernels, so those are **reconstructions** from the stored parameters (the
   status bar says so): checked against real CasaXPS fits (titanium, copper,
   vanadium, a titanium depth profile) they reproduce the data to 3–7 % rms of

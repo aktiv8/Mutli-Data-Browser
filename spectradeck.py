@@ -1670,7 +1670,9 @@ class Workspace:
     def _display(self, r):
         """``r`` as it should be drawn and exported: display names applied and
         the binding-energy shift added (the photon energy moves with it, so
-        the kinetic energy of every point is unchanged). Returns ``r`` itself
+        the kinetic energy of every point is unchanged). The shift is the
+        user's own calibration or, when there is none, the charge correction
+        the file records (``Region.calibration_shift``). Returns ``r`` itself
         when nothing applies."""
         q = self._disp_cache.get(id(r))
         if q is not None:
@@ -1680,7 +1682,7 @@ class Workspace:
         ann = self.ann
         dn = ann.region_label(fid, r.sample, r.name)
         ds = ann.sample_label(fid, r.sample)
-        shift = (ann.shift_for(fid, r.sample, r.name)
+        shift = (ann.shift_for(fid, r.sample, r.name, r.calibration_shift)
                  if viewdata.is_binding(r) else 0.0)
         if dn == r.name and ds == r.sample and not shift:
             q = r
@@ -1689,6 +1691,7 @@ class Workspace:
             q.name, q.sample = dn, ds
             if shift:
                 q.energy = [e + shift for e in r.energy]
+                q.shift_applied = shift
                 if r.photon_energy:
                     q.photon_energy = r.photon_energy + shift
         self._disp_cache[id(r)] = q
@@ -1808,8 +1811,29 @@ class Workspace:
         self.status.config(text=f"Shift of {where} removed.")
 
     def calibration_statement(self):
-        return calibration.statement(self.ann.calibration,
-                                     self.ann.calibration_statement)
+        own = calibration.statement(self.ann.calibration,
+                                    self.ann.calibration_statement)
+        if (self.ann.calibration_statement or "").strip():
+            return own
+        casa = calibration.casa_statement(self._casa_calibrations())
+        return " ".join(t for t in (casa, own) if t)
+
+    def _casa_calibrations(self):
+        """``(sample label, measured, assigned)`` for every charge correction
+        recorded in a loaded file that is still in effect (the user's own
+        calibration of the same spectrum replaces it)."""
+        out = []
+        for p in self.docs:
+            fid = self.file_ids.get(id(p), "")
+            for r in p.regions:
+                cc = r.extra.get("casa_calib")
+                if not cc or not r.calibration_shift:
+                    continue
+                if self.ann.shift_for(fid, r.sample, r.name, None) is not None:
+                    continue
+                out.append((self.ann.sample_label(fid, r.sample),
+                            cc["measured"], cc["assigned"]))
+        return out
 
     # -- sputter settings (depth and fluence axes) ---------------------------------
     def _sputter_for(self, r):
@@ -1887,7 +1911,7 @@ class Workspace:
 
     def _marker_shift(self, r):
         fid, sample, name = self._marker_key(r)
-        return self.ann.shift_for(fid, sample, name)
+        return self.ann.shift_for(fid, sample, name, r.calibration_shift)
 
     def identify_markers(self, r):
         return self.ann.markers_for(*self._marker_key(r))
@@ -2623,6 +2647,11 @@ class Workspace:
             return None
         if any(c.approximate for c in cvs):
             notes.append("fit: LA / LF shapes are reconstructed")
+        unknown = sorted({c.background_type for c in cvs
+                          if not c.background_known})
+        if unknown:
+            notes.append("fit: " + ", ".join(unknown) + " background not "
+                         "reproduced, components only")
         if not all(c.scale_known for c in cvs):
             notes.append("fit: dwell time unknown, curves in counts/s")
         return {"curves": cvs, "show": show,
@@ -2648,7 +2677,8 @@ class Workspace:
                     r = rs[0]
                     p = self.region_parser.get(id(r))
                     shift = self.ann.shift_for(
-                        self.file_ids.get(id(p), ""), r.sample, r.name)
+                        self.file_ids.get(id(p), ""), r.sample, r.name,
+                        r.calibration_shift)
                     break
         return x - shift
 

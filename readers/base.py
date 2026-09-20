@@ -114,6 +114,11 @@ class Region:
     date: str = ""                     # acquisition date/time (display string)
     extra: dict = field(default_factory=dict)   # reader-specific leftovers
     fit: object = None                 # casafit.Fit: a CasaXPS fit read from VAMAS
+    calibration_shift: float = 0.0     # eV the file itself says to add to the
+                                       # BE axis (CasaXPS charge correction);
+                                       # applied on display, never to `energy`
+    shift_applied: float = 0.0         # set on the display copy: eV already
+                                       # added to `energy` and `photon_energy`
 
     @property
     def n_points(self) -> int:
@@ -451,6 +456,13 @@ class SpectrumFile:
                 + (f", {'/'.join(bgs)} background" if bgs else "")
                 + (f", BE calibration {r.fit.calib_shift:+.2f} eV"
                    if r.fit.calib_shift else ""))
+        cc = r.extra.get("casa_calib")
+        if cc and cc.get("shift"):
+            md["BE calibration (CasaXPS)"] = (
+                f"{cc['shift']:+.3f} eV ({cc['measured']:.4f} to "
+                f"{cc['assigned']:.4f})"
+                + (", taken from the other regions of this sample"
+                   if cc.get("inherited") else ""))
         for k, v in (r.extra.get("preserved_metadata") or {}).items():
             if not md.get(k):              # restored from a VAMAS comment
                 md[k] = v

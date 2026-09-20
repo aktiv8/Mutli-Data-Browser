@@ -142,12 +142,47 @@ def linear_bg(y, avg=1):
         * np.linspace(0.0, 1.0, n)
 
 
-def background(kind, y, avg=1):
+def tougaard_u2(x, y, b, c, avg=1):
+    """The two-parameter universal Tougaard background of ``y`` on the
+    ascending-KE grid ``x``: the level at the high-KE end (mean of ``avg``
+    points) plus the inelastic tail of everything above each point,
+    ``sum K(T) (y - end) dE`` over ``T = x' - x``, with the cross-section
+    ``K(T) = B T / (C + T^2)^2``. CasaXPS stores C with a minus sign (its
+    general form is ``B T / ((C - T^2)^2 + D T^2)`` and the two-parameter
+    version has D = 0). ``b`` is B (eV^2), ``c`` the positive C (eV^2).
+    Checked on real CasaXPS fits (see ``tests/test_casafit.py``)."""
+    np = _np()
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = len(y)
+    if n < 3:
+        return y.copy()
+    k = max(1, min(int(avg), n // 2 or 1))
+    base = float(y[-k:].mean())
+    dx = float(np.abs(np.diff(x)).mean())
+    yb = y - base
+    bg = np.empty(n)
+    for i in range(n):
+        t = x[i + 1:] - x[i]
+        bg[i] = float(np.sum(b * t / ((c + t * t) ** 2) * yb[i + 1:]))
+    return base + bg * dx
+
+
+_TOUGAARD_U2 = re.compile(r"^u\s*2\s*tougaard")
+
+
+def background(kind, y, avg=1, x=None, params=()):
     """Background under ``y`` for a CasaXPS type name ('Shirley', 'Linear',
-    'None' ...); None for a type this module cannot reproduce."""
+    'None', 'U 2 Tougaard' ...); None for a type this module cannot
+    reproduce. ``x`` (ascending KE) and ``params`` (the region line's six
+    numbers after the averaging width) are needed for Tougaard."""
     t = str(kind or "").strip().lower()
     if t.startswith("shirley"):
         return shirley(y, avg)
+    if _TOUGAARD_U2.match(t):
+        if x is None or len(params) < 4 or not params[2]:
+            return None
+        return tougaard_u2(x, y, params[2], abs(params[3]) or 1643.0, avg)
     if t.startswith("linear"):
         return linear_bg(y, avg)
     if t in ("none", "", "offset"):
