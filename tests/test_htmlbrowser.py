@@ -105,6 +105,55 @@ class TestNumbers(unittest.TestCase):
         self.assertIsNone(hb.jpeg_size(b"\xff\xd8\xff\xe0\x00"))
 
 
+def survey(n=1101, hv=1486.6):
+    """A wide scan with a strong C 1s (285 eV) and O 1s (532 eV)."""
+    e = [1100.0 - i * 1100.0 / (n - 1) for i in range(n)]
+    c = [50 + 900 * 2.718 ** (-((x - 285.0) / 2.0) ** 2)
+         + 1500 * 2.718 ** (-((x - 532.0) / 2.0) ** 2) for x in e]
+    return Region(name="Survey", index=0, offset=0, energy=e, counts=c,
+                  decodable=True, sample="S1", photon_energy=hv,
+                  pass_energy=160.0, dwell=0.1, step=1.0, source="a.vms",
+                  count_units="counts/s")
+
+
+class TestElementIdentification(unittest.TestCase):
+    def test_line_table_is_shipped(self):
+        el = hb.build_payload([doc("a.vms", [region()])])["elements"]
+        import xpslines
+        self.assertEqual(len(el["lines"]), len(xpslines.load_lines()))
+        self.assertEqual(el["lines"][0][:2], ["Li", "1s"])
+        self.assertIn("C", el["common"])
+        self.assertEqual(el["hv"], xpslines.DEFAULT_HV)
+        # an Auger line has a kinetic energy and no binding energy
+        auger = [x for x in el["lines"] if x[2] is None]
+        self.assertTrue(auger and all(x[3] is not None for x in auger))
+
+    def test_no_lines_no_table_rows(self):
+        p = hb.build_payload([doc("a.vms", [survey()])], lines=[])
+        self.assertEqual(p["elements"]["lines"], [])
+        self.assertNotIn("auto", p["samples"][0]["regions"][0])
+
+    def test_surveys_get_automatic_labels(self):
+        reg = hb.build_payload([doc("a.vms", [survey()])])["samples"][0]["regions"][0]
+        labels = {a["label"]: a["be"] for a in reg["auto"]}
+        self.assertAlmostEqual(labels["C 1s"], 285.0, delta=1.0)
+        self.assertAlmostEqual(labels["O 1s"], 532.0, delta=1.0)
+
+    def test_narrow_scans_get_none(self):
+        p = hb.build_payload([doc("a.vms", [region("C 1s")])])
+        self.assertNotIn("auto", p["samples"][0]["regions"][0])
+
+    def test_labels_follow_the_shifted_axis(self):
+        r = survey()
+        shifted = hb.build_payload(
+            [doc("a.vms", [r])],
+            display=lambda x: __import__("dataclasses").replace(
+                x, energy=[e + 1.0 for e in x.energy]))
+        labels = {a["label"]: a["be"]
+                  for a in shifted["samples"][0]["regions"][0]["auto"]}
+        self.assertAlmostEqual(labels["C 1s"], 286.0, delta=1.0)
+
+
 class TestPayload(unittest.TestCase):
     def test_structure(self):
         d = doc("dir/a.vms", [region("C 1s", "A"), region("O 1s", "A", lo=525,
@@ -625,6 +674,22 @@ class TestJavaScript(unittest.TestCase):
                          np.flatnonzero(cube.channels(e[3], e[9])).tolist()],
         }
 
+    def element_fixture(self):
+        """Candidate lookups as xpslines gives them, for the page's port."""
+        import xpslines
+        lines = xpslines.load_lines()
+        table = hb.element_table(lines)
+        cases = []
+        for be, win, hv in ((285.0, 2.0, None), (284.4, 1.0, 1486.6),
+                            (532.1, 2.0, 1486.6), (455.5, 3.0, 1486.6),
+                            (978.0, 4.0, 1486.6), (978.0, 4.0, 1253.6),
+                            (150.0, 0.5, None), (72.5, 5.0, 1486.6)):
+            got = xpslines.candidates(be, win, lines, hv)
+            cases.append({"be": be, "win": win, "hv": hv,
+                          "labels": [xpslines.label_of(e) for _d, e in got],
+                          "deltas": [d for d, _e in got]})
+        return {"table": table, "cases": cases}
+
     def fit_fixture(self, tmp):
         """A fitted spectrum: the payload, the app's own CSV of it (which
         includes the fit columns) and its fit columns as the app names them."""
@@ -694,6 +759,7 @@ class TestJavaScript(unittest.TestCase):
             }
             if HAVE_NP:
                 fx["map"] = self.map_fixture()
+            fx["elements"] = self.element_fixture()
             if HAVE_FIT:
                 fx["fit"] = self.fit_fixture(tmp)
             fx_path = os.path.join(tmp, "fx.json")

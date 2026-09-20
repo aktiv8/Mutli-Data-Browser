@@ -39,6 +39,7 @@ import quant
 import snapshot
 import themes
 import viewdata
+import xpslines
 
 FORMAT_VERSION = 1
 VIEWER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "viewer")
@@ -50,7 +51,8 @@ CAMERA_QUALITY = 78                      # JPEG quality
 CAMERA_BUDGET = 40 * 1024 * 1024         # pictures beyond this are left out
 MAP_STEP = 0.125                         # counts per step of a stored map value
 MAP_BUDGET = 40 * 1024 * 1024            # compressed SnapMap bytes; see pack_maps
-FIT_DIGITS = 6                           # significant figures of a fit curve
+SURVEY_SPAN = 250.0                      # eV: wider than this is a survey
+FIT_DIGITS = 6                          # significant figures of a fit curve
 FIT_BUDGET = 600_000                     # curve values in all; see _fit_block
 
 
@@ -352,6 +354,30 @@ def _fit_block(d, budget):
     return {"rows": out, "notes": fit_notes(rows), "dropped": dropped}
 
 
+# -- element identification ----------------------------------------------------------
+def element_table(lines):
+    """The line table for the page's candidate lookup (what ``xpslines`` uses):
+    ``lines`` as ``[element, line, be, ke, rank]`` (one of be / ke is null;
+    Auger lines give a kinetic energy), the elements that win close calls, and
+    the defaults."""
+    return {"lines": [[e["el"], e["line"], e.get("be"), e.get("ke"),
+                       e.get("rank", 1)] for e in lines],
+            "common": sorted(xpslines.COMMON),
+            "bonus": xpslines.COMMON_BONUS, "hv": xpslines.DEFAULT_HV}
+
+
+def auto_labels(d, lines):
+    """Automatic element labels for a survey (a binding-energy spectrum wider
+    than ``SURVEY_SPAN``), as ``xpslines.auto_label`` gives them on the
+    spectrum as shown; [] for anything else."""
+    if (not lines or not d.photon_energy or not viewdata.is_binding(d)
+            or not d.energy
+            or max(d.energy) - min(d.energy) <= SURVEY_SPAN):
+        return []
+    found = xpslines.auto_label(d.energy, d.counts, lines, hv=d.photon_energy)
+    return [{"be": round(be, 2), "label": label} for be, label in found]
+
+
 # -- the payload --------------------------------------------------------------------
 def _meta(md):
     """Non-empty metadata values as strings, order kept."""
@@ -360,15 +386,18 @@ def _meta(md):
 
 def build_payload(docs, display=None, details=None, methods_text="",
                   calibration="", figures=(), calib=None, generated=None,
-                  cameras=True, snapmaps=True):
+                  cameras=True, snapmaps=True, lines=None):
     """The data of the browser as a JSON-able dict.
 
     ``figures`` is ``[{"name", "caption", "pages": [png bytes]}]``; ``calib``
     the holder calibration (or None). ``display(region)`` gives a region as
     exported (renamed, shifted). ``cameras`` / ``snapmaps`` switch the camera
     pictures and the SnapMap pixels off; anything left out or thinned to fit
-    the size limits is said in ``build_notes``."""
+    the size limits is said in ``build_notes``. ``lines`` is the element-line
+    table (default: ``xpslines.load_lines()``); it feeds the page's peak
+    identification and the automatic labels of surveys."""
     details = details or {}
+    element_lines = xpslines.load_lines() if lines is None else lines
     samples, files, notes = [], [], []
     map_src = []                     # (parser, region, shown region, its dict)
     n_regions = 0
@@ -417,6 +446,9 @@ def build_payload(docs, display=None, details=None, methods_text="",
                 "meta": _meta(p.region_metadata(r)), "note": rnote,
                 "markers": marks,
             }
+            auto = auto_labels(d, element_lines)
+            if auto:
+                reg["auto"] = auto
             fit = _fit_block(d, fit_budget) if getattr(d, "fit", None) else None
             if fit:
                 reg["fit"] = fit
@@ -460,6 +492,7 @@ def build_payload(docs, display=None, details=None, methods_text="",
         "methods": methods_text or "", "calibration": calibration or "",
         "files": files, "samples": samples, "figures": figs,
         "holders": holders, "cameras": cams, "maps": maps,
+        "elements": element_table(element_lines),
         "build_notes": notes,
         "palette": {"light": list(light["cycle"]), "dark": list(dark["cycle"]),
                     "bg": {"light": light["plot_bg"], "dark": dark["plot_bg"]}},

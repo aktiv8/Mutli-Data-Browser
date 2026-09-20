@@ -53,7 +53,10 @@
           </label>
           <button type="button" id="resetzoom" title="Undo zooming on every panel">Reset zoom</button>
           <button type="button" id="csv" title="Download the ticked spectra as CSV">Download CSV</button>
+          <button type="button" id="identify" aria-pressed="false" title="Click a peak on a plot to see which element lines lie near it">Identify peaks</button>
+          <label class="field" id="autoField" hidden title="Automatic labels from approximate line positions: check them before relying on them"><input type="checkbox" id="autolabel"> Label survey peaks</label>
         </div>
+        <div class="idbox" id="idbox" hidden></div>
         <div class="controls levelbar" id="levelbar" hidden>
           <label class="field"><input type="checkbox" id="levelOn"> One depth level at a time</label>
           <input type="range" id="level" min="0" max="0" step="1" aria-label="Depth level">

@@ -224,6 +224,22 @@ function near(a, b, msg, tol) {
     eq(tb, [['Level', 'Etch time (s)', 'A'], ['0', '0', '12.3457'], ['1', '30', '']], 'profile table');
   }
 
+  // ---- element identification: the same candidates, in the same order, as xpslines.py ----
+  if (fx.elements) {
+    const ex = fx.elements;
+    ex.cases.forEach((c, i) => {
+      const got = V.candidates(c.be, c.win, ex.table, c.hv);
+      eq(got.map((x) => x.label), c.labels, 'candidates ' + i + ' (' + c.be + ' eV)');
+      got.forEach((x, k) => near(x.d, c.deltas[k], 'candidate delta ' + i + '.' + k, 1e-9));
+    });
+    check(ex.cases.some((c) => c.labels.length > 1), 'the fixture has an ambiguous peak, so the order is tested');
+    check(ex.table.lines.some((l) => l[2] === null), 'the fixture has Auger lines');
+    near(V.lineBe(['O', 'KLL', null, 510, 1], 1486.6, 1486.6), 976.6, 'Auger binding energy follows hv', 1e-9);
+    near(V.lineBe(['O', 'KLL', null, 510, 1], null, 1253.6), 743.6, 'default hv when none is given', 1e-9);
+    eq(V.candidates(1000, 1, ex.table, 1486.6), [], 'nothing near 1000 eV within 1 eV');
+    eq(V.lineLabel(['C', '1s', 285, null, 1]), 'C 1s', 'line label');
+  }
+
   // ---- metadata summary ----
   const sm = V.summariseMeta([{ A: '1', B: 'x', C: '' }, { A: '1', B: 'y', C: '' }, { A: '1', B: 'x', D: '5' }], []);
   eq(sm.common, [['A', '1']], 'common metadata');

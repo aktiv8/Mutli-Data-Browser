@@ -292,6 +292,30 @@
     }).join('\r\n') + '\r\n';
   };
 
+  /* ------------------------------------------------- element identification */
+  /* mirrors xpslines.py: `el` is the payload's element table ({lines: [element, line,
+     be, ke, rank], common, bonus, hv}); an Auger line has a kinetic energy, so its
+     binding energy follows the photon energy */
+  V.lineBe = function (line, hv, defaultHv) {
+    return line[2] !== null && line[2] !== undefined ? line[2] : (hv || defaultHv) - line[3];
+  };
+  V.lineLabel = function (line) { return line[0] + ' ' + line[1]; };
+  /* the lines within `win` eV of a binding energy, most plausible first: nearest, a
+     secondary line (rank > 1) needs to be about 0.8 eV closer per rank step, and the
+     elements met on almost every sample get a head start */
+  V.candidates = function (be, win, el, hv) {
+    var out = [];
+    el.lines.forEach(function (line, i) {
+      var lb = V.lineBe(line, hv, el.hv), d = lb - be;
+      if (Math.abs(d) > win) return;
+      var rank = line[4] === null || line[4] === undefined ? 1 : line[4];
+      var key = Math.abs(d) + 0.8 * (rank - 1) - (rank === 1 && el.common.indexOf(line[0]) >= 0 ? el.bonus : 0);
+      out.push({ d: d, be: lb, line: line, label: V.lineLabel(line), key: key, i: i });
+    });
+    out.sort(function (a, b) { return a.key - b.key || a.i - b.i; });
+    return out;
+  };
+
   /* ---------------------------------------------------------- depth profiles */
   /* mirrors quant.profile: one group per depth level of a sample (from quantGroups,
      in depth order); each level is normalised on its own. mode: 'element' (at % of
@@ -571,6 +595,7 @@
             fit: { components: true, envelope: true, background: true, residual: false, hidden: {} },
             q: { include: {}, transmission: false, level: {} },
             d: { sample: null, mode: 'element', axis: null, last: null },
+            ident: { on: false, win: 2, auto: false, clicked: null, extra: {} },
             M: { id: null, data: null, energy: null, total: null, win: null, mask: null, count: 0,
                  scale: 'Viridis', bg: false, overlay: false, alpha: 0.65, loading: false, drag: null } };
   var $ = function (id) { return document.getElementById(id); };
@@ -832,6 +857,7 @@
       }
     });
     $('fitbar').hidden = !anyFit;
+    $('autoField').hidden = !specs.some(function (s) { return (s.reg.auto || []).length > 0; });
     $('notes').textContent = notes.join('; ');
     refreshSwatches();
     var cols = colours(), cmap = traceColourMap();
@@ -927,7 +953,7 @@
       if (Math.abs(d.b - d.a) > 6 && p.lay) {
         var v1 = p.lay.toX(d.a), v2 = p.lay.toX(d.b);
         p.zoom = [Math.min(v1, v2), Math.max(v1, v2)];
-      }
+      } else if (S.ident.on && p.lay) identifyAt(p, d.a);
       redraw(p);
     });
     canvas.addEventListener('dblclick', function () { p.zoom = null; redraw(p); });
@@ -1078,19 +1104,26 @@
     }
     ctx.textBaseline = 'alphabetic';
 
-    /* peak markers (first spectrum of the panel) */
-    var marks = items[0].reg.markers || [];
+    /* peak markers: the labels of every spectrum of the panel, the automatic survey
+       labels when asked for, and the ones picked in this session */
     ctx.save();
     ctx.beginPath(); ctx.rect(lay.l, lay.t, lay.w, lay.h); ctx.clip();
-    marks.forEach(function (m) {
-      var hvv = items[0].reg.hv, fromHv = hvv ? hvv - m.be : null;
-      var v = m.kin ? (ax0.invert ? fromHv : m.be) : (ax0.invert ? m.be : fromHv);
-      if (v === null || v < lo || v > hi) return;
-      var x = X(v);
-      ctx.strokeStyle = C.muted; ctx.setLineDash([2, 3]); ctx.beginPath();
-      ctx.moveTo(x, lay.t); ctx.lineTo(x, by); ctx.stroke(); ctx.setLineDash([]);
+    var drawnLabels = [];
+    /* the user's own labels first, then the app's, then the automatic ones: a label that
+       would sit on top of one already drawn keeps its line but not its text */
+    panelMarks(g).map(function (m) {
+      var fromHv = m.hv ? m.hv - m.be : null;
+      m.v = m.kin ? (ax0.invert ? fromHv : m.be) : (ax0.invert ? m.be : fromHv);
+      return m;
+    }).filter(function (m) { return m.v !== null && m.v >= lo && m.v <= hi; })
+      .sort(function (a, b) { return (b.mine - a.mine) || (a.auto - b.auto); }).forEach(function (m) {
+      var x = X(m.v);
+      ctx.strokeStyle = C.muted; ctx.globalAlpha = m.auto ? 0.6 : 1; ctx.setLineDash([2, 3]); ctx.beginPath();
+      ctx.moveTo(x, lay.t); ctx.lineTo(x, by); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      if (drawnLabels.some(function (o) { return Math.abs(o - x) < 11; })) return;
+      drawnLabels.push(x);
       ctx.save(); ctx.translate(x, lay.t + 4); ctx.rotate(-Math.PI / 2);
-      ctx.fillStyle = C.muted; ctx.font = font(10); ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = m.mine ? C.accent : C.muted; ctx.font = font(10); ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
       ctx.fillText(m.label, 0, 0); ctx.restore();
     });
 
@@ -1151,6 +1184,64 @@
       ctx.fillStyle = C.accent; ctx.globalAlpha = 0.15;
       ctx.fillRect(Math.min(P.drag.a, P.drag.b), lay.t, Math.abs(P.drag.b - P.drag.a), lay.h);
       ctx.globalAlpha = 1;
+    }
+  }
+
+  /* every marker to draw on a panel, each with its own spectrum's photon energy;
+     the same label at (almost) the same energy on several spectra is drawn once */
+  function panelMarks(g) {
+    var out = [], seen = {};
+    g.items.forEach(function (s) {
+      var lists = [[s.reg.markers || [], false, false], [S.ident.auto ? (s.reg.auto || []) : [], true, false],
+                   [S.ident.extra[s.id] || [], false, true]];
+      lists.forEach(function (l) {
+        l[0].forEach(function (m) {
+          var k = m.label + '|' + Math.round(m.be * 2) + '|' + (m.kin ? 'k' : 'b');
+          if (seen[k]) return;
+          seen[k] = true;
+          out.push({ be: m.be, label: m.label, kin: !!m.kin, hv: s.reg.hv, auto: l[1], mine: l[2] });
+        });
+      });
+    });
+    return out;
+  }
+  /* click a peak in identify mode: list the element lines near it */
+  function identifyAt(P, xpx) {
+    var v = P.lay.toX(xpx), item = P.items[0], hv = item.reg.hv;
+    var be = P.lay.ax.label === 'Kinetic energy' ? (hv ? hv - v : null) : v;
+    S.ident.clicked = be === null ? null : { be: be, item: item, hv: hv };
+    renderIdBox();
+  }
+  function renderIdBox() {
+    var box = clear($('idbox')), I = S.ident;
+    box.hidden = !I.on;
+    if (!I.on) return;
+    var win = h('input', { type: 'number', min: '0.1', step: '0.5', value: String(I.win), 'aria-label': 'Window in eV', class: 'idwin' });
+    win.addEventListener('change', function () { var v = parseFloat(win.value); I.win = v > 0 ? v : 2; renderIdBox(); });
+    box.appendChild(h('div', { class: 'controls' }, h('strong', { text: 'Identify peaks' }),
+      h('label', { class: 'field' }, 'Window ± ', win, ' eV')));
+    if (!I.clicked) {
+      box.appendChild(h('p', { class: 'muted small', text: 'Click a peak on a plot to see which element lines lie near it. Line positions are approximate (chemical shifts of a few eV are normal).' }));
+    } else {
+      var c = V.candidates(I.clicked.be, I.win, S.data.elements, I.clicked.hv);
+      box.appendChild(h('p', { class: 'small', text: 'Peak at ' + I.clicked.be.toFixed(2) + ' eV: ' + (c.length ? c.length + ' candidate line' + (c.length > 1 ? 's' : '') + ' within ± ' + I.win + ' eV (best first). Click one to label the peak.' : 'no line within ± ' + I.win + ' eV.') }));
+      var row = h('div', { class: 'chips' });
+      c.slice(0, 12).forEach(function (x) {
+        var b = h('button', { type: 'button', class: 'chip', title: x.label + ' at ' + x.be.toFixed(1) + ' eV (' + (x.d >= 0 ? '+' : '') + x.d.toFixed(1) + ' eV from the peak)', text: x.label + '  ' + x.be.toFixed(1) + ' (' + (x.d >= 0 ? '+' : '') + x.d.toFixed(1) + ')' });
+        b.addEventListener('click', function () {
+          var id = I.clicked.item.id;
+          (I.extra[id] = I.extra[id] || []).push({ be: I.clicked.be, label: x.label });
+          renderIdBox(); requestRender();
+        });
+        row.appendChild(b);
+      });
+      box.appendChild(row);
+    }
+    var n = Object.keys(I.extra).reduce(function (a, k) { return a + I.extra[k].length; }, 0);
+    if (n) {
+      var clr = h('button', { type: 'button', text: 'Clear my ' + n + ' label' + (n > 1 ? 's' : '') });
+      clr.addEventListener('click', function () { I.extra = {}; renderIdBox(); requestRender(); });
+      box.appendChild(h('p', { class: 'small' }, clr, ' Labels picked here last for this session only; the app\'s own labels are kept in the workbook.'));
     }
   }
 
@@ -2110,6 +2201,13 @@
     });
     $('resetzoom').addEventListener('click', function () { S.panels.forEach(function (p) { p.zoom = null; }); requestRender(); });
     $('csv').addEventListener('click', downloadCsv);
+    $('identify').addEventListener('click', function () {
+      S.ident.on = !S.ident.on;
+      $('identify').setAttribute('aria-pressed', S.ident.on ? 'true' : 'false');
+      document.body.classList.toggle('identifying', S.ident.on);
+      renderIdBox();
+    });
+    $('autolabel').addEventListener('change', function (e) { S.ident.auto = e.target.checked; requestRender(); });
     V.FIT_LAYERS.forEach(function (k) {
       $('fit-' + k).addEventListener('change', function (e) { S.fit[k] = e.target.checked; requestRender(); });
     });
