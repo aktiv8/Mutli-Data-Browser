@@ -12,14 +12,42 @@ import math
 import struct
 import datetime
 
+import casafit
 import metasummary
 import vamasmeta
 
 # ==========================================================================
 #  EXPORTERS
 # ==========================================================================
-def export_csv(regions, path):
-    """Export selected regions to a single CSV (wide format)."""
+def fit_columns(r, pre=""):
+    """CSV columns ``[(header, values)]`` for a region's CasaXPS fit: the
+    background, each component (above the background, as CasaXPS draws it)
+    and the envelope, on the spectrum's own points, in its own units. Empty
+    when the region has no fit (or numpy is missing)."""
+    fit = getattr(r, "fit", None)
+    if fit is None or not r.photon_energy:
+        return []
+    try:
+        cvs = casafit.curves(fit, r.energy, r.counts, r.photon_energy,
+                             r.dwell, r.extra.get("n_scans", 1))
+    except ImportError:
+        return []
+    cols = []
+    for cv in cvs:
+        tag = f"{pre}{r.name} fit" + (f" [{cv.region}]" if len(cvs) > 1 else "")
+        if cv.background is not None:
+            cols.append((f"{tag}: background", cv.background))
+        for comp, vals in cv.components:
+            cols.append((f"{tag}: {comp.name}", vals))
+        if cv.envelope is not None:
+            cols.append((f"{tag}: envelope", cv.envelope))
+    return cols
+
+
+def export_csv(regions, path, include_fits=True):
+    """Export selected regions to a single CSV (wide format). A region with a
+    CasaXPS fit gets its background, components and envelope as extra
+    columns (``include_fits=False`` leaves them out)."""
     usable = [r for r in regions if r.decodable and r.counts]
     if not usable:
         raise ValueError("None of the selected regions contain decodable data.")
@@ -29,12 +57,15 @@ def export_csv(regions, path):
         pre = f"{r.sample} " if r.sample else ""
         cols.append((f"{pre}{r.name} {r.energy_label} ({r.energy_units})", r.energy))
         cols.append((f"{pre}{r.name} {r.count_label} ({r.count_units})", r.counts))
+        if include_fits:
+            cols += fit_columns(r, pre)
         maxlen = max(maxlen, len(r.counts))
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow([c[0] for c in cols])
         for i in range(maxlen):
-            row = [(c[1][i] if i < len(c[1]) else "") for c in cols]
+            row = [("" if (i >= len(c[1]) or c[1][i] != c[1][i]) else c[1][i])
+                   for c in cols]
             w.writerow(row)
     return len(usable)
 
@@ -111,7 +142,7 @@ def export_vamas(regions, path, institution="Not specified",
         a(str(now.hour)); a(str(now.minute)); a(str(now.second))
         a("0")                    # hours in advance of GMT
         # block comment: include etch info for depth profiles
-        comment = []
+        comment = list(casafit.to_lines(getattr(r, "fit", None)))
         if r.etch_level is not None:
             comment.append(f"Etch level : {r.etch_level}")
         if r.etch_time is not None:
@@ -154,7 +185,7 @@ def export_vamas(regions, path, institution="Not specified",
             a("Transmission"); a("d")   # corresponding var 2
         a("pulse counting")       # signal mode
         a(dwell)                  # signal collection time (s)
-        a("1")                    # number of scans
+        a(str(int(r.extra.get("n_scans") or 1)))   # number of scans
         a("0")                    # signal time correction
         a(SENT)                   # sample normal polar angle of tilt
         a(SENT)                   # sample normal tilt azimuth

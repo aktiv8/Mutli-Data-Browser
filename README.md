@@ -42,6 +42,9 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `viewdata.py`, `metasummary.py` | plot-view and metadata-tidying helpers |
 | `themes.py` | design tokens and colour themes |
 | `plotstyle.py`, `plotstyle_ui.py` | the plot style (fonts, lines, ticks, grid, legend, titles, ranges, image size), its presets and its dialog |
+| `lineshapes.py`, `casafit.py` | CasaXPS fits from VAMAS: line shapes, backgrounds, parsing and reconstruction |
+| `sputter.py`, `sputter_ui.py` | sputter settings, fluence and depth axes |
+| `vamasmeta.py` | metadata carried in VAMAS comments |
 | `holder.py` | holder-photo geometry: stage position → photo pixel, calibration nudges, marker picking |
 | `fonts.py`, `assets/fonts/` | bundled IBM Plex Sans (SIL Open Font License) |
 | `pdf_preview.py` | in-app PDF preview (PyMuPDF) |
@@ -352,6 +355,33 @@ positions, depth profile, sputter settings), while values VAMAS stores exactly
 without the block read exactly as before. The abscissa start, step and photon
 energy are now written to 10 significant digits (they were 6), so a re-read
 spectrum matches the original to the last digit.
+
+## CasaXPS fits
+
+A VAMAS file saved from CasaXPS after peak fitting carries the fit in its block
+comments (regions, backgrounds, components, INDEX chemical-state groups, the
+`Calib` binding-energy offset). Opening such a file shows the fit under any
+panel that holds **one spectrum**: tick *Components*, *Envelope* and/or
+*Background* in the **Fit** row under the plot controls. A depth profile keeps
+one fit per level (each block its own), so stepping through levels shows each
+level's fit where it has one. Components that share an INDEX are one chemical
+state and one colour.
+
+* **Correct frame and scale.** CasaXPS stores positions as kinetic energies in
+  its calibrated frame and intensities in counts per second; the curves are
+  reconstructed in the spectrum's own axis and counts, and follow the app's
+  energy calibration.
+* **Exact and reconstructed shapes.** `GL` and `SGL` shapes and Shirley / linear
+  backgrounds are computed exactly. CasaXPS does not publish its `LA` and `LF`
+  kernels, so those are **reconstructions** from the stored parameters (the
+  status bar says so): checked against real CasaXPS fits (titanium, copper,
+  vanadium, a titanium depth profile) they reproduce the data to 3–7 % rms of
+  the peak height (the fit's own scatter included). The areas, positions and
+  widths shown are CasaXPS's own numbers.
+* **Export.** VAMAS export writes the fit back unchanged (CasaXPS reopens its
+  own fit); CSV export adds the background, each component and the envelope as
+  columns. The metadata lists the number of components and the calibration.
+* The fit is read, not edited: fit in CasaXPS, review it here.
 
 ## Depth profiles
 

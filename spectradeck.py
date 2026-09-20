@@ -82,6 +82,7 @@ import workbook as wbk
 import annotations
 import appinfo
 import calibration
+import casafit
 import handover
 import htmlbrowser
 import xpslines
@@ -911,6 +912,8 @@ class Workspace:
             shutil.rmtree(self._pdf_dir, ignore_errors=True)
         cfg["colour_scale"] = self.colscale_var.get()
         cfg["colour_reverse"] = bool(self.colrev_var.get())
+        for k, v in self.fit_vars.items():
+            cfg["fit_" + k] = bool(v.get())
         cfg["axis_colour"] = self.axis_choice
         cfg["axis_colour_custom"] = self.axis_custom
         cfg["view_mode"] = self.view_var.get()
@@ -1091,6 +1094,22 @@ class Workspace:
         ab.bind("<<ComboboxSelected>>", lambda e: self._on_axis_changed())
         tip(ab, "Colour of the axis lines, ticks and labels. Black or white "
                 "are ignored where they would be hard to see.")
+        self.fit_frame = ttk.Frame(ctl3)
+        self.fit_frame.pack(side="left", padx=(14, 0))
+        ttk.Label(self.fit_frame, text="Fit").pack(side="left", padx=(0, 4))
+        self.fit_vars = {}
+        for key, text, tipt in (
+                ("components", "Components", "The fitted components (from a "
+                 "CasaXPS VAMAS), shaded above the background."),
+                ("envelope", "Envelope", "Background plus every component."),
+                ("background", "Background", "The region's background.")):
+            v = tk.BooleanVar(value=bool(cfg.get("fit_" + key, True)))
+            self.fit_vars[key] = v
+            cb = ttk.Checkbutton(self.fit_frame, text=text, variable=v,
+                                 command=self._schedule_render)
+            cb.pack(side="left", padx=(0, 6))
+            tip(cb, tipt + " Shown on a panel with one spectrum that has a "
+                           "fit; LA and LF shapes are reconstructions.")
         sty = ttk.Button(ctl3, text="Style…", style="Tool.TButton",
                          command=self.edit_plot_style)
         sty.pack(side="left", padx=(12, 0))
@@ -2422,12 +2441,13 @@ class Workspace:
                 shift0 = self._marker_shift(vis[0])
                 marks = [(m["be"] + shift0, m["label"])
                          for m in self.identify_markers(vis[0])]
+            fit_arg = self._fit_overlay(vis, disp, base, notes)
             draw_stack(ax, disp, offset, norm, cur, colours, title, subtitle,
                        selected, multi, first_col=(i % cols == 0),
                        bottom_row=(i + cols >= len(chunk)),
                        accent=pal["accent"], muted=pal["muted"],
                        scale=scale, ke_top=ke_top, top_row=top_row,
-                       markers=marks, style=style)
+                       markers=marks, style=style, fit=fit_arg)
             axmap[ax] = key
             axhv[ax] = viewdata.photon_energy(disp)
             axinfo[ax] = (axhv[ax], "stack", len(disp), "")
@@ -2446,6 +2466,30 @@ class Workspace:
             b = ax.get_position()
             ax.set_position([b.x0, b.y0, max(0.05, b.width - gutter), b.height])
         return axmap
+
+    def _fit_overlay(self, vis, disp, base, notes):
+        """The CasaXPS fit to draw under a panel that shows one spectrum (or
+        None): reconstructed on that spectrum's own points, with the three
+        toggles applied. ``notes`` gets a line about approximated shapes."""
+        if len(disp) != 1 or getattr(disp[0], "fit", None) is None:
+            return None
+        show = {k: bool(v.get()) for k, v in self.fit_vars.items()}
+        if not any(show.values()):
+            return None
+        r = disp[0]
+        try:
+            cvs = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                                 r.dwell, r.extra.get("n_scans", 1))
+        except ImportError:
+            return None
+        if not cvs:
+            return None
+        if any(c.approximate for c in cvs):
+            notes.append("fit: LA / LF shapes are reconstructed")
+        if not all(c.scale_known for c in cvs):
+            notes.append("fit: dwell time unknown, curves in counts/s")
+        return {"curves": cvs, "show": show,
+                "colours": list(base["cycle"])[1:] or list(base["cycle"])}
 
     def _binding_at(self, event):
         """Binding energy (as measured, before any shift) under the pointer,
@@ -2584,6 +2628,7 @@ class Workspace:
             "ke_top": bool(self.ke_var.get()), "z_axis": self.z_var.get(),
             "colour_scale": self.colscale_var.get(),
             "colour_reverse": bool(self.colrev_var.get()),
+            "fit_show": {k: bool(v.get()) for k, v in self.fit_vars.items()},
             "axis_colour": self.axis_choice,
             "axis_colour_custom": self.axis_custom,
             "panels_per_page": self.panels_var.get(),
@@ -2621,6 +2666,11 @@ class Workspace:
                 var.set(st[key])
         if isinstance(st.get("plot_style"), dict):
             self.plot_style = plotstyle.sanitise(st["plot_style"])
+        fs = st.get("fit_show")
+        if isinstance(fs, dict):
+            for k, v in self.fit_vars.items():
+                if isinstance(fs.get(k), bool):
+                    v.set(fs[k])
         tr = str(st.get("traces_per_panel", "")).strip()
         if tr == "All" or (tr.isdigit() and int(tr) > 0):
             self.traces_var.set(tr)

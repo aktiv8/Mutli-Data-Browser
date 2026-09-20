@@ -113,6 +113,7 @@ class Region:
     source: str = ""                   # basename of the file it came from
     date: str = ""                     # acquisition date/time (display string)
     extra: dict = field(default_factory=dict)   # reader-specific leftovers
+    fit: object = None                 # casafit.Fit: a CasaXPS fit read from VAMAS
 
     @property
     def n_points(self) -> int:
@@ -416,6 +417,13 @@ class SpectrumFile:
         md["Quality"] = r.conditions.get("Quality", "")
         md["Charge neutraliser"] = self.instrument.get("Charge neutraliser", "")
         md["Ion gun / sputtering"] = self.instrument.get("Ion gun / sputtering", "")
+        if r.fit is not None:
+            bgs = sorted({g.background for g in r.fit.regions})
+            md["CasaXPS fit"] = (
+                f"{len(r.fit.components)} component(s)"
+                + (f", {'/'.join(bgs)} background" if bgs else "")
+                + (f", BE calibration {r.fit.calib_shift:+.2f} eV"
+                   if r.fit.calib_shift else ""))
         for k, v in (r.extra.get("preserved_metadata") or {}).items():
             if not md.get(k):              # restored from a VAMAS comment
                 md[k] = v

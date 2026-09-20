@@ -113,7 +113,7 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
                title="", subtitle="", selected=(), multi_file=False,
                first_col=True, bottom_row=True, accent="#0F6B8C",
                muted="#56636E", scale="Binding", ke_top=False,
-               top_row=False, markers=(), style=None):
+               top_row=False, markers=(), style=None, fit=None):
     """Draw one panel: a single spectrum plain, several stacked by y offset.
 
     Stacked panels drop the (meaningless) y ticks for a scale bar and label
@@ -153,6 +153,9 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
             j = (min if binding else max)(range(len(xs)), key=xs.__getitem__)
             lo, hi = max(0, j - 2), min(len(yoff), j + 3)
             ends.append((sum(yoff[lo:hi]) / (hi - lo), lbl, col))
+    if fit and n == 1:                 # a CasaXPS fit under a single spectrum
+        draw_fit(ax, axes_x[0].x, fit, 1.0 / norm_factor(r0, norm, cursor),
+                 muted, accent)
     if norm == "At cursor" and cursor is not None:
         cx = (r0.photon_energy - cursor
               if a0.label == "Kinetic Energy" else cursor)
@@ -408,3 +411,49 @@ def place_marker_labels(ax, artists, hot=(), radius=9):
             text.set_va(va)
             chosen = text.get_window_extent(renderer)
         placed.append(chosen)
+
+
+def draw_fit(ax, x, fit, scale, muted, accent):
+    """Overlay a reconstructed CasaXPS fit on a single-spectrum panel.
+
+    ``fit`` is ``{"curves": [casafit.Curves], "show": {"envelope", "components",
+    "background"}, "colours": [...]}``; ``x`` are the panel's x values (one
+    per data point) and ``scale`` multiplies every curve (normalisation).
+    Components sharing an INDEX are one chemical state and one colour; a
+    legend names them."""
+    import math
+    show = fit.get("show", {})
+    cols = fit.get("colours") or ["#888888"]
+    names = {}
+    for cv in fit["curves"]:
+        base = ([(b * scale) if b == b else b for b in cv.background]
+                if cv.background is not None else None)
+        if show.get("background") and base is not None:
+            ax.plot(x, base, color=muted, lw=1.0, ls="--", zorder=2.2)
+        if show.get("components"):
+            for comp, vals in cv.components:
+                key = (f"i{comp.index}" if comp.index >= 0
+                       else f"n{comp.name}")
+                if key not in names:
+                    names[key] = (cols[len(names) % len(cols)],
+                                  comp.group if comp.index >= 0 and comp.group
+                                  else comp.name)
+                col = names[key][0]
+                y = [v * scale for v in vals]
+                lo = base if base is not None else [0.0] * len(y)
+                top = [(b + v) if (v == v and b == b) else float("nan")
+                       for b, v in zip(lo, y)]
+                ok = [t == t for t in top]
+                ax.fill_between(x, lo, top, where=ok, color=col, alpha=0.35,
+                                lw=0, zorder=1.6)
+                ax.plot(x, top, color=col, lw=0.9, zorder=2.3)
+        if show.get("envelope") and cv.envelope is not None:
+            ax.plot(x, [v * scale for v in cv.envelope],
+                    color=ax.xaxis.label.get_color(), lw=1.3, zorder=2.6)
+    if names and show.get("components"):
+        from matplotlib.patches import Patch
+        handles = [Patch(facecolor=c, alpha=0.5, label=n[:22])
+                   for c, n in names.values()]
+        ax.legend(handles=handles, loc="upper left",
+                  fontsize=max(6, int(ax.xaxis.label.get_fontsize()) - 2),
+                  frameon=False, handlelength=1.0)

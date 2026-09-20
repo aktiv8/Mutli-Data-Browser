@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 
+import casafit
 import vamasmeta
 import sputter
 from .base import (Region, SpectrumFile, clean, clean_text, canon_region_name,
@@ -352,6 +353,9 @@ class VamasFile(SpectrumFile):
         # vendor extras from the block comments
         kv = kv_from_lines(b["comments"])
         r.extra["comments"] = kv
+        r.extra["comment_lines"] = list(b["comments"])
+        r.extra["n_scans"] = b["n_scans"]
+        r.fit = casafit.parse(b["comments"])
         r.lens_mode = self._lookup("Lens mode", kv)
         r.aperture = self._lookup("Aperture", kv)
         vamasmeta.apply_to_region(r, vamasmeta.decode(b["comments"]))
