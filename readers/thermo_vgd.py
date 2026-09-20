@@ -207,6 +207,17 @@ class ThermoVgdFile(ThermoDataSpaceFile):
             return self._finish()
         raw = ole.read("VGData")
         n_e = ds.space_axes[0]["n"]
+        if dataspace_kind(ds) == "map":
+            from array import array
+            ds.raw = array("d")
+            ds.raw.frombytes(raw[:len(raw) // 8 * 8])
+            expect = n_e
+            for (s, e, _n) in ds.data_axes[1:]:
+                expect *= e - s + 1
+            if len(ds.raw) == expect:                # [iy][ix][channel]
+                self._from_dataspace(ds)
+                return self._finish()
+            ds.raw = None                            # odd layout: the slow way
         total = len(raw) // 8
         vals = struct.unpack(f"<{total}d", raw[:total * 8])
         n_blocks = max(1, total // n_e)

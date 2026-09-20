@@ -7,7 +7,9 @@ import os
 from .base import Region, ImageBlob, TreeNode, SpectrumFile
 from .kratos_experiment import EscapeParser
 from . import (vamas, thermo_avg, thermo_vgd, phi_spe, scienta_txt,
-               kratos_kal)
+               kratos_kal, thermo_vgx)
+from .thermo_experiment import (ThermoExperiment, LoadCancelled,
+                                looks_like_experiment)
 
 
 class UnsupportedFormat(Exception):
@@ -27,6 +29,8 @@ READERS = [
      ("*.avg", "*.avx")),
     ("Thermo Avantage (.vgd)", thermo_vgd.sniff, thermo_vgd.ThermoVgdFile,
      ("*.vgd", "*.avx")),
+    ("Thermo Avantage experiment (.VGX)", thermo_vgx.sniff, ThermoExperiment,
+     ("*.vgx",)),
     ("PHI MultiPak (.spe)", phi_spe.sniff, phi_spe.PhiSpeFile, ("*.spe",)),
     ("Scienta SES (.txt)", scienta_txt.sniff, scienta_txt.ScientaTxtFile,
      ("*.txt",)),
@@ -43,6 +47,8 @@ def supported_patterns():
 
 
 def reader_for(path: str):
+    if os.path.isdir(path):
+        return ThermoExperiment            # an experiment folder
     ext = os.path.splitext(path)[1].lower()
     try:
         with open(path, "rb") as fh:
@@ -56,6 +62,13 @@ def reader_for(path: str):
         f"Unrecognised file format: {os.path.basename(path)}")
 
 
-def load_file(path: str) -> SpectrumFile:
-    """Load ``path`` with whichever reader recognises it."""
-    return reader_for(path)().load(path)
+def load_file(path: str, progress=None) -> SpectrumFile:
+    """Load ``path`` with whichever reader recognises it.
+
+    A folder or a ``.VGX`` opens as an Avantage experiment; only that reader
+    reports ``progress(i, n, name)`` (return True to cancel, which raises
+    ``LoadCancelled``)."""
+    cls = reader_for(path)
+    if cls is ThermoExperiment:
+        return cls().load(path, progress)
+    return cls().load(path)

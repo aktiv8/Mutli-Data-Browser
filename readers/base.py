@@ -410,6 +410,8 @@ class SpectrumFile:
         md = {}
         md["Sample"] = r.sample
         md["Region"] = r.name
+        if r.extra.get("scan"):
+            md["Scan"] = r.extra["scan"]
         md["Technique"] = r.technique
         md["Source file"] = r.source
         md["File format"] = self.format_name
@@ -429,6 +431,8 @@ class SpectrumFile:
         md["Photon energy (eV)"] = fmt(r.photon_energy, "", 2)
         md["Source power (W)"] = (r.conditions.get("X-ray Power", "")
                                   .replace("W", "").strip())
+        if r.conditions.get("X-ray spot (µm)"):
+            md["X-ray spot (µm)"] = r.conditions["X-ray spot (µm)"]
         md["Pass energy (eV)"] = fmt(r.pass_energy, "", 0) if r.pass_energy else ""
         md["Lens mode"] = r.lens_mode or self.instrument.get("Lens mode", "")
         md["Aperture"] = r.aperture or self.instrument.get("Aperture", "")

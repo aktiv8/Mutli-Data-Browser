@@ -63,6 +63,7 @@ class DataSpace:
         self.space_axes = []     # dict(start,width,n,type,linear,symbol,unit,label)
         self.blocks = []         # dict(index=tuple, labels={space_idx: value}, values=[..])
         self.pixels = None       # camera images: callable -> packed pixels, row by row
+        self.raw = None          # SnapMap: array('d') [iy][ix][channel], blocks left empty
 
     @property
     def n_energy(self):
@@ -196,11 +197,31 @@ def _dmy(s):
     return f"{y:04d}-{mo:02d}-{d:02d} {hh:02d}:{mi:02d}:{ss:02d}"
 
 
-def region_name_from_title(title: str) -> str:
-    t = (title or "").strip()
-    m = re.match(r"^([A-Z][a-z]?\s*\d[spdf](?:\d/\d)?)\b", t)
+_LINE = r"[A-Z][a-z]?\s*\d[spdf](?:\d(?:/\d)?)?"
+
+
+def _line_name(tok: str) -> str:
+    """'C1s' -> 'C 1s'; 'Cu2p3' (a spin-orbit component) -> 'Cu 2p3/2'."""
+    m = re.fullmatch(r"([A-Z][a-z]?)\s*(\d[spdf])(\d)", tok)
     if m:
-        return canon_region_name(m.group(1))
+        return f"{m.group(1)} {m.group(2)}{m.group(3)}/2"
+    return canon_region_name(tok)
+
+
+def region_name_from_title(title: str) -> str:
+    """'C1s Scan' -> 'C 1s'; a scan of two lines ('Si2p Al2p Scan') keeps both
+    ('Si 2p Al 2p'); anything with 'survey' / 'wide' is a survey."""
+    t = (title or "").strip()
+    m = re.match(rf"^({_LINE})\b", t)
+    if m:
+        names, rest = [_line_name(m.group(1))], t[m.end():]
+        while True:
+            m = re.match(rf"^\s+({_LINE})\b", rest)
+            if not m:
+                break
+            names.append(_line_name(m.group(1)))
+            rest = rest[m.end():]
+        return " ".join(names)
     if re.search(r"survey|wide", t, re.I):
         return "Survey"
     return t or "Region"
@@ -303,10 +324,10 @@ class ThermoDataSpaceFile(SpectrumFile):
             return r
 
         blocks = ds.blocks or [{"index": (), "labels": {}, "values": []}]
-        if extra_kind == "none" or len(blocks) == 1 and extra_kind != "position":
+        if extra_kind == "map":
+            self._map_from(ds, blocks, make, stage, energy)
+        elif extra_kind == "none" or len(blocks) == 1 and extra_kind != "position":
             make(0, blocks[0]["values"])
-        elif extra_kind == "map":
-            self._map_from(ds, blocks, make, stage)
         else:
             for k, b in enumerate(blocks):
                 labels = b["labels"]
@@ -364,7 +385,7 @@ class ThermoDataSpaceFile(SpectrumFile):
         self.sputter_hint = sputter.from_properties(p)
 
     # -- SnapMap -----------------------------------------------------------------
-    def _map_from(self, ds, blocks, make, stage):
+    def _map_from(self, ds, blocks, make, stage, energy):
         """A spectrum at every pixel: the summed spectrum is the region, the
         pixels ride along as ``extra["cube"]`` (see snapmap.py)."""
         import snapmap
@@ -376,6 +397,19 @@ class ThermoDataSpaceFile(SpectrumFile):
         pos_y = next(k for k, sp in enumerate(dax[1:]) if yi in sp)
         nx, ny = ax_x["n"], ax_y["n"]
         n = ds.n_energy
+        note = (f"SnapMap ({nx} x {ny} pixels): the summed spectrum is "
+                "shown; open the map to see where the signal comes from.")
+        if ds.raw is not None:               # binary file: no per-pixel lists
+            from array import array as _array
+            cube = snapmap.MapCube(
+                list(energy), nx, ny, ax_x["start"], ax_x["width"],
+                ax_y["start"], ax_y["width"], _array("f", ds.raw))
+            r = make(0, cube.total(), note=note)
+            cube.label = r.count_label
+            if stage:
+                cube.stage_x_mm, cube.stage_y_mm = stage
+            r.extra["cube"] = cube
+            return
         tot = [0.0] * n
         seen = False
         for b in blocks:
@@ -383,9 +417,7 @@ class ThermoDataSpaceFile(SpectrumFile):
                 if v is not None:
                     tot[i] += v
                     seen = True
-        r = make(0, tot if seen else None,
-                 note=f"SnapMap ({nx} x {ny} pixels): the summed spectrum is "
-                      "shown; open the map to see where the signal comes from.")
+        r = make(0, tot if seen else None, note=note)
         if seen and r.energy:
             cube = snapmap.build(
                 r.energy, nx, ny, ax_x["start"], ax_x["width"], ax_y["start"],
