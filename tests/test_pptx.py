@@ -62,6 +62,19 @@ class TestHelpers(unittest.TestCase):
                       "Spectra shown (3)", "C 1s ×2"):
             self.assertIn(token, text)
         self.assertIn("Stack", pptx_export.look_notes({}))
+        self.assertNotIn("own view", pptx_export.look_notes({}))
+
+    def test_look_notes_name_panels_with_their_own_view(self):
+        text = pptx_export.look_notes({
+            "view_mode": "Stack", "z_axis": "Auto",
+            "panel_views": {
+                "C 1s": {"view": "Waterfall 3D", "z_axis": "Etch level"},
+                "Ti 2p": {"view": "Fit", "fit_show": {"background": False}},
+                "bad": {"view": "nonsense"}}})
+        self.assertIn("Panels with their own view: "
+                      "C 1s: Waterfall 3D, by Etch level; "
+                      "Ti 2p: Fit, showing components, envelope.", text)
+        self.assertNotIn("bad", text)
 
 
 try:

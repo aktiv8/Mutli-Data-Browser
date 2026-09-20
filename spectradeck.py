@@ -89,6 +89,7 @@ import themes
 import viewdata
 import metasummary
 import methods
+import panelview
 import workbook as wbk
 import annotations
 import appinfo
@@ -464,11 +465,11 @@ class Workspace:
 
     PANEL_CHOICES = ["Auto", "1", "2", "4", "6", "9", "12", "16"]
     TRACE_CHOICES = ["All", "1", "3", "5", "10", "20", "50", "100"]
-    NORM_MODES = ["None", "Max = 1", "Area = 1", "At cursor"]
+    NORM_MODES = list(panelview.NORMS)
     GROUP_MODES = {"Element name": "name", "Energy range": "range",
                    "Element, per sample": "sample",
                    "Element, per file": "file"}
-    VIEW_MODES = ["Stack", "Waterfall 3D", "Heatmap"]
+    VIEW_MODES = list(panelview.VIEWS)
 
     def __init__(self, root):
         self.root = root
@@ -510,7 +511,9 @@ class Workspace:
         self.trace_start = 0        # first visible trace of long stacks
         self._scale_guard = False
         self.cursors = {}           # group key -> "At cursor" energy
-        self.calib = holder.sanitise(load_calibration())
+        self.panel_views = {}       # group key -> panelview override
+        self._trace_limit_now = None    # window the trace slider describes
+        self.calib =holder.sanitise(load_calibration())
         self._open = {}             # id(node) -> expanded?
         self._render_job = None
         self._axmap = {}
@@ -668,6 +671,8 @@ class Workspace:
                                    command=lambda n=name: self.set_theme(n))
         viewm.add_cascade(label="Colour theme", menu=themem)
         viewm.add_command(label="Plot style…", command=self.edit_plot_style)
+        viewm.add_command(label="Reset panel views",
+                          command=self.reset_panel_views)
         bar.add_cascade(label="View", menu=viewm)
         self.view_menu = viewm
         helpm = tk.Menu(bar, tearoff=0)
@@ -1038,7 +1043,9 @@ class Workspace:
         vb.bind("<<ComboboxSelected>>", lambda e: self._on_view_changed())
         tip(vb, "Stack: offset traces. Waterfall 3D: energy, trace and "
                 "intensity in a rotatable 3-D plot. Heatmap: intensity as "
-                "colour against energy and trace.")
+                "colour against energy and trace. Fit: one spectrum with "
+                "its CasaXPS fit. Applies to every panel; right-click a "
+                "panel to give it its own view.")
 
         ttk.Label(ctl2, text="Energy").pack(side="left")
         scale = cfg.get("energy_scale", "Binding")
@@ -1233,9 +1240,13 @@ class Workspace:
 
     def _sync_view_controls(self):
         """Enable only the controls that act in the current view."""
-        stack = self.view_var.get() == "Stack"
+        views = {self.view_var.get()} | {
+            ov["view"] for ov in self.panel_views.values() if "view" in ov}
+        stack = any(not panelview.is_series(v) for v in views)
+        series = any(panelview.is_series(v) for v in views)
         self.offset_sc.state(["!disabled"] if stack else ["disabled"])
-        self.z_cb.state(["disabled"] if stack else ["!disabled", "readonly"])
+        self.z_cb.state(["!disabled", "readonly"] if series
+                        else ["disabled"])
         self.ke_cb.state(["disabled"] if self.scale_var.get() == "Kinetic"
                          else ["!disabled"])
 
@@ -1943,7 +1954,9 @@ class Workspace:
         normalisation the panel applies)."""
         if event.ydata is None:
             return None
-        mode = self.norm_var.get()
+        key = self._axmap.get(event.inaxes)
+        mode = self._look_for(key)["norm"] if key is not None \
+            else self.norm_var.get()
         f = 1.0 if mode in ("None", "At cursor") else norm_factor(
             self._display(r), mode)
         return float(event.ydata) * f
@@ -2307,21 +2320,32 @@ class Workspace:
         p = self.region_parser.get(id(r))
         return p.date_for_region(r) if p else r.date
 
+    def _page_defaults(self):
+        """The view row as a look: what every panel without an override uses."""
+        return {"view": self.view_var.get(), "norm": self.norm_var.get(),
+                "offset": float(self.offset_var.get()),
+                "z_axis": self.z_var.get(),
+                "reverse": bool(self.reverse.get()),
+                "fit_show": {k: bool(v.get())
+                             for k, v in self.fit_vars.items()}}
+
+    def _look_for(self, key, defaults=None):
+        """The full look of the panel with this group label."""
+        return panelview.resolve(defaults or self._page_defaults(),
+                                 self.panel_views.get(key))
+
     def _groups(self):
         groups = group_regions(self._ticked_regions(),
                                self.GROUP_MODES[self.group_var.get()])
-        if self.view_var.get() != "Stack":
+        defaults = self._page_defaults()
+
+        def z_order(rs, mode):
             # series views read in z order (surface first / earliest first)
-            out = []
-            for k, rs in groups:
-                order, _z = viewdata.z_sorted(rs, self.z_var.get(),
-                                              self._date_of,
-                                              self._sputter_for)
-                out.append((k, [rs[i] for i in order]))
-            return out
-        if self.reverse.get():
-            groups = [(k, rs[::-1]) for k, rs in groups]
-        return groups
+            return viewdata.z_sorted(rs, mode, self._date_of,
+                                     self._sputter_for)[0]
+        return [(k, panelview.arrange(rs, self._look_for(k, defaults),
+                                      z_order))
+                for k, rs in groups]
 
     # -- view window: panels per page / traces per panel ----------------
     def _panels_per_page(self, n_groups):
@@ -2379,7 +2403,7 @@ class Workspace:
         d = delta if delta is not None else event.delta
         step = -1 if d > 0 else 1
         if event.state & 0x0001:                 # Shift: slide the trace window
-            limit = self._traces_limit()
+            limit = self._trace_limit_now
             if limit:
                 self.trace_start += step * max(1, limit // 5)
                 self._schedule_render()
@@ -2433,6 +2457,24 @@ class Workspace:
             self.trace_start = v
             self._schedule_render()
 
+    @staticmethod
+    def _panel_limit(limit, look):
+        """Traces shown at once on one panel: a fit panel shows one spectrum
+        (the trace window steps through the group)."""
+        return 1 if look["view"] == "Fit" else limit
+
+    def _trace_span(self, groups, looks, limit):
+        """(window, length) of the panel whose window can slide furthest: what
+        the trace slider and its label describe."""
+        best, span = (limit, 0), 0
+        for k, rs in groups:
+            lim = self._panel_limit(limit, looks[k])
+            if lim and len(rs) - lim > span:
+                best, span = (lim, len(rs)), len(rs) - lim
+        if span == 0:
+            best = (limit, max((len(rs) for _k, rs in groups), default=0))
+        return best
+
     def _update_trace_controls(self, limit, longest):
         max_start = max(0, longest - limit) if limit else 0
         self.trace_start = max(0, min(self.trace_start, max_start))
@@ -2469,9 +2511,13 @@ class Workspace:
         self.panel_start -= self.panel_start % cols       # row-aligned
         chunk = groups[self.panel_start:self.panel_start + npp]
         limit = self._traces_limit()
-        self._update_trace_controls(
-            limit, max((len(rs) for _k, rs in groups), default=0))
+        defaults = self._page_defaults()
+        looks = {k: self._look_for(k, defaults) for k, _rs in groups}
+        self._trace_limit_now, longest = self._trace_span(groups, looks,
+                                                          limit)
+        self._update_trace_controls(self._trace_limit_now, longest)
         self._counts = (n_spec, n_groups)
+        self._panel_keys = [k for k, _rs in groups]
         self.prev_btn.config(
             state="normal" if self.panel_start > 0 else "disabled")
         self.next_btn.config(
@@ -2482,8 +2528,9 @@ class Workspace:
                   f"of {n_groups}") if n_groups > npp else "")
         self.hint.config(
             text="Click a panel to set the energy to match at."
-            if (self.norm_var.get() == "At cursor" and n_spec
-                and self.view_var.get() == "Stack") else "")
+            if n_spec and any(lk["norm"] == "At cursor"
+                              and not panelview.is_series(lk["view"])
+                              for lk in looks.values()) else "")
         self._set_scrollbar(HAVE_MPL and n_groups > npp)
         if HAVE_MPL:
             self.fig.clear()
@@ -2518,9 +2565,7 @@ class Workspace:
         pal, axis_note = self._plot_palette(base, paper=pal is not None)
         rows, cols = _grid_dims(len(chunk))
         multi = len(self.docs) > 1
-        norm = self.norm_var.get()
-        offset = float(self.offset_var.get())
-        view = self.view_var.get()
+        defaults = self._page_defaults()
         scale = self.scale_var.get()
         ke_top = bool(self.ke_var.get()) and scale == "Binding"
         selected = ({id(r) for r in self.sel_regions}
@@ -2536,8 +2581,11 @@ class Workspace:
         reverse = bool(self.colrev_var.get())
         style = self.plot_style
         for i, (key, rs) in enumerate(chunk):
-            s = min(start, len(rs) - limit) if limit and len(rs) > limit else 0
-            vis = rs[s:s + limit] if limit and len(rs) > limit else rs
+            look = self._look_for(key, defaults)
+            view, norm, offset = look["view"], look["norm"], look["offset"]
+            lim = self._panel_limit(limit, look)
+            s = min(start, len(rs) - lim) if lim and len(rs) > lim else 0
+            vis = rs[s:s + lim] if lim and len(rs) > lim else rs
             colours = self.trace_colours(rs, base)[s:s + len(vis)]
             disp = [self._display(r) for r in vis]      # names, BE shift
             if scale == "Kinetic" and not all(
@@ -2555,15 +2603,15 @@ class Workspace:
                 subtitle = (f"{len(rs)} spectra" if len(vis) == len(rs)
                             else f"{s + 1}–{s + len(vis)} of {len(rs)}")
             top_row = i < cols
-            if view != "Stack":
+            if panelview.is_series(view):
                 # groups arrive z-sorted (_groups), so this order is the
                 # identity and ``vis`` lines up with the z values
-                _order, zi = viewdata.z_sorted(rs, self.z_var.get(),
+                _order, zi = viewdata.z_sorted(rs, look["z_axis"],
                                                self._date_of,
                                                self._sputter_for)
                 zvis = viewdata.ZInfo(zi.values[s:s + len(vis)], zi.label,
                                       zi.mode)
-                why = viewdata.z_unavailable(self.z_var.get(), zi.mode, rs,
+                why = viewdata.z_unavailable(look["z_axis"], zi.mode, rs,
                                              self._sputter_for)
                 if why:
                     notes.append(f"{key}: {why}")
@@ -2600,7 +2648,11 @@ class Workspace:
                          for m in self.identify_markers(vis[0])]
             reels_arg = (self.ann.reels_for(*self._marker_key(vis[0]))
                          if len(vis) == 1 else None)
-            fit_arg = self._fit_overlay(vis, disp, base, notes)
+            fit_arg = self._fit_overlay(vis, disp, base, notes,
+                                        look["fit_show"])
+            if view == "Fit" and fit_arg is None and not any(
+                    getattr(r, "fit", None) is not None for r in disp):
+                notes.append(f"{key}: no fit stored, shown as a plain trace")
             draw_stack(ax, disp, offset, norm, cur, colours, title, subtitle,
                        selected, multi, first_col=(i % cols == 0),
                        bottom_row=(i + cols >= len(chunk)),
@@ -2610,7 +2662,8 @@ class Workspace:
                        reels=reels_arg)
             axmap[ax] = key
             axhv[ax] = viewdata.photon_energy(disp)
-            axinfo[ax] = (axhv[ax], "stack", len(disp), "")
+            axinfo[ax] = (axhv[ax], "fit" if view == "Fit" else "stack",
+                          len(disp), "")
             if len(vis) > 1 and plotstyle.end_labels(style):
                 stacked_axes.append(ax)
         if fig is self.fig:
@@ -2627,13 +2680,14 @@ class Workspace:
             ax.set_position([b.x0, b.y0, max(0.05, b.width - gutter), b.height])
         return axmap
 
-    def _fit_overlay(self, vis, disp, base, notes):
+    def _fit_overlay(self, vis, disp, base, notes, show):
         """The CasaXPS fit to draw under a panel that shows one spectrum (or
-        None): reconstructed on that spectrum's own points, with the three
-        toggles applied. ``notes`` gets a line about approximated shapes."""
+        None): reconstructed on that spectrum's own points, with the panel's
+        three toggles (``show``) applied. ``notes`` gets a line about
+        approximated shapes."""
         if len(disp) != 1 or getattr(disp[0], "fit", None) is None:
             return None
-        show = {k: bool(v.get()) for k, v in self.fit_vars.items()}
+        show = {k: bool(show.get(k, True)) for k in panelview.FIT_LAYERS}
         if not any(show.values()):
             return None
         r = disp[0]
@@ -2693,13 +2747,100 @@ class Workspace:
             text = f"KE {x:.2f} eV" + (f"   BE {hv - x:.2f} eV" if hv else "")
         else:
             text = f"BE {x:.2f} eV" + (f"   KE {hv - x:.2f} eV" if hv else "")
-        if kind == "stack" and n == 1:
+        if kind in ("stack", "fit") and n == 1:
             text += f"   y {event.ydata:.5g}"
         elif kind == "heatmap":
             text += f"   {zlabel or 'z'} {event.ydata:.5g}"
         self.cursor_lbl.config(text=text)
 
+    # -- per-panel view ---------------------------------------------------
+    OFFSET_CHOICES = (0.0, 0.3, 0.6, 1.0, 1.5, 2.0, 3.0)
+
+    def _set_panel_view(self, key, name, value):
+        self.panel_views = panelview.with_value(self.panel_views, key, name,
+                                                value)
+        self._panel_views_changed()
+
+    def reset_panel_views(self, key=None):
+        """Give one panel (or every panel) the page's view again."""
+        if key is None or key in self.panel_views:
+            self.panel_views = panelview.reset(self.panel_views, key)
+            self._panel_views_changed()
+
+    def _panel_views_changed(self):
+        self._sync_view_controls()
+        self._schedule_render()
+        self._update_title()
+
+    def _panel_menu(self, event):
+        """Right-click on a panel: its own view, normalisation, offset, z
+        axis, order and fit layers (all optional; the page's controls stay
+        the default for panels that don't set them)."""
+        key = self._axmap.get(event.inaxes)
+        if key is None:
+            return
+        look = self._look_for(key)
+        series = panelview.is_series(look["view"])
+        if getattr(self, "_pmenu", None) is None:
+            self._pmenu = {n: self._menu(self.root) for n in
+                           ("root", "view", "norm", "offset", "z", "fit")}
+        pm = self._pmenu
+        for m in pm.values():
+            m.delete(0, "end")
+
+        def mark(on, text):
+            return ("✓ " if on else "    ") + text
+
+        def fill(sub, values, current, name, to_text=str):
+            for v in values:
+                sub.add_command(
+                    label=mark(v == current, to_text(v)),
+                    command=lambda v=v: self._set_panel_view(key, name, v))
+        fill(pm["view"], panelview.VIEWS, look["view"], "view")
+        fill(pm["norm"], panelview.NORMS, look["norm"], "norm")
+        fill(pm["offset"], self.OFFSET_CHOICES,
+             min(self.OFFSET_CHOICES, key=lambda o: abs(o - look["offset"])),
+             "offset", lambda o: f"{o:g}×")
+        fill(pm["z"], viewdata.Z_MODES, look["z_axis"], "z_axis")
+        for layer in panelview.FIT_LAYERS:
+            on = look["fit_show"].get(layer, True)
+            pm["fit"].add_command(
+                label=mark(on, layer.capitalize()),
+                command=lambda layer=layer, on=on: self._set_panel_view(
+                    key, "fit_show", (layer, not on)))
+        root = pm["root"]
+        root.add_command(label=f"Panel: {key}", state="disabled")
+        root.add_separator()
+        root.add_cascade(label="View", menu=pm["view"])
+        root.add_cascade(label="Normalise", menu=pm["norm"])
+        root.add_cascade(label="Offset", menu=pm["offset"],
+                         state="disabled" if series else "normal")
+        root.add_cascade(label="Z axis", menu=pm["z"],
+                         state="normal" if series else "disabled")
+        root.add_command(
+            label=mark(look["reverse"], "Reverse order"),
+            state="disabled" if series else "normal",
+            command=lambda: self._set_panel_view(key, "reverse",
+                                                 not look["reverse"]))
+        root.add_cascade(label="Fit layers", menu=pm["fit"],
+                         state="disabled" if series else "normal")
+        root.add_separator()
+        root.add_command(label="Use the page's view",
+                         state="normal" if key in self.panel_views
+                         else "disabled",
+                         command=lambda: self.reset_panel_views(key))
+        ev = event.guiEvent
+        try:
+            root.tk_popup(ev.x_root, ev.y_root)
+        finally:
+            root.grab_release()
+
     def _on_plot_click(self, event):
+        if (event.button == 3 and event.inaxes is not None
+                and self._click_cb is None and self._pick_cb is None
+                and not str(getattr(self.toolbar, "mode", ""))):
+            self._panel_menu(event)
+            return
         if self._click_cb is not None and event.inaxes is not None:
             if not str(getattr(self.toolbar, "mode", "")):
                 be = self._binding_at(event)
@@ -2715,19 +2856,22 @@ class Workspace:
                 self.canvas.get_tk_widget().config(cursor="")
                 cb(be)
             return
-        if (self.norm_var.get() != "At cursor" or event.inaxes is None
-                or event.xdata is None or self.view_var.get() != "Stack"):
+        if event.inaxes is None or event.xdata is None:
+            return
+        key = self._axmap.get(event.inaxes)
+        if key is None:
+            return
+        look = self._look_for(key)
+        if look["norm"] != "At cursor" or panelview.is_series(look["view"]):
             return
         if str(getattr(self.toolbar, "mode", "")):
             return              # zoom / pan tool is active
-        key = self._axmap.get(event.inaxes)
-        if key is not None:
-            x = float(event.xdata)
-            hv = self._axhv.get(event.inaxes)
-            if self.scale_var.get() == "Kinetic" and hv:
-                x = hv - x              # cursors are kept as binding energy
-            self.cursors[key] = x
-            self._schedule_render()
+        x = float(event.xdata)
+        hv = self._axhv.get(event.inaxes)
+        if self.scale_var.get() == "Kinetic" and hv:
+            x = hv - x                  # cursors are kept as binding energy
+        self.cursors[key] = x
+        self._schedule_render()
 
     def save_plot_image(self):
         """Save the panels currently shown as PNG / SVG / PDF."""
@@ -2803,6 +2947,7 @@ class Workspace:
             "trace_start": int(self.trace_start),
             "plot_style": dict(self.plot_style),
             "cursors": {k: float(v) for k, v in self.cursors.items()},
+            "panel_views": copy.deepcopy(self.panel_views),
             "ticked": ticked,
         }
 
@@ -2855,6 +3000,9 @@ class Workspace:
         if isinstance(cur, dict):
             self.cursors = {str(k): float(v) for k, v in cur.items()
                             if isinstance(v, (int, float))}
+        # unlike the settings above, a look without panel views means none
+        # (an older figure must not inherit the live window's overrides)
+        self.panel_views = panelview.sanitise_all(st.get("panel_views"))
         missing = 0
         if isinstance(st.get("ticked"), list):
             by_file = {self.file_ids.get(id(p)): p.regions for p in self.docs}
@@ -3693,6 +3841,10 @@ class Workspace:
                      f"{'panel' if n_groups == 1 else 'panels'}")
         else:
             text += "nothing ticked"
+        own = sum(1 for k in getattr(self, "_panel_keys", ())
+                  if k in self.panel_views)
+        if own and n_spec:
+            text += f"  ·  {own} with their own view"
         notes = list(dict.fromkeys(self._view_notes))
         if notes and n_spec:
             text += "  ·  " + "; ".join(notes)

@@ -10,6 +10,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+import panelview
 import plotstyle
 import workbook as wbk
 
@@ -210,7 +211,12 @@ class FiguresDialog(tk.Toplevel):
     def _fill(self, select=None):
         self.list.delete(0, "end")
         for i, f in enumerate(self.app.figures, 1):
-            self.list.insert("end", f"{i}.  {f['name']}")
+            own = len(panelview.sanitise_all(
+                f.get("state", {}).get("panel_views")))
+            self.list.insert("end", f"{i}.  {f['name']}"
+                             + (f"   ({own} panel"
+                                f"{'' if own == 1 else 's'} with own view)"
+                                if own else ""))
         self.sel = None
         if select is not None and self.app.figures:
             select = max(0, min(select, len(self.app.figures) - 1))

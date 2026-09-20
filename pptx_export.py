@@ -16,6 +16,7 @@ import os
 
 import appinfo
 import metasummary
+import panelview
 
 SECTIONS = ("title", "files", "metadata", "images", "figures")
 
@@ -117,6 +118,17 @@ def look_notes(state):
     names = metasummary.compact_labels(
         [f"{t.get('name', '')}" for t in ticked], limit=12)
     text = "; ".join(parts) + "."
+    defaults = {"view": st.get("view_mode", "Stack"),
+                "norm": st.get("norm", "None"),
+                "offset": st.get("offset", 0.6),
+                "z_axis": st.get("z_axis", "Auto"),
+                "reverse": bool(st.get("reverse")),
+                "fit_show": st.get("fit_show") or {}}
+    own = [f"{label}: {panelview.describe(ov, defaults)}"
+           for label, ov in panelview.sanitise_all(
+               st.get("panel_views")).items()]
+    if own:
+        text += "\nPanels with their own view: " + "; ".join(own) + "."
     if ticked:
         text += f"\nSpectra shown ({len(ticked)}): {names}."
     return text
