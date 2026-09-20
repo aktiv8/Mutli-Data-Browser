@@ -89,6 +89,7 @@ import themes
 import viewdata
 import metasummary
 import methods
+import timing
 import panelview
 import workbook as wbk
 import annotations
@@ -3392,7 +3393,8 @@ class Workspace:
     def methods_generated(self):
         """The methods text written from the loaded files' metadata."""
         rows = [md for p in self.docs for md in p.metadata_rows()]
-        return methods.generate(rows, self.calibration_statement())
+        return methods.generate(rows, self.calibration_statement(),
+                                timing.summarise(self.docs))
 
     def methods_text(self):
         """What the report says: the user's own text, else the generated."""
@@ -3967,28 +3969,34 @@ class Workspace:
                     for k, v in items:
                         row(k, v)
 
-            section("Sample", ["Sample", "Source file", "File format"])
-            section("Acquisition", [
-                "Date acquired", "Etch level", "Etch time (s)", "Instrument",
-                "Operator", "Acquisition computer", "X-ray source", "Anode",
-                "Photon energy (eV)", "Source power (W)", "Charge neutraliser",
-                "Ion gun / sputtering"])
+            groups = [
+                ("Sample", ["Sample", "Source file", "File format"]),
+                ("Acquisition", [
+                    "Date acquired", "Run started", "Run finished",
+                    "Etch level", "Etch time (s)", "Instrument",
+                    "Acquisition software", "Operator", "Acquisition computer",
+                    "Institution", "Project", "Experiment", "Platter",
+                    "Source configuration", "X-ray source", "Anode",
+                    "Photon energy (eV)", "Source power (W)",
+                    "Anode voltage (kV)", "Emission current (mA)",
+                    "X-ray spot (µm)", "Charge neutraliser",
+                    "Ion gun / sputtering", "Work function (eV)"]),
+                ("Region", [
+                    "Region", "Technique", "Pass energy (eV)", "Lens mode",
+                    "Aperture", "Analyser mode", "Acquisition mode",
+                    "BE start (eV)", "BE end (eV)", "Step (eV)", "Dwell (s)",
+                    "Points", "Scans", "Counting time", "Quality",
+                    "Position X (mm)", "Position Y (mm)", "Sample tilt (°)",
+                    "Take-off angle (°)"])]
             r = regs[0]
-            section("Region", [
-                "Region", "Pass energy (eV)", "Lens mode", "Aperture",
-                "BE start (eV)", "BE end (eV)", "Step (eV)", "Dwell (s)",
-                "Points", "Quality"])
-            if r.note:
-                row("Note", r.note)
-            section("Corrections and notes", ["BE shift (eV)", "Notes"])
-            shown = {"Sample", "Source file", "File format", "Date acquired",
-                     "Etch level", "Etch time (s)", "Instrument", "Operator",
-                     "Acquisition computer", "X-ray source", "Anode",
-                     "Photon energy (eV)", "Source power (W)",
-                     "Charge neutraliser", "Ion gun / sputtering", "Region",
-                     "Pass energy (eV)", "Lens mode", "Aperture",
-                     "BE start (eV)", "BE end (eV)", "Step (eV)", "Dwell (s)",
-                     "Points", "Quality", "BE shift (eV)", "Notes"}
+            for title, keys in groups:
+                section(title, keys)
+                if title == "Region" and r.note:
+                    row("Note", r.note)
+            section("Corrections and notes", ["BE shift (eV)", "Comments",
+                                              "Notes"])
+            shown = {k for _t, keys in groups for k in keys}
+            shown |= {"BE shift (eV)", "Comments", "Notes"}
             section("Edited fields", [k for k in base
                                       if k in edited and k not in shown])
         else:

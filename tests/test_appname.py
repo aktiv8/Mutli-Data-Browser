@@ -43,6 +43,39 @@ class TestAppName(unittest.TestCase):
                             f"{os.path.relpath(path, ROOT)}:{n} still uses "
                             f"the old name: {line.strip()}")
 
+    def test_escape_means_the_kratos_software_or_the_former_name(self):
+        """"ESCApe" names the Kratos acquisition software (its .experiment
+        files) or is the app's former name; a title or label written for data
+        of any format must not carry it."""
+        word = re.compile(r"ESCApe(?! Explorer)")
+        allowed = re.compile(r"Kratos|\.experiment|EscapeParser|former|old name"
+                             r"|previous|escape_explorer", re.I)
+        this = os.path.abspath(__file__)
+        for path in source_files():
+            if os.path.abspath(path) == this:
+                continue
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for n, line in enumerate(fh, 1):
+                    if word.search(line):
+                        self.assertRegex(
+                            line, allowed,
+                            f"{os.path.relpath(path, ROOT)}:{n} uses ESCApe "
+                            f"without naming the Kratos software: "
+                            f"{line.strip()}")
+
+    def test_only_a_kratos_experiment_names_escape_as_its_software(self):
+        import readers.kratos_experiment as ke
+        import readers.kratos_kal as kal
+        import readers.scienta_txt as sc
+        import readers.phi_spe as phi
+        import readers.thermo_avg as th
+        self.assertEqual(ke.EscapeParser.format_name,
+                         "Kratos ESCApe (.experiment)")
+        for mod in (kal, sc, phi, th):
+            with open(mod.__file__, encoding="utf-8") as fh:
+                src = fh.read()
+            self.assertNotIn("ESCApe", src.replace("ESCAPE", ""), mod.__name__)
+
     def test_no_wrong_capitalisation_of_the_new_name(self):
         wrong = re.compile(r"(?i)expose\s*spectra\s*deck")
         for path in source_files():

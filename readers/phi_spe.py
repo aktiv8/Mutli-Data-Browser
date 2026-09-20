@@ -105,7 +105,8 @@ class PhiSpeFile(SpectrumFile):
                  "Institution": kv.get("institution", ""),
                  "X-ray source": kv.get("xraysource", "")}
         if wf:
-            instr["Work function"] = f"{wf:g} eV"
+            instr["Work function (eV)"] = f"{wf:g}"
+        instr["Acquisition software"] = "PHI MultiPak"
         ne = _num(kv.get("neutralizerenergy"))
         if ne:
             instr["Charge neutraliser"] = (

@@ -11,12 +11,15 @@ from __future__ import annotations
 # What identifies the data, what is about the run, and the per-scan analyser
 # settings (the ones that legitimately differ between survey and narrow scans).
 IDENT_FIELDS = ["Sample", "Source file", "File format"]
-RUN_FIELDS = ["Date acquired", "Instrument", "Operator",
-              "Acquisition computer", "X-ray source", "Anode",
-              "Photon energy (eV)", "Source power (W)", "Charge neutraliser",
+RUN_FIELDS = ["Date acquired", "Run started", "Run finished", "Instrument",
+              "Acquisition software", "Operator", "Acquisition computer",
+              "X-ray source", "Anode", "Photon energy (eV)",
+              "Source power (W)", "Anode voltage (kV)",
+              "Emission current (mA)", "X-ray spot (µm)", "Charge neutraliser",
               "Ion gun / sputtering"]
-SETTING_FIELDS = ["Pass energy (eV)", "Lens mode", "Aperture", "Step (eV)",
-                  "Dwell (s)", "Quality"]
+SETTING_FIELDS = ["Pass energy (eV)", "Lens mode", "Aperture",
+                  "Analyser mode", "Acquisition mode", "Step (eV)",
+                  "Dwell (s)", "Scans", "Counting time", "Quality"]
 
 NOT_RECORDED = "not recorded"
 
@@ -110,11 +113,16 @@ from dataclasses import dataclass, field
 # it is the same everywhere, else on the sample's line when it is constant
 # within that sample, else it becomes a column of that sample's scan table.
 SETUP_FIELDS = [
-    "Technique", "Instrument", "Operator", "Acquisition computer",
-    "X-ray source", "Anode", "Photon energy (eV)", "Source power (W)",
-    "Charge neutraliser", "Ion gun / sputtering", "Lens mode", "Aperture",
-    "Pass energy (eV)", "Step (eV)", "Dwell (s)", "Quality",
-    "Position X (mm)", "Position Y (mm)", "BE shift (eV)", "Notes",
+    "Technique", "Instrument", "Acquisition software", "Operator",
+    "Acquisition computer", "Institution", "Project", "Experiment",
+    "Platter", "Source configuration", "X-ray source", "Anode",
+    "Photon energy (eV)", "Source power (W)", "Anode voltage (kV)",
+    "Emission current (mA)", "X-ray spot (µm)", "Charge neutraliser",
+    "Ion gun / sputtering", "Lens mode", "Aperture", "Analyser mode",
+    "Acquisition mode", "Pass energy (eV)", "Step (eV)", "Dwell (s)",
+    "Scans", "Counting time", "Quality", "Work function (eV)",
+    "Sample tilt (°)", "Take-off angle (°)", "Position X (mm)",
+    "Position Y (mm)", "BE shift (eV)", "Comments", "Notes",
 ]
 # Only Latin-1 characters: the PDF uses the built-in Helvetica.
 SHORT = {
@@ -123,6 +131,11 @@ SHORT = {
     "Ion gun / sputtering": "Ion gun", "Lens mode": "Lens",
     "Pass energy (eV)": "PE (eV)", "Position X (mm)": "X (mm)",
     "Position Y (mm)": "Y (mm)", "BE shift (eV)": "BE shift",
+    "Acquisition software": "Software", "Anode voltage (kV)": "Anode (kV)",
+    "Emission current (mA)": "Emission (mA)", "X-ray spot (µm)": "Spot (µm)",
+    "Analyser mode": "Analyser", "Acquisition mode": "Mode",
+    "Counting time": "Counting", "Work function (eV)": "WF (eV)",
+    "Source configuration": "Configuration",
 }
 # Scan ranges describe the region rather than the setup: always columns.
 RANGE_COLS = [("BE start", "BE start (eV)"), ("BE end", "BE end (eV)"),
@@ -215,6 +228,12 @@ def _date_cell(dates, day):
 
 def layout_file(samples):
     """Arrange ``SpectrumFile.samples_metadata()`` for a report.
+
+    Every field in ``SETUP_FIELDS``, the acquisition date, the depth-profile
+    levels and the scan ranges is placed somewhere. What is left out on
+    purpose: the identifiers already used as headings (Sample, Region, Source
+    file, File format) and per-run detail that only makes sense over a whole
+    experiment ("Run started" / "Run finished", reported by ``timing``).
 
     * ``common``: setup fields identical in every region of the file;
     * per sample ``line``: fields constant within that sample only (stage

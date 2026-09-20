@@ -15,8 +15,9 @@ import os
 import re
 from array import array
 
+import timing
 from .base import (Region, ImageBlob, SpectrumFile, canon_region_name,
-                   read_bytes)
+                   read_bytes, CAE)
 
 _PROP_RE = re.compile(r"^(DS_\w+(?:\[\d+\])?)\s*:\s*(VT_\w+)\s*=\s*(.*)$")
 _AXISVALUE_RE = re.compile(
@@ -309,12 +310,7 @@ class ThermoDataSpaceFile(SpectrumFile):
                        and 1480 < hv < 1490 else ""),
                 etch_level=level, etch_time=etch_time,
             )
-            v, i_ = p.get("DS_SOPROPID_VOLTAGE"), p.get("DS_SOPROPID_CURRENT")
-            if v and i_:
-                r.conditions["X-ray Power"] = f"{v * i_:.1f} W"
-            spot = p.get("DS_SOPROPID_WIDTH")
-            if spot:
-                r.conditions["X-ray spot (µm)"] = f"{spot:g}"
+            self._acquisition_facts(r, p)
             if pos:
                 r.pos_x, r.pos_y = pos
             elif stage:
@@ -365,21 +361,73 @@ class ThermoDataSpaceFile(SpectrumFile):
                 "total_etch_time": times[-1] if times else 0.0,
                 "cumulative": times, "etch_source": "data axis"}
 
+    def _acquisition_facts(self, r, p):
+        """What the property block says about how the region was acquired:
+        source (spot, anode voltage, emission), scans, the run's start and
+        end, and scan or snapshot. Only fields both ``.avg`` and ``.vgd`` hold.
+
+        ``DS_ACPROPID_DIRECTION`` is 1 for every scanned file and 0 for every
+        snapshot / SnapMap in the 107 files of the reference data set (the
+        ``MODE`` code alone is 2 / 3 / 7 and is kept as ``acq_code``). The start
+        and end are UTC: the files were written exactly one hour later on a
+        UK machine in summer time."""
+        v, i_ = p.get("DS_SOPROPID_VOLTAGE"), p.get("DS_SOPROPID_CURRENT")
+        if v and i_:
+            r.conditions["X-ray Power"] = f"{v * i_:.1f} W"
+        if v:
+            r.conditions["Anode voltage (kV)"] = f"{v / 1000:g}"
+        if i_:
+            r.conditions["Emission current (mA)"] = f"{i_ * 1000:.3g}"
+        w, ln = p.get("DS_SOPROPID_WIDTH"), p.get("DS_SOPROPID_LENGTH")
+        if w:
+            r.conditions["X-ray spot (µm)"] = (
+                f"{w:g} × {ln:g}" if ln and abs(ln - w) > 1e-6 else f"{w:g}")
+        x = r.extra
+        periods = p.get("DS_ACPROPID_PERIODS")
+        # A SnapMap's .vgd says 2 where Avantage's own .avg export of it says
+        # 1, so its scan count is left unknown; every other kind agrees.
+        if isinstance(periods, int) and periods > 0 and self.kind != "map":
+            x["n_scans"] = periods
+        t0, t1 = (_dmy(p.get(k)) for k in ("DS_ACPROPID_START_TIME",
+                                           "DS_ACPROPID_END_TIME"))
+        if timing.parse_ts(t0):
+            x["t_start"], x["tz"] = t0, "UTC"
+            if timing.parse_ts(t1):
+                x["t_end"] = t1
+        direction = p.get("DS_ACPROPID_DIRECTION")
+        if self.kind == "map":
+            x["acq_mode"] = "SnapMap"
+        elif direction == 1:
+            x["acq_mode"] = "Scan"
+        elif direction == 0:
+            x["acq_mode"] = "Snapshot"
+        if p.get("DS_ACPROPID_MODE") is not None:
+            x["acq_code"] = p["DS_ACPROPID_MODE"]
+        if p.get("DS_ANPROPID_MODE") == 1:       # FAT in CasaXPS's own export
+            x["analyser_mode"] = CAE
+
     def _instrument_from(self, p):
         hv = p.get(K_ENERGY)
         hv = round(float(hv), 3) if hv else None
         instr = {"Instrument": p.get("DS_GEPROPID_INSTRUMENT", ""),
                  "Operator": p.get("DS_EXT_SUPROPID_AUTHOR", ""),
-                 "Lens mode": p.get("DS_ANPROPID_LENS_MODE_NAME", "")}
+                 "Lens mode": p.get("DS_ANPROPID_LENS_MODE_NAME", ""),
+                 "Acquisition software": "Thermo Avantage"}
+        wf = p.get("DS_ANPROPID_WORK_FTN")
+        if isinstance(wf, (int, float)) and wf:
+            instr["Work function (eV)"] = f"{wf:.3g}"
         if hv:
             instr["X-ray source"] = ("Al Kα, monochromated"
                                      if p.get("DS_SOPROPID_MONO") and 1480 < hv < 1490
                                      else "") + f" ({hv:g} eV)"
             instr["X-ray source"] = instr["X-ray source"].strip()
         if "DS_SOURCE_FLOODGUNPROPID_DESCRIPTION" in p:
-            instr["Charge neutraliser"] = (
-                f"{p['DS_SOURCE_FLOODGUNPROPID_DESCRIPTION']}, "
-                f"{p.get('DS_SOURCE_FLOODGUNPROPID_CURRENT', 0):g} µA")
+            fg = (f"{p['DS_SOURCE_FLOODGUNPROPID_DESCRIPTION']}, "
+                  f"{p.get('DS_SOURCE_FLOODGUNPROPID_CURRENT', 0):g} µA")
+            en = p.get("DS_SOURCE_FLOODGUNPROPID_ENERGY")
+            if isinstance(en, (int, float)) and en:
+                fg += f", {en:.3g} eV"
+            instr["Charge neutraliser"] = fg
         self.instrument = {k: v for k, v in instr.items() if v}
         import sputter
         self.sputter_hint = sputter.from_properties(p)

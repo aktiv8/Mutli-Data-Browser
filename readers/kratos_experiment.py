@@ -189,6 +189,7 @@ class EscapeParser(SpectrumFile):
                 or "achromat" in s.lower()), "")
         self.instrument = {
             "Instrument": instrument or "(unknown)",
+            "Acquisition software": "Kratos ESCApe",     # what writes .experiment
             "Acquisition computer": host or "(unknown)",
             "X-ray source": source or "(unknown)",
             "Lens mode": lens,

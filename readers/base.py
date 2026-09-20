@@ -13,7 +13,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
+import timing
+
 UNSET = 1e36        # VAMAS uses 1e37 for "not specified"
+# Facts about the job or the analyser that a reader may put in ``instrument``
+# and that region_metadata passes on when they are there.
+SESSION_KEYS = ("Institution", "Project", "Experiment", "Platter",
+                "Experiment ID", "Sample description", "Work function (eV)",
+                "Comments")
 
 
 def read_bytes(path) -> bytes:
@@ -48,6 +55,19 @@ def guess_region_name(name: str, energy) -> str:
 def clean_text(s) -> str:
     s = (s or "").strip()
     return "" if s.lower() in _JUNK else s
+
+
+CAE = "Constant analyser energy (CAE)"
+CRR = "Constant retard ratio (CRR)"
+_ANALYSER = {"fat": CAE, "cae": CAE, "frr": CRR, "crr": CRR}
+
+
+def analyser_mode_name(text) -> str:
+    """VAMAS / vendor analyser mode as words: FAT and CAE are the same fixed
+    pass-energy mode, FRR and CRR the fixed retard ratio one; anything else
+    (or "not specified") is returned as written, or "" when empty."""
+    t = clean_text(text)
+    return _ANALYSER.get(t.lower(), t)
 
 
 def canon_region_name(s) -> str:
@@ -420,7 +440,18 @@ class SpectrumFile:
         md["Technique"] = r.technique
         md["Source file"] = r.source
         md["File format"] = self.format_name
+        sw = r.extra.get("acq_software") or self.instrument.get(
+            "Acquisition software", "")
+        if sw:
+            md["Acquisition software"] = sw
         md["Date acquired"] = self.date_for_region(r)
+        t0 = timing.parse_ts(r.extra.get("t_start"))
+        if t0:
+            zone = r.extra.get("tz", "")
+            md["Run started"] = timing.fmt_ts(t0, zone)
+            t1 = timing.parse_ts(r.extra.get("t_end"))
+            if t1 and t1 >= t0:
+                md["Run finished"] = timing.fmt_ts(t1, zone)
         if r.pos_x is not None:
             md["Position X (mm)"] = f"{r.pos_x:.3f}"
             md["Position Y (mm)"] = f"{r.pos_y:.3f}"
@@ -436,19 +467,36 @@ class SpectrumFile:
         md["Photon energy (eV)"] = fmt(r.photon_energy, "", 2)
         md["Source power (W)"] = (r.conditions.get("X-ray Power", "")
                                   .replace("W", "").strip())
-        if r.conditions.get("X-ray spot (µm)"):
-            md["X-ray spot (µm)"] = r.conditions["X-ray spot (µm)"]
+        for key in ("Anode voltage (kV)", "Emission current (mA)",
+                    "X-ray spot (µm)", "Sample tilt (°)", "Take-off angle (°)"):
+            if r.conditions.get(key):
+                md[key] = r.conditions[key]
         md["Pass energy (eV)"] = fmt(r.pass_energy, "", 0) if r.pass_energy else ""
         md["Lens mode"] = r.lens_mode or self.instrument.get("Lens mode", "")
         md["Aperture"] = r.aperture or self.instrument.get("Aperture", "")
+        if r.extra.get("analyser_mode"):
+            md["Analyser mode"] = r.extra["analyser_mode"]
+        if r.extra.get("acq_mode"):
+            md["Acquisition mode"] = r.extra["acq_mode"]
         md["BE start (eV)"] = fmt(be0, "", 2)
         md["BE end (eV)"] = fmt(be1, "", 2)
         md["Step (eV)"] = fmt(r.step, "", 3)
         md["Dwell (s)"] = fmt(r.dwell, "", 3)
         md["Points"] = str(r.n_points) if r.n_points else ""
+        if r.extra.get("n_scans"):
+            md["Scans"] = str(int(r.extra["n_scans"]))
+        net = timing.net_seconds(r)
+        if net is not None:
+            md["Counting time"] = timing.fmt_duration(net)
         md["Quality"] = r.conditions.get("Quality", "")
-        md["Charge neutraliser"] = self.instrument.get("Charge neutraliser", "")
+        md["Charge neutraliser"] = (r.extra.get("neutraliser")
+                                    or self.instrument.get("Charge neutraliser", ""))
         md["Ion gun / sputtering"] = self.instrument.get("Ion gun / sputtering", "")
+        for key in SESSION_KEYS:              # what the file says about the job
+            if self.instrument.get(key):
+                md[key] = self.instrument[key]
+        if r.extra.get("config"):
+            md["Source configuration"] = r.extra["config"]
         if r.fit is not None:
             bgs = sorted({g.background for g in r.fit.regions})
             md["CasaXPS fit"] = (

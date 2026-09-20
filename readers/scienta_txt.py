@@ -75,6 +75,7 @@ class ScientaTxtFile(SpectrumFile):
             "Instrument": clean_text(first_info.get("Instrument", "")),
             "Operator": clean_text(first_info.get("User", "")),
             "Institution": clean_text(first_info.get("Location", "")),
+            "Acquisition software": "Scienta SES",
             "Lens mode": clean_text(first_info.get("Lens Mode", "")),
             "X-ray source": (f"{_float(first_info.get('Excitation Energy')):g} eV"
                              if _float(first_info.get("Excitation Energy"))
@@ -127,5 +128,7 @@ class ScientaTxtFile(SpectrumFile):
         sweeps = info.get("Number of Sweeps")
         if sweeps:
             reg.conditions["Sweeps"] = sweeps
+            if str(sweeps).strip().isdigit() and int(sweeps) > 0:
+                reg.extra["n_scans"] = int(sweeps)
         reg.extra["info"] = info
         self.regions.append(reg)

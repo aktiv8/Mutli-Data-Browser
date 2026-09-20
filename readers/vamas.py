@@ -17,9 +17,56 @@ import vamasmeta
 import sputter
 from .base import (Region, SpectrumFile, clean, clean_text, canon_region_name,
                    guess_region_name, unset, kv_from_lines,
-                   read_bytes)
+                   read_bytes, analyser_mode_name)
+from .thermo_avg import _PROP_RE, typed_value
 
 HEADER_ID = b"VAMAS Surface Chemical Analysis Standard Data Transfer Format"
+
+# What CasaXPS copies from an Avantage file into its VAMAS comments
+_CASA_VERSION_RE = re.compile(r"CasaXPS\s+Version\s+(\S+)", re.I)
+_SPOT_RE = re.compile(
+    r"x-ray\s+spot-size:\s*([\d.]+)\s*um\s+by\s*([\d.]+)\s*um", re.I)
+_LENS_RE = re.compile(
+    r"^LENS_MODE_NAME\s*:\s*(.+?):\s+\d{1,2}/\d{1,2}/\d{4}", re.I)
+_FG_RE = re.compile(
+    r"F/G\s+Current:\s*([\d.]+)\s+F/G\s+Energy:\s*([\d.]+)", re.I)
+
+
+def avantage_dump(lines):
+    """The ``DS_...`` properties of an Avantage ``;Dump of DataSpace`` copied
+    into VAMAS comment lines (CasaXPS does this), as {name: typed value}."""
+    props = {}
+    for line in lines:
+        m = _PROP_RE.match(line.strip())
+        if m:
+            props.setdefault(m.group(1), typed_value(m.group(2), m.group(3)))
+    return props
+
+
+def casa_block_facts(lines):
+    """Spot size, lens mode and neutraliser from the free-text lines CasaXPS
+    keeps of an Avantage acquisition: {'spot', 'lens', 'neutraliser'}."""
+    out = {}
+    for i, line in enumerate(lines):
+        line = line.strip()
+        m = _SPOT_RE.search(line)
+        if m:
+            w, h = float(m.group(1)), float(m.group(2))
+            out["spot"] = f"{w:g}" if abs(w - h) < 1e-6 else f"{w:g} × {h:g}"
+            continue
+        m = _LENS_RE.match(line)
+        if m:
+            out["lens"] = m.group(1).strip()
+            continue
+        m = _FG_RE.search(line)
+        if m:
+            desc = lines[i - 1].strip() if i else ""
+            if not re.match(r"^[A-Za-z][\w /\-]*\bmode$", desc):
+                desc = ""              # the line above is not its description
+            cur, en = float(m.group(1)), float(m.group(2))
+            out["neutraliser"] = (f"{desc}, " if desc else "") + (
+                f"{cur:g} µA, {en:.3g} eV")
+    return out
 
 
 class VamasError(Exception):
@@ -258,6 +305,24 @@ class VamasFile(SpectrumFile):
         first = next((b for b in blocks if not unset(b["hv"])), None)
         if first is not None:
             instr["X-ray source"] = self._source_text(first)
+        # a CasaXPS export carries the Avantage properties of its first file
+        dump = avantage_dump(h["comments"])
+        if dump:
+            instr["Operator"] = instr["Operator"] or clean_text(
+                dump.get("DS_EXT_SUPROPID_AUTHOR", ""))
+            instr["Instrument"] = instr["Instrument"] or clean_text(
+                dump.get("DS_GEPROPID_INSTRUMENT", ""))
+        casa = ""
+        for line in h["comments"]:
+            m = _CASA_VERSION_RE.search(line)
+            if m:
+                casa = f"CasaXPS {m.group(1)}"
+                break
+        if dump:
+            instr["Acquisition software"] = "Thermo Avantage" + (
+                f" (VAMAS export by {casa})" if casa else "")
+        elif casa:
+            instr["Acquisition software"] = f"{casa} (VAMAS export)"
         for k in ("Lens mode", "Aperture", "Charge neutraliser",
                   "Ion gun / sputtering"):
             v = self._lookup(k)
@@ -392,10 +457,23 @@ class VamasFile(SpectrumFile):
         r.extra["comments"] = kv
         r.extra["comment_lines"] = list(b["comments"])
         r.extra["n_scans"] = b["n_scans"]
+        mode = analyser_mode_name(b["analyser_mode"])
+        if mode:
+            r.extra["analyser_mode"] = mode
+        for key, angle in (("Sample tilt (°)", b["tilt"]),
+                           ("Take-off angle (°)", b["takeoff_polar"])):
+            if not unset(angle) and abs(angle) > 1e-9:
+                r.conditions[key] = f"{angle:g}"
         r.fit = casafit.parse(b["comments"])
         self._own_calibration(r, b["comments"])
         r.lens_mode = self._lookup("Lens mode", kv)
         r.aperture = self._lookup("Aperture", kv)
+        casa = casa_block_facts(b["comments"])
+        r.lens_mode = r.lens_mode or casa.get("lens", "")
+        if casa.get("spot"):
+            r.conditions["X-ray spot (µm)"] = casa["spot"]
+        if casa.get("neutraliser"):
+            r.extra["neutraliser"] = casa["neutraliser"]
         vamasmeta.apply_to_region(r, vamasmeta.decode(b["comments"]))
         r.extra["expvals"] = list(zip([v[0] for v in h["expvars"]],
                                       b["expvals"]))

@@ -90,7 +90,16 @@ def _source_sentence(rows):
               else f" (photon energies {hv})")
     if power:
         s += f" at a source power of {power}"
-    return s + "."
+        volt = _unique(rows, "Anode voltage (kV)")
+        emis = _unique(rows, "Emission current (mA)")
+        if len(volt) <= 1 and len(emis) <= 1 and (volt or emis):
+            s += " (" + join_and([f"{volt[0]} kV" if volt else "",
+                                  f"{emis[0]} mA emission" if emis else ""]) + ")"
+    s += "."
+    spot = _unique(rows, "X-ray spot (µm)")
+    if spot:
+        s += f" The X-ray spot size was {join_and(spot)} µm."
+    return s
 
 
 def _settings(rows, plural_noun=""):
@@ -129,14 +138,70 @@ def _analyser_paragraph(rows):
             sentences.append(f"{kind} ({len(rows)}) were acquired with {s}.")
     lens = _unique(rows, "Lens mode")
     aper = _unique(rows, "Aperture")
+    mode = _unique(rows, "Analyser mode")
     bits = []
     if lens:
         bits.append(f"lens mode {join_and(lens)}")
     if aper:
         bits.append(f"aperture {join_and(aper)}")
+    if mode:
+        bits.append(join_and([m[0].lower() + m[1:] for m in mode]) + " mode")
     if bits:
         sentences.append(f"The analyser used {join_and(bits)}.")
-    return " ".join(sentences)
+    sentences.append(_acquisition_sentence(rows))
+    return " ".join(s for s in sentences if s)
+
+
+def _acquisition_sentence(rows):
+    """Scan or snapshot, and how many scans were accumulated."""
+    parts = []
+    modes = {}
+    for r in rows:
+        m = str(r.get("Acquisition mode", "") or "").strip()
+        if m:
+            modes[m] = modes.get(m, 0) + 1
+    if modes:
+        parts.append("Spectra were recorded in " + join_and(
+            [f"{m.lower()} mode ({n})" for m, n in modes.items()]) + ".")
+    text, n = values_text([r.get("Scans") for r in rows])
+    if text:
+        parts.append(f"Each spectrum accumulated {text} scan"
+                     f"{'' if text == '1' else 's'}."
+                     if n == 1 else
+                     f"Spectra accumulated {text} scans, depending on the "
+                     "region.")
+    return " ".join(parts)
+
+
+def timing_sentence(summary):
+    """When the analysis ran and how long the instrument was in use, from a
+    ``timing.Summary``; '' when the files record neither."""
+    import timing
+    if summary is None:
+        return ""
+    parts = []
+    if summary.start and summary.end:
+        z = f" {summary.tz}" if summary.tz else ""
+        a, b = summary.start, summary.end
+        if a.date() == b.date():
+            parts.append(f"Data were acquired on {a:%Y-%m-%d} between "
+                         f"{a:%H:%M} and {b:%H:%M}{z}.")
+        else:
+            parts.append(f"Data were acquired from {a:%Y-%m-%d %H:%M} to "
+                         f"{b:%Y-%m-%d %H:%M}{z}.")
+    if summary.active is not None and summary.net is not None \
+            and not summary.n_without_net and not summary.n_without_run:
+        parts.append(
+            f"The instrument was in use for "
+            f"{timing.fmt_duration(summary.active)}, of which "
+            f"{timing.fmt_duration(summary.net)} was counting time.")
+    elif summary.net is not None and not summary.n_without_net:
+        parts.append(f"The total counting time was "
+                     f"{timing.fmt_duration(summary.net)}.")
+    elif summary.active is not None and not summary.n_without_run:
+        parts.append(f"The instrument was in use for "
+                     f"{timing.fmt_duration(summary.active)}.")
+    return " ".join(parts)
 
 
 def _flag(value):
@@ -239,10 +304,12 @@ def _data_sentence(rows):
     return text + "."
 
 
-def generate(rows, calibration=""):
+def generate(rows, calibration="", timing_summary=None):
     """The methods text for ``rows`` (region metadata dicts of every loaded
-    file) plus the calibration statement. Paragraphs are separated by blank
-    lines. Returns '' when there is nothing to describe."""
+    file) plus the calibration statement, and, when ``timing_summary`` (a
+    ``timing.Summary``) is given, when and for how long the data were acquired.
+    Paragraphs are separated by blank lines. Returns '' when there is nothing
+    to describe."""
     rows = [r for r in rows if r]
     if not rows:
         return ""
@@ -268,7 +335,8 @@ def generate(rows, calibration=""):
         _depth_sentence(rows)) if s]
     if extra:
         paras.append(" ".join(extra))
-    paras.append(_data_sentence(rows))
+    paras.append(" ".join(s for s in (_data_sentence(rows),
+                                      timing_sentence(timing_summary)) if s))
     if calibration and calibration.strip():
         paras.append(calibration.strip())
     else:

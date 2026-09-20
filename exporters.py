@@ -459,7 +459,7 @@ def _metadata_pdf_reportlab(parser, samples, path):
                             rightMargin=PAGE_MARGIN_MM * mm,
                             topMargin=PAGE_MARGIN_MM * mm,
                             bottomMargin=16 * mm,
-                            title="ESCApe acquisition metadata")
+                            title="Acquisition metadata")
     doc.build(_metadata_story(parser, samples),
               canvasmaker=_numbered_canvas())
     return len(samples)
@@ -474,7 +474,7 @@ def _metadata_pdf_matplotlib(parser, samples, path):
 
     lay = metasummary.layout_file(samples)
     fname = os.path.basename(parser.path or "experiment")
-    lines = [f"ESCApe metadata - {fname}", ""]
+    lines = [f"Acquisition metadata - {fname}", ""]
     if lay.common:
         lines.append("Common to every region")
         lines += [f"  {k}: {v}" for k, v in lay.common]

@@ -82,6 +82,7 @@ class KratosKalFile(SpectrumFile):
         anode = self._anode(first)
         self.instrument = {k: v for k, v in {
             "Instrument": "Kratos (Vision)",
+            "Acquisition software": "Kratos Vision",
             "X-ray source": (f"{anode[0]} ({anode[1]:g} eV)" if anode else ""),
             "Lens mode": first.get("HSA Lens Mode", "").replace(
                 "F_HSA_LENS_", "").title(),
@@ -144,5 +145,7 @@ class KratosKalFile(SpectrumFile):
         sw = o.get("# Sweeps completed")
         if sw:
             reg.conditions["Sweeps"] = sw
+            if sw.strip().isdigit() and int(sw) > 0:
+                reg.extra["n_scans"] = int(sw)
         reg.extra["fields"] = o
         self.regions.append(reg)
