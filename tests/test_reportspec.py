@@ -61,7 +61,8 @@ class TestSpec(unittest.TestCase):
         self.assertFalse(rs.is_on(s, "files"))
         self.assertTrue(rs.is_on(s, "summary"))       # a section the input lacked
         self.assertEqual(s["skip"], {"figures": ["a", "3"]})
-        self.assertEqual(s["options"], {"sha": "short", "dividers": "auto"})
+        self.assertEqual(s["options"], {"sha": "short", "dividers": "auto",
+                                     "mosaic": "on"})
 
     def test_changes_return_new_specs_and_leave_the_old_alone(self):
         a = rs.default_spec()
@@ -614,10 +615,12 @@ class TestInTheApp(unittest.TestCase):
         seen = []
         ws._has_image_pages = lambda: True
         ws._image_items = lambda: [("cam:a/x", "x"), ("map:a/S1", "Map")]
-        ws._report_image_pages = lambda pdf, skip=(): seen.append(
-            ("pdf", set(skip))) or 0
-        ws._deck_image_pages = lambda skip=(): seen.append(
-            ("deck", set(skip))) or []
+        ws._report_image_pages = (
+            lambda pdf, skip=(), mosaics=False:
+            seen.append(("pdf", set(skip), mosaics)) or 0)
+        ws._deck_image_pages = (
+            lambda skip=(), mosaics=False:
+            seen.append(("deck", set(skip), mosaics)) or [])
         try:
             self.assertEqual(ws.report_inventory().children["images"],
                              [("cam:a/x", "x"), ("map:a/S1", "Map")])
@@ -630,9 +633,9 @@ class TestInTheApp(unittest.TestCase):
             for name in ("_has_image_pages", "_image_items",
                          "_report_image_pages", "_deck_image_pages"):
                 del ws.__dict__[name]
-        self.assertEqual(seen[0], ("pdf", {"cam:a/x"}))
+        self.assertEqual(seen[0], ("pdf", {"cam:a/x"}, True))    # mosaics: on
         if HAVE_PPTX:
-            self.assertEqual(seen[1], ("deck", {"cam:a/x"}))
+            self.assertEqual(seen[1], ("deck", {"cam:a/x"}, True))
 
     def test_fits_in_the_files_reach_the_report_and_the_generator(self):
         import resultspages

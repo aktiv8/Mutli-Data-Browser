@@ -3394,22 +3394,22 @@ class Workspace:
                 out.append(consume(pg, page))
         return out
 
-    def _report_image_pages(self, pdf, skip=()):
-        """Camera sheets and SnapMap pages onto a PdfPages; returns how many
-        (``skip``: keys of pictures and sites left out)."""
+    def _report_image_pages(self, pdf, skip=(), mosaics=False):
+        """Camera sheets, mosaics and SnapMap pages onto a PdfPages; returns
+        how many (``skip``: keys of pictures and sites left out)."""
         def consume(_pg, page):
             pdf.savefig(page)
             return 1
         return len(self._render_image_pages(
-            self._image_page_plan(skip=skip), consume, (11.7, 8.3),
-            (0.0, 0.03, 1.0, 0.93)))
+            self._image_page_plan(skip=skip, mosaics=mosaics), consume,
+            (11.7, 8.3), (0.0, 0.03, 1.0, 0.93)))
 
-    def _deck_image_pages(self, skip=()):
+    def _deck_image_pages(self, skip=(), mosaics=False):
         """The same pages as slide pictures: ``[{"title", "png", "notes"}]``,
         three camera pictures to a slide."""
         def consume(pg, page):
             buf = io.BytesIO()
-            if pg.kind == "camera":            # photographs: JPEG is a tenth the size
+            if pg.kind in ("camera", "mosaic"):   # photographs: JPEG is a tenth the size
                 page.savefig(buf, format="jpeg", dpi=150,
                              pil_kwargs={"quality": 88})
             else:
@@ -3417,7 +3417,8 @@ class Workspace:
             return {"title": pg.title, "png": buf.getvalue(),
                     "notes": pg.notes()}
         return self._render_image_pages(
-            self._image_page_plan(per_sheet=3, columns=3, skip=skip), consume,
+            self._image_page_plan(per_sheet=3, columns=3, skip=skip,
+                                  mosaics=mosaics), consume,
             pptx_export.FIGURE_SIZE, (0.0, 0.0, 1.0, 1.0), dpi=150,
             decorate=False)
 
@@ -3519,12 +3520,14 @@ class Workspace:
     def _build_report(self, path, spec=None, notes=None):
         spec = self._spec_for_output(spec)
         left_out = reportspec.skipped(spec, "images")
+        mosaics = reportspec.option(spec, "mosaic") == "on"
         return report.build_report(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,
             self._report_figures(), self._report_figure_pages,
             spec=spec,
-            render_images=((lambda pdf: self._report_image_pages(pdf, left_out))
+            render_images=((lambda pdf: self._report_image_pages(
+                                pdf, left_out, mosaics))
                            if self._has_image_pages() else None),
             cover_data=self.cover_data(), notes=notes,
             results=self._results())
@@ -3751,11 +3754,12 @@ class Workspace:
     def _build_deck(self, path, spec=None, notes=None):
         spec = self._spec_for_output(spec)
         left_out = reportspec.skipped(spec, "images")
+        mosaics = reportspec.option(spec, "mosaic") == "on"
         return pptx_export.build_deck(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,
             self._report_figures(), self._deck_images,
-            image_pages=((lambda: self._deck_image_pages(left_out))
+            image_pages=((lambda: self._deck_image_pages(left_out, mosaics))
                          if self._has_image_pages() else None),
             spec=spec,
             cover_data=self.cover_data(), notes=notes,

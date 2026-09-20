@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
+import mosaic
 import reportspec
 import snapmap
 import snapshot
@@ -36,24 +38,28 @@ class Picture:
     outlines: dict               # label -> (left, top, width, height) in pixels
     _array: object = field(default=None, repr=False)
     key: str = ""                # what a report choice calls it (``item_key``)
+    _sizes: dict = field(default_factory=dict, repr=False)
 
     @property
     def calib(self):
         return self.blob.calib
 
-    def array(self):
-        """The picture as an RGB array, shrunk to at most ``PICTURE_PX`` wide
-        (a PDF page or slide gains nothing from more)."""
-        if self._array is None:
+    def array(self, max_px=PICTURE_PX):
+        """The picture as an RGB array, shrunk to at most ``max_px`` wide
+        (default ``PICTURE_PX``: a PDF page or slide gains nothing from more;
+        the mosaic asks for more). Each size is read once."""
+        if self._array is not None and max_px == PICTURE_PX:
+            return self._array
+        if max_px not in self._sizes:
             import numpy as np
             from PIL import Image
             data = self.parser.extract_jpeg(self.blob)
             im = Image.open(io.BytesIO(data)).convert("RGB")
-            if im.width > PICTURE_PX:
-                im = im.resize((PICTURE_PX, round(im.height * PICTURE_PX
-                                                  / im.width)), Image.LANCZOS)
-            self._array = np.asarray(im)
-        return self._array
+            if im.width > max_px:
+                im = im.resize((max_px, round(im.height * max_px
+                                              / im.width)), Image.LANCZOS)
+            self._sizes[max_px] = np.asarray(im)
+        return self._sizes[max_px]
 
 
 @dataclass
@@ -111,16 +117,19 @@ def items(docs, label_of=None):
     return out
 
 
-def plan(docs, label_of=None, display=None, per_sheet=6, columns=3, skip=()):
-    """The pages for ``docs``: camera sheets first, then one page per SnapMap
-    site. ``label_of(parser, sample)`` gives a sample's shown name and
-    ``display(region)`` a region as it should appear (names, energy shift);
-    ``skip`` holds the keys (``items``) of pictures and sites left out (a
-    picture left out is not drawn beside its map either)."""
+def plan(docs, label_of=None, display=None, per_sheet=6, columns=3, skip=(),
+         mosaics=False):
+    """The pages for ``docs``: camera sheets first, then (with ``mosaics``) one
+    page for each set of overlapping pictures stitched together (``mosaic``),
+    then one page per SnapMap site. ``label_of(parser, sample)`` gives a
+    sample's shown name and ``display(region)`` a region as it should appear
+    (names, energy shift); ``skip`` holds the keys (``items``) of pictures and
+    sites left out (a picture left out is not drawn beside its map either, nor
+    stitched)."""
     label_of = label_of or (lambda p, s: s)
     display = display or (lambda r: r)
     skip = set(skip)
-    pictures, sites = [], []
+    pictures, sites, sets = [], [], []
     for p in docs:
         positions = {label_of(p, k): xy
                      for k, xy in p.sample_positions().items()}
@@ -138,6 +147,9 @@ def plan(docs, label_of=None, display=None, per_sheet=6, columns=3, skip=()):
                                 if blob.sample else "", p, blob, points,
                                 outlines, key=item_key("cam", p, blob.name)))
         pictures += [m for m in mine if m.key not in skip]
+        if mosaics:                       # per file: another holder, another frame
+            sets += [(c, positions, first) for c in mosaic.clusters(
+                [m for m in mine if m.key not in skip])]
         for sample, rs in cubes.items():
             if item_key("map", p, sample) in skip:
                 continue
@@ -164,12 +176,44 @@ def plan(docs, label_of=None, display=None, per_sheet=6, columns=3, skip=()):
             lambda fig, rect, cmap, c=chunk: draw_sheet(fig, rect, c, columns,
                                                         slots),
             lambda c=chunk: _sheet_notes(c)))
+    for n, (cluster, positions, first) in enumerate(sets, 1):
+        title = "Camera mosaic" + (f" ({n} of {len(sets)})"
+                                   if len(sets) > 1 else "")
+        pages.append(Page(
+            "mosaic", title, len(cluster),
+            lambda fig, rect, cmap, c=cluster, ps=positions, fs=first:
+                draw_mosaic(fig, rect, c, ps, fs),
+            lambda c=cluster: _mosaic_notes(c)))
     for site in sites:
         pages.append(Page(
             "maps", f"SnapMap – {site.title}", len(site.maps),
             lambda fig, rect, cmap, s=site: draw_site(fig, rect, s, cmap),
             lambda s=site: _site_notes(s)))
     return pages
+
+
+def mosaic_picture(cluster, positions, sites):
+    """``(Mosaic, Picture)``: the stitched pictures as one picture with its
+    own calibration, so the analysis points and map outlines on it come from
+    ``snapshot.view_of`` like on any camera picture."""
+    m = mosaic.build(cluster)
+    points, outlines = snapshot.view_of(m.calib, positions, sites)
+    pic = Picture(f"Mosaic of {len(cluster)} pictures", "", None,
+                  SimpleNamespace(calib=m.calib), points, outlines,
+                  _array=m.array)
+    return m, pic
+
+
+def draw_mosaic(fig, rect, cluster, positions, sites):
+    """One stitched mosaic filling ``rect``."""
+    _m, pic = mosaic_picture(cluster, positions, sites)
+    draw_sheet(fig, rect, [pic], 1, 1)
+
+
+def _mosaic_notes(cluster):
+    m = mosaic.build(cluster)
+    return "\n".join([f"Mosaic: {m.description()}",
+                      "Pictures: " + ", ".join(m.names) + "."] + m.notes)
 
 
 def available(docs) -> bool:

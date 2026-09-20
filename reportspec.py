@@ -7,7 +7,7 @@ workbook and in named presets)::
     {"version": 1,
      "sections": [{"id": "cover", "on": True}, ...],     # this order is the order
      "skip": {"figures": ["fig2"], "metadata": ["f3"]},  # children switched off
-     "options": {"sha": "short", "dividers": "auto"},
+     "options": {"sha": "short", "dividers": "auto", "mosaic": "on"},
      "cover": {"design": "ribbon", "image": "", "accent": ""}}   # see covers
 
 Children that are not listed in ``skip`` are on, so a figure or file added
@@ -68,9 +68,11 @@ LEGACY_DECK = {"title": ("cover", "summary", "methods", "calibration"),
                "images": ("images",), "figures": ("figures",)}
 
 # option -> allowed values: the checksum column of the file list, and whether
-# the slides get a divider slide before a long section ("auto": 5 slides or more)
-OPTIONS = {"sha": ("short", "none"), "dividers": ("auto", "none")}
-DEFAULT_OPTIONS = {"sha": "short", "dividers": "auto"}
+# the slides get a divider slide before a long section ("auto": 5 slides or more),
+# and whether overlapping camera pictures are also stitched into a mosaic
+OPTIONS = {"sha": ("short", "none"), "dividers": ("auto", "none"),
+           "mosaic": ("on", "off")}
+DEFAULT_OPTIONS = {"sha": "short", "dividers": "auto", "mosaic": "on"}
 # The cover picture (see ``covers``): a design id, the file for the 'image'
 # design, and the accent colour ('' = the default one).
 DEFAULT_COVER = {"design": "ribbon", "image": "", "accent": ""}
@@ -257,6 +259,7 @@ def spec_from_sections(sections, kind="pdf"):
     spec["sections"] = [{"id": sid, "on": sid in on} for sid in LEGACY_ORDER]
     spec["cover"]["design"] = "none"          # the old reports had no picture
     spec["options"]["dividers"] = "none"      # ... and no divider slides
+    spec["options"]["mosaic"] = "off"         # ... and no mosaics
     return spec
 
 

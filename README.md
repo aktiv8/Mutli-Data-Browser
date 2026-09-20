@@ -42,6 +42,7 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `quant.py`, `resultspages.py` | atomic percent from CasaXPS fits, and its tables and depth-profile charts for the report and the slides |
 | `timing.py` | how long an analysis took (counting time, span, overhead) |
 | `imagepages.py` | camera-picture sheets and SnapMap pages, drawn once for the PDF report and the slides |
+| `mosaic.py` | stitching overlapping camera pictures into one mosaic (stage positions, matched where they overlap, blended) |
 | `methods.py` | the methods text, written from what the files record |
 | `handover.py` | the hand-over ZIP (report, spectra, figures, metadata, README, checksums) |
 | `htmlbrowser.py`, `viewer/` | the offline HTML data browser (payload builder and the page: template, CSS, JavaScript) |
@@ -314,7 +315,8 @@ workbook. Sections, in the default results-first order:
 * **Figures** — one page set per saved figure (drawn on white with its caption);
   with none saved the current view is used.
 * **Camera pictures and SnapMaps** — see below; each picture and map site can be
-  ticked separately.
+  ticked separately, and overlapping pictures can also be **stitched into a
+  mosaic** (*Options* tab).
 * **Methods**, **Energy calibration**, **Acquisition metadata** (the tidied
   metadata of every file) and **Data files** (with checksums; the *Options* tab
   can leave them out) — the audit trail, last.
@@ -332,6 +334,13 @@ A figure slide is a high-resolution picture with an editable caption and speaker
 files have them (an Avantage experiment), the report gets pages after the
 metadata and the deck gets slides before the figures:
 
+* **Mosaics**: pictures that overlap (say, several points along a row) are
+  also joined into one large picture. They are laid out by their stage
+  positions, then matched to each other where the overlap has enough detail to
+  match (a few pixels of correction), and blended without a seam; the analysis
+  points and map outlines are drawn on it. Where a picture was taken twice
+  (before and after a pass) the later one is used. A note on the page says how
+  many overlaps were matched.
 * **Camera pictures**: six to a report page (three to a slide), each with the
   analysis points that fall in it (its own highlighted), the outline of any
   SnapMap taken there and a scale bar. Both pictures of a point (before and
@@ -581,8 +590,8 @@ in `CLAUDE.md` have the detail):
 * a **quantification view in the app itself** (the report, the slides and the
   data browser have one), and choosing **which regions count** in the report's
   quantification (today only whole samples can be left out);
-* **stitching neighbouring camera pictures** into one mosaic, and other ways of
-  pairing or arranging pictures in the report;
+* a **viewer for the mosaic** in the app or the data browser (today it is in the
+  report and the slides);
 * section **divider pages** in the PDF (the slides have them) and clickable
   entries in the slides' contents;
 * opening a saved workbook **without re-reading** the original files, and
