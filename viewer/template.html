@@ -59,6 +59,13 @@
           <input type="range" id="level" min="0" max="0" step="1" aria-label="Depth level">
           <span id="levelText" class="muted"></span>
         </div>
+        <div class="controls fitbar" id="fitbar" hidden>
+          <span class="muted">Fit</span>
+          <label class="field"><input type="checkbox" id="fit-components" checked> Components</label>
+          <label class="field"><input type="checkbox" id="fit-envelope" checked> Envelope</label>
+          <label class="field"><input type="checkbox" id="fit-background" checked> Background</label>
+          <label class="field"><input type="checkbox" id="fit-residual"> Residual</label>
+        </div>
         <p id="notes" class="muted small"></p>
         <div id="panels" class="panels"></div>
         <p id="empty" class="empty">Tick spectra in the list to plot them. Spectra with the same element name share a panel.

@@ -130,6 +130,37 @@ function near(a, b, msg, tol) {
   const lv = V.buildCsv([{ sample: { name: 'S' }, name: 'C 1s', reg: { level: 2, elabel: 'Binding Energy', eunits: 'eV', ylabel: 'Intensity', yunits: 'counts' }, x: [1], y: [2] }]);
   check(lv.split('\r\n')[0].indexOf('S C 1s L2 ') === 0, 'depth levels are told apart in CSV headers');
 
+  // ---- CasaXPS fits: the CSV (with its fit columns) equals the app's export ----
+  if (fx.fit) {
+    const fdata = await V.decode(fx.fit.payload_b64);
+    const fspecs = V.prepare(fdata);
+    const fcsv = V.buildCsv(fspecs).replace(/\r\n/g, '\n').trim().split('\n');
+    const fwant = fx.fit.csv.replace(/\r\n/g, '\n').trim().split('\n');
+    eq(fcsv[0], fwant[0], 'fit CSV header equals the app export (fit columns named the same)');
+    eq(fcsv.length, fwant.length, 'fit CSV row count');
+    let fworst = 0, blanks = true;
+    for (let i = 1; i < fwant.length; i++) {
+      const c = fcsv[i].split(','), w = fwant[i].split(',');
+      eq(c.length, w.length, 'fit CSV columns row ' + i);
+      for (let k = 0; k < w.length; k++) {
+        if (w[k] === '' || c[k] === '') { if (c[k] !== w[k]) blanks = false; continue; }
+        const dv = Math.abs(parseFloat(c[k]) - parseFloat(w[k])) / (Math.abs(parseFloat(w[k])) + 1e-9);
+        if (dv > fworst) fworst = dv;
+      }
+    }
+    check(blanks, 'fit CSV: cells outside the region are blank in both');
+    check(fworst < 1e-5, 'fit CSV values agree (worst relative error ' + fworst + ')');
+    // curves on every point, null outside the region
+    const cur = { i0: 2 }, full = V.curveFull(cur, [5, 6], 6);
+    eq(full, [null, null, 5, 6, null, null], 'curveFull places a curve at its first point');
+    eq(V.curveFull(null, [1], 3), null, 'no curves, no curve');
+    eq(V.residual([10, 20, 30], [9, null, 33]), [1, null, -3], 'residual is data - envelope');
+    eq(V.fitStates(fspecs[0].reg).map((x) => x.gk + '|' + x.name + '|' + x.slot),
+       fx.fit.states.filter((x, i, a) => a.findIndex((y) => y.gk === x.gk) === i)
+         .map((x, i) => x.gk + '|' + x.name + '|' + i), 'chemical states in order of appearance');
+    eq(V.fitRows({}).length, 0, 'a spectrum without a fit has no rows');
+  }
+
   // ---- metadata summary ----
   const sm = V.summariseMeta([{ A: '1', B: 'x', C: '' }, { A: '1', B: 'y', C: '' }, { A: '1', B: 'x', D: '5' }], []);
   eq(sm.common, [['A', '1']], 'common metadata');

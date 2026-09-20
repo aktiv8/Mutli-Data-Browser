@@ -175,13 +175,60 @@
       var tag = s.reg.level !== null && s.reg.level !== undefined ? ' L' + s.reg.level : '';
       cols.push([pre + s.name + tag + ' ' + (s.reg.elabel || 'Binding Energy') + ' (' + (s.reg.eunits || 'eV') + ')', s.x]);
       cols.push([pre + s.name + tag + ' ' + s.reg.ylabel + ' (' + s.reg.yunits + ')', s.y]);
+      V.fitCsvColumns(s, pre).forEach(function (c) { cols.push(c); });
       maxlen = Math.max(maxlen, s.y.length);
     });
     var lines = [cols.map(function (c) { return V.csvField(c[0]); }).join(',')];
     for (var i = 0; i < maxlen; i++) {
-      lines.push(cols.map(function (c) { return i < c[1].length ? String(c[1][i]) : ''; }).join(','));
+      lines.push(cols.map(function (c) {
+        var v = c[1][i];
+        return i < c[1].length && v !== null && v !== undefined && v === v ? String(v) : '';
+      }).join(','));
     }
     return lines.join('\r\n') + '\r\n';
+  };
+
+  /* ------------------------------------------------------------ CasaXPS fits */
+  /* A fit arrives as rows (one per fit region: RSF, area, limits, components)
+     and, per row, curves from the region's first point on (`i0`): background,
+     envelope and one curve per component, in the spectrum's own counts. The
+     numbers were worked out by the desktop app; the page only draws them. */
+  V.FIT_LAYERS = ['components', 'envelope', 'background', 'residual'];
+  V.curveFull = function (cur, curve, n) {      /* a curve on every point, null outside */
+    if (!cur || !curve) return null;
+    var out = new Array(n);
+    for (var i = 0; i < n; i++) out[i] = null;
+    for (var k = 0; k < curve.length && cur.i0 + k < n; k++) out[cur.i0 + k] = curve[k];
+    return out;
+  };
+  V.fitRows = function (reg) { return reg && reg.fit ? reg.fit.rows : []; };
+  /* the chemical states of a spectrum's fit in first-appearance order, with a
+     colour slot each (what the app's legend does) */
+  V.fitStates = function (reg) {
+    var out = [], seen = {};
+    V.fitRows(reg).forEach(function (row) {
+      row.components.forEach(function (c) {
+        if (!(c.gk in seen)) { seen[c.gk] = out.length; out.push({ gk: c.gk, name: c.state, slot: out.length }); }
+      });
+    });
+    return out;
+  };
+  V.residual = function (y, env) {              /* data - envelope, null where there is no envelope */
+    return y.map(function (v, i) { return env && env[i] !== null && env[i] !== undefined ? v - env[i] : null; });
+  };
+  /* CSV columns of a spectrum's fit, named as the app's export names them */
+  V.fitCsvColumns = function (s, pre) {
+    var rows = V.fitRows(s.reg).filter(function (r) { return r.curve; }), cols = [], n = s.y.length;
+    rows.forEach(function (row) {
+      var tag = (pre || '') + s.name + ' fit' + (rows.length > 1 ? ' [' + row.region + ']' : '');
+      var cur = row.curve;
+      if (cur.bg) cols.push([tag + ': background', V.curveFull(cur, cur.bg, n)]);
+      row.components.forEach(function (c, j) {
+        if (cur.comps[j]) cols.push([tag + ': ' + c.name, V.curveFull(cur, cur.comps[j], n)]);
+      });
+      if (cur.env) cols.push([tag + ': envelope', V.curveFull(cur, cur.env, n)]);
+    });
+    return cols;
   };
 
   /* ------------------------------------------------------------- metadata */
@@ -372,6 +419,7 @@
             norm: 'none', offset: 0.6, scale: 'Binding', levelOn: false, levelIdx: 0, levels: [],
             panels: new Map(), theme: 'auto', printing: false, nodes: [], holderIdx: 0,
             holderHot: null, tab: 'plot', filter: '', camIdx: 0, mapById: {}, camById: {},
+            fit: { components: true, envelope: true, background: true, residual: false, hidden: {} },
             M: { id: null, data: null, energy: null, total: null, win: null, mask: null, count: 0,
                  scale: 'Viridis', bg: false, overlay: false, alpha: 0.65, loading: false, drag: null } };
   var $ = function (id) { return document.getElementById(id); };
@@ -624,10 +672,89 @@
     if (S.scale === 'Kinetic' && specs.some(function (s) { return s.reg.binding && !s.reg.hv; })) {
       notes.push('no photon energy for some spectra: shown as binding energy');
     }
+    var anyFit = false;
+    S.panels.forEach(function (p) {
+      var s = singleFit(p.group);
+      if (s) {
+        anyFit = true;
+        (s.reg.fit.notes || []).forEach(function (t) { notes.push('fit: ' + t); });
+      }
+    });
+    $('fitbar').hidden = !anyFit;
     $('notes').textContent = notes.join('; ');
     refreshSwatches();
     var cols = colours(), cmap = traceColourMap();
-    S.panels.forEach(function (p) { drawPanel(p, cols, cmap); });
+    S.panels.forEach(function (p) { drawPanel(p, cols, cmap); updateFitBox(p); });
+  }
+
+  /* ------------------------------------------------------------ plot: fits */
+  /* a fit is drawn (and tabulated) on a panel that shows one spectrum */
+  function singleFit(g) {
+    return g && g.items.length === 1 && V.fitRows(g.items[0].reg).length ? g.items[0] : null;
+  }
+  function fitColours() {
+    var c = cycle();
+    return c.length > 1 ? c.slice(1) : c;
+  }
+  /* the fit's curves on every point of the spectrum, scaled like the data */
+  function fitCurves(s, f) {
+    var n = s.y.length, sc = function (a) { return a ? a.map(function (v) { return v === null ? null : v / f; }) : null; };
+    return V.fitRows(s.reg).map(function (row, ri) {
+      var cur = row.curve;
+      if (!cur) return { row: row, ri: ri, bg: null, env: null, comps: [], res: null };
+      var env = sc(V.curveFull(cur, cur.env, n));
+      return { row: row, ri: ri, bg: sc(V.curveFull(cur, cur.bg, n)), env: env,
+               comps: cur.comps.map(function (c) { return sc(V.curveFull(cur, c, n)); }),
+               res: env ? V.residual(s.y.map(function (v) { return v / f; }), env) : null };
+    });
+  }
+  function fmtN(v, d) { return v === null || v === undefined || v !== v ? '' : v.toFixed(d); }
+  function updateFitBox(p) {
+    var s = singleFit(p.group);
+    if (!s) { if (p.fitbox) { p.wrap.removeChild(p.fitbox); p.fitbox = null; } return; }
+    if (!p.fitbox) { p.fitbox = h('div', { class: 'fitbox' }); p.wrap.appendChild(p.fitbox); }
+    var box = clear(p.fitbox), st = V.fitStates(s.reg), slot = {}, cols = fitColours(), kin = S.scale === 'Kinetic' && s.reg.hv;
+    st.forEach(function (x) { slot[x.gk] = cols[x.slot % cols.length]; });
+    var rows = s.reg.fit.rows, shown = 0;
+    rows.forEach(function (row, ri) {
+      if (shown >= 8) return;
+      shown++;
+      var head = [row.region, row.background + ' background'];
+      if (row.rsf) head.push('RSF ' + +row.rsf.toPrecision(4));
+      if (row.area !== null && row.area !== undefined) head.push('area ' + Math.round(row.area).toLocaleString('en-US') + ' counts/s·eV' + (row.basis === 'components' ? ' (sum of components)' : ''));
+      if (row.rms !== null && row.rms !== undefined) head.push('fit rms ' + (row.rms * 100).toFixed(1) + ' % of the range');
+      box.appendChild(h('div', { class: 'fit-head', text: head.join('  ·  ') }));
+      if (!row.components.length) return;
+      var tot = row.components.reduce(function (a, c) { return a + Math.max(0, c.area || 0); }, 0);
+      var tb = h('tbody');
+      row.components.forEach(function (c, j) {
+        var key = ri + ':' + j, off = !!S.fit.hidden[key];
+        var cb = h('input', { type: 'checkbox', 'aria-label': 'Show ' + c.name });
+        cb.checked = !off;
+        var tr = h('tr', { class: off ? 'off' : '' },
+          h('td', null, cb),
+          h('td', null, h('span', { class: 'sw', style: 'background:' + (slot[c.gk] || '#888') })),
+          h('td', { text: c.name }),
+          h('td', { class: 'num', text: fmtN(kin ? s.reg.hv - c.be : c.be, 2) }),
+          h('td', { class: 'num', text: fmtN(c.fwhm, 2) }),
+          h('td', { class: 'num', text: fmtN(c.area, 1) }),
+          h('td', { class: 'num', text: tot > 0 ? fmtN(100 * Math.max(0, c.area || 0) / tot, 1) : '' }),
+          h('td', { text: c.shape }),
+          h('td', { text: c.state !== c.name ? c.state : '' }));
+        cb.addEventListener('change', function () {
+          S.fit.hidden[key] = !cb.checked;
+          tr.className = cb.checked ? '' : 'off';
+          redraw(p);
+        });
+        tb.appendChild(tr);
+      });
+      var th = h('tr', null, h('th'), h('th'), h('th', { text: 'Component' }),
+        h('th', { class: 'num', text: (kin ? 'KE' : 'BE') + ' (eV)' }), h('th', { class: 'num', text: 'FWHM (eV)' }),
+        h('th', { class: 'num', text: 'Area (counts/s·eV)' }), h('th', { class: 'num', text: 'Area %' }),
+        h('th', { text: 'Shape' }), h('th', { text: 'State' }));
+      box.appendChild(h('div', { class: 'scroll' }, h('table', { class: 'grid' }, h('thead', null, th), tb)));
+    });
+    if (rows.length > shown) box.appendChild(h('div', { class: 'fit-head', text: '… and ' + (rows.length - shown) + ' more fit regions' }));
   }
   function makePanel(key) {
     var canvas = h('canvas', { 'aria-label': 'Spectrum plot', role: 'img' });
@@ -699,6 +826,7 @@
     var step = stacked ? S.offset * (Math.max.apply(null, spans) || 1) : 0;
     var yoff = ys.map(function (v, i) { return v.map(function (y) { return y + i * step; }); });
 
+    var fit = singleFit(g) ? fitCurves(items[0], V.normFactor(items[0].y, S.norm)) : null;
     var xlo = Infinity, xhi = -Infinity;
     axes.forEach(function (a) { a.x.forEach(function (v) { if (v < xlo) xlo = v; if (v > xhi) xhi = v; }); });
     var pad = (xhi - xlo) * 0.02 || 1;
@@ -715,6 +843,18 @@
       }
     });
     if (!isFinite(ylo)) { ylo = 0; yhi = 1; }
+    /* the residual (data - envelope) gets a band of its own under the spectrum, at true scale */
+    var resBase = null, rr = 0;
+    if (fit && S.fit.residual) {
+      fit.forEach(function (fr) {
+        if (!fr.res) return;
+        for (var k = 0; k < fr.res.length; k++) {
+          if (fr.res[k] === null || axes[0].x[k] < lo || axes[0].x[k] > hi) continue;
+          rr = Math.max(rr, Math.abs(fr.res[k]));
+        }
+      });
+      if (rr > 0) { resBase = ylo - rr * 1.6; ylo = resBase - rr * 1.3; }
+    }
     var yp = (yhi - ylo) * 0.06 || 1;
     ylo -= yp; yhi += yp;
 
@@ -803,6 +943,9 @@
       ctx.fillText(m.label, 0, 0); ctx.restore();
     });
 
+    /* the fit: background, components on top of it, envelope, residual */
+    if (fit) drawFit(ctx, C, lay, X, Y, axes[0].x, fit, items[0], resBase, rr, font);
+
     /* traces */
     var endpts = [];
     items.forEach(function (s, i) {
@@ -824,6 +967,7 @@
       endpts.push(Y(sum / (b - a)));
     });
     ctx.restore();
+    if (fit && S.fit.components) fitLegend(ctx, C, lay, items[0], font);
 
     /* trace labels: at the end of each trace of a stack, a legend otherwise */
     ctx.font = font(11); ctx.textBaseline = 'middle';
@@ -857,6 +1001,77 @@
       ctx.fillRect(Math.min(P.drag.a, P.drag.b), lay.t, Math.abs(P.drag.b - P.drag.a), lay.h);
       ctx.globalAlpha = 1;
     }
+  }
+
+  /* a polyline through the points that have a value; a gap starts a new stroke */
+  function strokeCurve(ctx, xs, ys, X, Y) {
+    var pen = false;
+    ctx.beginPath();
+    for (var k = 0; k < xs.length; k++) {
+      if (ys[k] === null || ys[k] === undefined) { pen = false; continue; }
+      if (pen) ctx.lineTo(X(xs[k]), Y(ys[k])); else { ctx.moveTo(X(xs[k]), Y(ys[k])); pen = true; }
+    }
+    ctx.stroke();
+  }
+  /* the area between two curves over each run of points where both exist */
+  function fillBetween(ctx, xs, top, lo, X, Y) {
+    var k = 0, n = xs.length;
+    while (k < n) {
+      while (k < n && (top[k] === null || lo[k] === null)) k++;
+      var a = k;
+      while (k < n && top[k] !== null && lo[k] !== null) k++;
+      if (k - a < 2) continue;
+      ctx.beginPath();
+      for (var i = a; i < k; i++) { if (i === a) ctx.moveTo(X(xs[i]), Y(top[i])); else ctx.lineTo(X(xs[i]), Y(top[i])); }
+      for (i = k - 1; i >= a; i--) ctx.lineTo(X(xs[i]), Y(lo[i]));
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  function drawFit(ctx, C, lay, X, Y, xs, fit, s, resBase, rr, font) {
+    var cols = fitColours(), slot = {};
+    V.fitStates(s.reg).forEach(function (x) { slot[x.gk] = cols[x.slot % cols.length]; });
+    ctx.lineJoin = 'round';
+    fit.forEach(function (fr) {
+      var zero = xs.map(function () { return 0; });
+      if (S.fit.background && fr.bg) {
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
+        strokeCurve(ctx, xs, fr.bg, X, Y); ctx.setLineDash([]);
+      }
+      if (S.fit.components) {
+        fr.comps.forEach(function (cv, j) {
+          if (!cv || S.fit.hidden[fr.ri + ':' + j]) return;
+          var c = fr.row.components[j], col = slot[c.gk] || '#888888';
+          var lo = fr.bg || zero, top = cv.map(function (v, k) { return v === null || lo[k] === null ? null : lo[k] + v; });
+          ctx.fillStyle = col; ctx.globalAlpha = 0.35; fillBetween(ctx, xs, top, lo, X, Y); ctx.globalAlpha = 1;
+          ctx.strokeStyle = col; ctx.lineWidth = 1; strokeCurve(ctx, xs, top, X, Y);
+        });
+      }
+      if (S.fit.envelope && fr.env) {
+        ctx.strokeStyle = C.fg; ctx.lineWidth = 1.4; strokeCurve(ctx, xs, fr.env, X, Y);
+      }
+      if (resBase !== null && fr.res) {
+        var res = fr.res.map(function (v) { return v === null ? null : resBase + v; });
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 0.6; ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(lay.l, Y(resBase)); ctx.lineTo(lay.l + lay.w, Y(resBase)); ctx.stroke(); ctx.setLineDash([]);
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1; strokeCurve(ctx, xs, res, X, Y);
+        ctx.fillStyle = C.muted; ctx.font = font(10); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText('Residual (data − envelope)', lay.l + 6, Y(resBase + rr) - 4);
+      }
+    });
+    ctx.lineWidth = 1;
+  }
+  /* the states of the fit, top left of the plot; a long list is left to the table */
+  function fitLegend(ctx, C, lay, s, font) {
+    var st = V.fitStates(s.reg), cols = fitColours();
+    if (!st.length || st.length > 6) return;
+    ctx.font = font(11); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    st.forEach(function (x, i) {
+      var y = lay.t + 12 + i * 15;
+      ctx.fillStyle = cols[x.slot % cols.length]; ctx.globalAlpha = 0.5; ctx.fillRect(lay.l + 8, y - 5, 10, 10); ctx.globalAlpha = 1;
+      ctx.fillStyle = C.fg;
+      ctx.fillText(x.name.length > 22 ? x.name.slice(0, 21) + '…' : x.name, lay.l + 24, y);
+    });
+    ctx.textBaseline = 'alphabetic';
   }
 
   function onMove(P, e) {
@@ -1497,6 +1712,9 @@
     });
     $('resetzoom').addEventListener('click', function () { S.panels.forEach(function (p) { p.zoom = null; }); requestRender(); });
     $('csv').addEventListener('click', downloadCsv);
+    V.FIT_LAYERS.forEach(function (k) {
+      $('fit-' + k).addEventListener('change', function (e) { S.fit[k] = e.target.checked; requestRender(); });
+    });
     $('levelOn').addEventListener('change', function (e) { S.levelOn = e.target.checked; requestRender(); });
     $('level').addEventListener('input', function (e) { S.levelIdx = +e.target.value; requestRender(); });
     $('theme').addEventListener('change', function (e) { S.theme = e.target.value; applyTheme(); });

@@ -122,6 +122,36 @@ class TestFitRows(unittest.TestCase):
         self.assertFalse(row["background_known"])
 
 
+@unittest.skipUnless(HAVE_NP, "numpy not installed")
+class TestCurvesAndStates(unittest.TestCase):
+    def test_curves_start_at_the_regions_first_point(self):
+        r = linear_region()
+        row = quant.fit_rows(r, curves=True)[0]
+        cur = row["curves"]
+        n = len(cur["env"])
+        self.assertEqual([len(c) for c in cur["comps"]], [n, n])
+        self.assertLess(cur["i0"] + n, len(r.counts) + 1)
+        self.assertNotIn("curves", quant.fit_rows(r)[0])
+        # counts, not per second: the envelope reaches the data's scale
+        top = max(range(n), key=lambda k: cur["env"][k])
+        self.assertAlmostEqual(cur["env"][top], r.counts[cur["i0"] + top],
+                               delta=r.counts[cur["i0"] + top] * 0.1)
+
+    def test_component_state_names(self):
+        row = quant.fit_rows(linear_region())[0]
+        c0, c1 = row["components"]
+        self.assertEqual(c0["gk"], "n" + c0["name"])       # INDEX -1: stands alone
+        self.assertEqual(c0["state"], c0["name"])
+        self.assertEqual(c1["gk"], "i3")                   # INDEX 3, group "Ti(IV)"
+        self.assertEqual(c1["state"], "Ti(IV)")
+
+    def test_a_group_tag_that_is_only_the_region_label_is_not_a_name(self):
+        c = {"name": "V 2p3/2 V(0)", "group": "V 2p", "index": 2}
+        self.assertEqual(quant.state_of(c, "V 2p"), ("i2", "V 2p3/2 V(0)"))
+        self.assertEqual(quant.state_of(dict(c, group="Metal"), "V 2p"),
+                         ("i2", "Metal"))
+
+
 class TestNormalise(unittest.TestCase):
     def rows(self):
         return [{"area": 100.0, "area_t": 50.0, "rsf": 1.0},

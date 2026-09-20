@@ -35,6 +35,7 @@ import zlib
 import annotations as an
 import appinfo
 import holder
+import quant
 import snapshot
 import themes
 import viewdata
@@ -49,6 +50,8 @@ CAMERA_QUALITY = 78                      # JPEG quality
 CAMERA_BUDGET = 40 * 1024 * 1024         # pictures beyond this are left out
 MAP_STEP = 0.125                         # counts per step of a stored map value
 MAP_BUDGET = 40 * 1024 * 1024            # compressed SnapMap bytes; see pack_maps
+FIT_DIGITS = 6                           # significant figures of a fit curve
+FIT_BUDGET = 600_000                     # curve values in all; see _fit_block
 
 
 class ViewerError(Exception):
@@ -295,6 +298,60 @@ def _map_entries(src, cam_ids, label_of, notes):
     return out
 
 
+# -- CasaXPS fits ------------------------------------------------------------------
+def fit_notes(rows):
+    """The caveats of a fit, as the app's plots state them."""
+    out = []
+    if any(r["approximate"] for r in rows):
+        out.append("LA / LF line shapes are reconstructed")
+    unknown = sorted({r["background"] for r in rows
+                      if not r["background_known"]})
+    if unknown:
+        out.append(", ".join(unknown) + " background not reproduced, "
+                   "components only")
+    if not all(r["scale_known"] for r in rows):
+        out.append("dwell time unknown, curves in counts/s")
+    return out
+
+
+def _round_curve(values):
+    return None if values is None else [
+        None if v is None else round_sig(v, FIT_DIGITS) for v in values]
+
+
+def _fit_block(d, budget):
+    """The CasaXPS fit of a (display) region for the page, or None: for every
+    fit region its numbers (``quant.fit_rows``: RSF, area, limits, components
+    with their positions) and the curves that draw it (background, envelope,
+    components from the region's first point on, so ``y - env`` is the
+    residual). ``budget`` is a one-item list counting the curve values left;
+    curves that would not fit are left out and the table stays."""
+    rows = quant.fit_rows(d, curves=True)
+    if not rows:
+        return None
+    out, dropped = [], False
+    for row in rows:
+        cur = row.pop("curves", None)
+        if cur:
+            n = sum(len(c) for c in [cur["bg"], cur["env"]] + cur["comps"]
+                    if c)
+            if n > budget[0]:
+                cur, dropped = None, True
+            else:
+                budget[0] -= n
+                cur = {"i0": cur["i0"], "bg": _round_curve(cur["bg"]),
+                       "env": _round_curve(cur["env"]),
+                       "comps": [_round_curve(c) for c in cur["comps"]]}
+        row["curve"] = cur
+        for k in ("area", "area_t", "be_lo", "be_hi", "rms"):
+            if row.get(k) is not None:
+                row[k] = round_sig(row[k], 7)
+        for c in row["components"]:
+            c["be"] = round(c["be"], 4)
+        out.append(row)
+    return {"rows": out, "notes": fit_notes(rows), "dropped": dropped}
+
+
 # -- the payload --------------------------------------------------------------------
 def _meta(md):
     """Non-empty metadata values as strings, order kept."""
@@ -315,6 +372,7 @@ def build_payload(docs, display=None, details=None, methods_text="",
     samples, files, notes = [], [], []
     map_src = []                     # (parser, region, shown region, its dict)
     n_regions = 0
+    fit_budget, fit_dropped = [FIT_BUDGET], 0
     label_map = {}                       # (id(parser), original sample) -> label
     for fi, p in enumerate(docs):
         ann = getattr(p, "annotations", None)
@@ -359,6 +417,10 @@ def build_payload(docs, display=None, details=None, methods_text="",
                 "meta": _meta(p.region_metadata(r)), "note": rnote,
                 "markers": marks,
             }
+            fit = _fit_block(d, fit_budget) if getattr(d, "fit", None) else None
+            if fit:
+                reg["fit"] = fit
+                fit_dropped += bool(fit.pop("dropped"))
             entry["regions"].append(reg)
             if snapmaps and r.extra.get("cube") is not None:
                 map_src.append((p, r, d, reg))
@@ -367,6 +429,10 @@ def build_payload(docs, display=None, details=None, methods_text="",
     if not n_regions:
         raise ViewerError("There are no spectra with data to put in the "
                           "browser.")
+    if fit_dropped:
+        notes.append(f"Fit curves were left out of {fit_dropped} "
+                     f"spectr{'um' if fit_dropped == 1 else 'a'} to keep the "
+                     "file small; their fit tables are still there.")
     for i, s in enumerate(samples):
         s["id"] = f"s{i}"
         for j, r in enumerate(s["regions"]):

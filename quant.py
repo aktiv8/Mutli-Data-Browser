@@ -30,14 +30,30 @@ def _trapz(y, x):
     return float(((x[1:] - x[:-1]) * (y[1:] + y[:-1]) / 2.0).sum())
 
 
-def fit_rows(r):
+def state_of(comp, region):
+    """``(key, name)`` of the chemical state a component belongs to: components
+    sharing an INDEX >= 0 are one state, named by the group's tag (unless that
+    is only CasaXPS's label for the region, then by the first component); the
+    others stand alone. The same rule ``plots.draw_fit`` uses for its legend."""
+    idx = comp.get("index", -1)
+    if idx is not None and idx >= 0:
+        grp = (comp.get("group") or "").strip()
+        named = grp and grp.lower() != (region or "").strip().lower()
+        return f"i{idx}", (grp if named else comp["name"])
+    return f"n{comp['name']}", comp["name"]
+
+
+def fit_rows(r, curves=False):
     """One row per distinct fit region of ``r`` (a Region with ``fit``), or [].
 
     Keys: region, background, rsf, area, area_t (with the transmission function
     divided out, None when the file has none), basis ("data" or "components"),
     be_lo / be_hi (region limits, binding energy), avg, rms, approximate,
     background_known, scale_known, and components (name, group, index, be,
-    fwhm, area, shape, rsf)."""
+    fwhm, area, shape, rsf, plus ``gk`` / ``state``: its chemical state's key
+    and name). With ``curves=True`` a row also has ``curves``: ``i0`` (index of
+    the first point of the region in the spectrum) and the background, envelope
+    and component curves from there on, in the spectrum's own counts."""
     fit = getattr(r, "fit", None)
     if (fit is None or fit.is_empty() or not r.photon_energy or not r.energy
             or not r.counts):
@@ -61,10 +77,13 @@ def fit_rows(r):
     rows = []
     for cv in cvs:
         reg = cv.fit_region
-        comps = [{"name": c.name, "group": c.group, "index": c.index,
-                  "be": hv - (c.pos_ke + cshift), "fwhm": c.fwhm,
-                  "area": c.area, "shape": c.shape, "rsf": c.rsf}
-                 for c, _v in cv.components]
+        comps = []
+        for c, _v in cv.components:
+            comp = {"name": c.name, "group": c.group, "index": c.index,
+                    "be": hv - (c.pos_ke + cshift), "fwhm": c.fwhm,
+                    "area": c.area, "shape": c.shape, "rsf": c.rsf}
+            comp["gk"], comp["state"] = state_of(comp, cv.region)
+            comps.append(comp)
         area = area_t = None
         basis = "components"
         if cv.background is not None:
@@ -79,11 +98,11 @@ def fit_rows(r):
                     area_t = _trapz(d / tf[ok][order], x)
         if area is None and comps:
             area = float(sum(c["area"] for c in comps))
-        if area is None:
-            continue
+        if area is None and cv.background is None:
+            continue                            # nothing to draw or count
         lo = getattr(reg, "start_ke", None)
         hi = getattr(reg, "end_ke", None)
-        rows.append({
+        row = {
             "region": cv.region, "background": cv.background_type,
             "rsf": getattr(reg, "rsf", None), "area": area, "area_t": area_t,
             "basis": basis,
@@ -93,8 +112,33 @@ def fit_rows(r):
             "approximate": bool(cv.approximate),
             "background_known": bool(cv.background_known),
             "scale_known": bool(cv.scale_known),
-            "components": comps})
+            "components": comps}
+        if curves:
+            row["curves"] = _curves_of(cv)
+        rows.append(row)
     return rows
+
+
+def _curves_of(cv):
+    """The curves of one ``casafit.Curves`` from the first point of the region
+    to the last, NaN gaps as None: ``{i0, bg, env, comps}``."""
+    import numpy as np
+    cols = [cv.background, cv.envelope] + [v for _c, v in cv.components]
+    have = [np.asarray(c, dtype=float) for c in cols if c is not None]
+    if not have:
+        return None
+    ok = ~np.isnan(have[0])
+    idx = np.nonzero(ok)[0]
+    if not len(idx):
+        return None
+    i0, i1 = int(idx[0]), int(idx[-1]) + 1
+
+    def cut(c):
+        if c is None:
+            return None
+        return [None if v != v else v for v in c[i0:i1]]
+    return {"i0": i0, "bg": cut(cv.background), "env": cut(cv.envelope),
+            "comps": [cut(v) for _c, v in cv.components]}
 
 
 def normalise(rows, include=None, transmission=False):
@@ -128,17 +172,12 @@ def normalise(rows, include=None, transmission=False):
 def states(row, at_pct=None):
     """Chemical states of one row: ``[{name, frac, at_pct}]``, each state's
     share of the row's positive component area. Components with the same INDEX
-    (>= 0) are one state, named by the group's tag or its first component; the
-    rest stand alone."""
+    (>= 0) are one state (see ``state_of``); the rest stand alone."""
     groups = {}
     for c in row.get("components") or []:
         a = max(0.0, c.get("area") or 0.0)
-        idx = c.get("index", -1)
-        key = ("i", idx) if idx is not None and idx >= 0 else ("c", c["name"])
-        g = groups.setdefault(key, {"name": c.get("group") or c["name"]
-                                    if key[0] == "i" else c["name"],
-                                    "area": 0.0})
-        g["area"] += a
+        key, name = state_of(c, row.get("region"))
+        groups.setdefault(key, {"name": name, "area": 0.0})["area"] += a
     tot = sum(g["area"] for g in groups.values())
     if tot <= 0:
         return []

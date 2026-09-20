@@ -34,6 +34,13 @@ try:
 except Exception:
     HAVE_PIL = False
 
+sys.path.insert(0, os.path.join(ROOT, "tests"))
+try:
+    from test_casafit import fitted_region
+    HAVE_FIT = True
+except Exception:
+    HAVE_FIT = False
+
 
 def region(name="C 1s", sample="S1", n=41, lo=280.0, hi=292.0, peak=286.0,
            level=None, etch=None, scale=1.0, hv=1486.6, regular=True):
@@ -497,6 +504,86 @@ def _window_case(y, ne=None):
     return {"energy": energy, "y": y, "expect": list(snapmap.default_window(cube))}
 
 
+@unittest.skipUnless(HAVE_FIT, "numpy / casafit test helpers not available")
+class TestFits(unittest.TestCase):
+    """CasaXPS fits in the payload: numbers and curves from the desktop side."""
+
+    def payload(self):
+        return hb.build_payload([doc("fit.vms", [fitted_region()])])
+
+    def test_fit_block(self):
+        reg = self.payload()["samples"][0]["regions"][0]
+        self.assertEqual(len(reg["fit"]["rows"]), 1)
+        row = reg["fit"]["rows"][0]
+        self.assertEqual(row["region"], "Ti 2p")
+        self.assertAlmostEqual(row["rsf"], 2.001)
+        self.assertEqual(len(row["components"]), 2)
+        c = row["components"][0]
+        self.assertEqual(set(("name", "be", "fwhm", "area", "shape", "state",
+                              "gk")) - set(c), set())
+        cur = row["curve"]
+        n = len(cur["env"])
+        self.assertEqual(len(cur["bg"]), n)
+        self.assertEqual([len(x) for x in cur["comps"]], [n, n])
+        self.assertLessEqual(cur["i0"] + n, len(reg["y"]))
+        # envelope = background + components, to the rounding of the curves
+        for k in (0, n // 2, n - 1):
+            total = cur["bg"][k] + sum(x[k] for x in cur["comps"])
+            self.assertAlmostEqual(total, cur["env"][k],
+                                   delta=abs(cur["env"][k]) * 1e-4 + 1e-6)
+
+    def test_curves_line_up_with_the_data(self):
+        reg = self.payload()["samples"][0]["regions"][0]
+        cur = reg["fit"]["rows"][0]["curve"]
+        y = reg["y"]
+        # the strongest point of the envelope is the strongest point of the data
+        top_env = cur["i0"] + max(range(len(cur["env"])),
+                                  key=lambda k: cur["env"][k])
+        top_y = max(range(len(y)), key=lambda k: y[k])
+        self.assertLessEqual(abs(top_env - top_y), 2)
+        # and the curves are on the data's scale, not per second
+        self.assertAlmostEqual(cur["env"][top_env - cur["i0"]], y[top_y],
+                               delta=y[top_y] * 0.15)
+
+    def test_regions_without_a_fit_have_no_fit_key(self):
+        d = doc("a.vms", [region("C 1s"), fitted_region()])
+        regs = hb.build_payload([d])["samples"]
+        by = {r["name"]: r for s in regs for r in s["regions"]}
+        self.assertNotIn("fit", by["C 1s"])
+        self.assertIn("fit", by["Ti 2p"])
+
+    def test_notes_come_along(self):
+        r = fitted_region()
+        r.fit.regions[0].background = "Tougaard 3 Parameter"
+        fit = hb.build_payload([doc("a.vms", [r])])["samples"][0]["regions"][0]["fit"]
+        self.assertTrue(any("not reproduced" in n for n in fit["notes"]))
+
+    def test_size_budget_drops_curves_not_the_table(self):
+        old = hb.FIT_BUDGET
+        hb.FIT_BUDGET = 10
+        try:
+            p = hb.build_payload([doc("a.vms", [fitted_region()])])
+        finally:
+            hb.FIT_BUDGET = old
+        row = p["samples"][0]["regions"][0]["fit"]["rows"][0]
+        self.assertIsNone(row["curve"])
+        self.assertEqual(len(row["components"]), 2)
+        self.assertTrue(any("Fit curves were left out" in n
+                            for n in p["build_notes"]))
+
+    def test_shift_moves_positions_with_the_axis(self):
+        r = fitted_region()
+        base = hb.build_payload([doc("a.vms", [r])])
+        shifted = hb.build_payload(
+            [doc("a.vms", [r])],
+            display=lambda x: __import__("dataclasses").replace(
+                x, energy=[e + 1.5 for e in x.energy],
+                photon_energy=x.photon_energy + 1.5))
+        b0 = base["samples"][0]["regions"][0]["fit"]["rows"][0]["components"][0]
+        b1 = shifted["samples"][0]["regions"][0]["fit"]["rows"][0]["components"][0]
+        self.assertAlmostEqual(b1["be"] - b0["be"], 1.5, places=3)
+
+
 @unittest.skipUnless(_node(), "Node.js not installed")
 class TestJavaScript(unittest.TestCase):
     """viewer.js against numbers computed by the Python side."""
@@ -538,6 +625,20 @@ class TestJavaScript(unittest.TestCase):
                          np.flatnonzero(cube.channels(e[3], e[9])).tolist()],
         }
 
+    def fit_fixture(self, tmp):
+        """A fitted spectrum: the payload, the app's own CSV of it (which
+        includes the fit columns) and its fit columns as the app names them."""
+        r = fitted_region()
+        payload = hb.build_payload([doc("fit.vms", [r])])
+        path = os.path.join(tmp, "fit.csv")
+        exporters.export_csv([r], path)
+        with open(path, newline="") as fh:
+            text = fh.read()
+        return {"payload_b64": hb.encode_payload(payload), "csv": text,
+                "states": [{"gk": c["gk"], "name": c["state"]}
+                           for c in payload["samples"][0]["regions"][0]
+                           ["fit"]["rows"][0]["components"]]}
+
     def test_pure_half_agrees_with_python(self):
         regs = [region("C 1s", "A", n=61), region("O 1s", "A", n=41, lo=525,
                                                  hi=540, peak=532),
@@ -572,6 +673,8 @@ class TestJavaScript(unittest.TestCase):
             }
             if HAVE_NP:
                 fx["map"] = self.map_fixture()
+            if HAVE_FIT:
+                fx["fit"] = self.fit_fixture(tmp)
             fx_path = os.path.join(tmp, "fx.json")
             with open(fx_path, "w", encoding="utf-8") as fh:
                 json.dump(fx, fh)

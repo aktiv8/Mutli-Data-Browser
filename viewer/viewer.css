@@ -81,6 +81,12 @@ li.collapsed > ul { display: none; }
 .panel canvas { display: block; width: 100%; height: 320px; cursor: crosshair; }
 .panels.one .panel canvas { height: 460px; }
 .readout { min-height: 18px; padding: 2px 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fitbox { padding: 4px 6px 6px; color: var(--plot-fg); }
+.fitbox .fit-head { margin: 2px 0 6px; font-size: 12px; color: var(--muted); }
+.fitbox table.grid { width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; background: var(--plot-bg); }
+.fitbox table.grid td.num, .fitbox table.grid th.num { text-align: right; }
+.fitbox table.grid tr.off td { opacity: 0.45; }
+.fitbox .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; }
 .empty { color: var(--muted); padding: 40px 10px; text-align: center; }
 .empty[hidden] { display: none; }
 
