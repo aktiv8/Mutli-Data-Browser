@@ -3477,14 +3477,29 @@ class Workspace:
                 self.report_dlg = None
         self.report_dlg = reportgen_ui.ReportGeneratorDialog(self.root, self)
 
-    def _build_report(self, path, spec=None):
+    def cover_data(self):
+        """``(energy, counts)`` of the spectrum the "your data" cover draws:
+        a ticked survey, else the first ticked spectrum, else the first one
+        loaded; None when there is nothing to draw."""
+        def usable(r):
+            return r.decodable and r.energy and r.counts and len(r.counts) > 2
+        pool = [r for r in self._ticked_regions() if usable(r)] or [
+            r for p in self.docs for r in p.regions if usable(r)]
+        if not pool:
+            return None
+        pick = next((r for r in pool
+                     if abs(r.energy[0] - r.energy[-1]) > 250), pool[0])
+        return list(pick.energy), list(pick.counts)
+
+    def _build_report(self, path, spec=None, notes=None):
         return report.build_report(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,
             self._report_figures(), self._report_figure_pages,
             spec=self._spec_for_output(spec),
             render_images=(self._report_image_pages
-                           if self._has_image_pages() else None))
+                           if self._has_image_pages() else None),
+            cover_data=self.cover_data(), notes=notes)
 
     def _report_ready(self):
         if not self.docs:
@@ -3705,14 +3720,15 @@ class Workspace:
             fig, consume, size=pptx_export.FIGURE_SIZE, rect=None,
             decorate=False, number=number)
 
-    def _build_deck(self, path, spec=None):
+    def _build_deck(self, path, spec=None, notes=None):
         return pptx_export.build_deck(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,
             self._report_figures(), self._deck_images,
             image_pages=(self._deck_image_pages
                          if self._has_image_pages() else None),
-            spec=self._spec_for_output(spec))
+            spec=self._spec_for_output(spec),
+            cover_data=self.cover_data(), notes=notes)
 
     def export_powerpoint(self):
         self.generate_report("pptx")
@@ -3747,17 +3763,17 @@ class Workspace:
                 filetypes=[("PDF", "*.pdf")])
         if not path:
             return
-        saved = []
+        saved, notes = [], []
         self.root.config(cursor="watch")
         self.root.update_idletasks()
         try:
             if kind in ("pdf", "both"):
-                n = self._build_report(path, spec)
+                n = self._build_report(path, spec, notes)
                 saved.append((path, f"Report ({n} pages)"))
             if kind in ("pptx", "both"):
                 deck = path if kind == "pptx" else os.path.splitext(path)[0] \
                     + ".pptx"
-                n = self._build_deck(deck, spec)
+                n = self._build_deck(deck, spec, notes)
                 saved.append((deck, f"Presentation ({n} slides)"))
         except (report.ReportError, pptx_export.PptxError) as exc:
             messagebox.showerror("Report", str(exc))
@@ -3769,6 +3785,8 @@ class Workspace:
             self.root.config(cursor="")
         text = "\n".join(f"{what} saved to\n{where}" for where, what in saved)
         text += "\n\nIncluded: " + reportspec.describe(spec, inv)
+        if notes:                     # e.g. a cover picture that was not found
+            text += "\n\nNote: " + "\n      ".join(dict.fromkeys(notes))
         if messagebox.askyesno("Saved", text + "\n\nOpen it now?"):
             open_external(saved[0][0])
 

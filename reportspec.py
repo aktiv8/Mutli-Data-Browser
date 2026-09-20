@@ -7,7 +7,8 @@ workbook and in named presets)::
     {"version": 1,
      "sections": [{"id": "cover", "on": True}, ...],     # this order is the order
      "skip": {"figures": ["fig2"], "metadata": ["f3"]},  # children switched off
-     "options": {"sha": "short"}}
+     "options": {"sha": "short"},
+     "cover": {"design": "ribbon", "image": "", "accent": ""}}   # see covers
 
 Children that are not listed in ``skip`` are on, so a figure or file added
 later appears in the report without the choice being redone. ``sanitise`` makes
@@ -25,6 +26,8 @@ from __future__ import annotations
 import copy
 import os
 from dataclasses import dataclass, field
+
+import covers
 
 VERSION = 1
 
@@ -62,13 +65,17 @@ LEGACY_DECK = {"title": ("cover", "summary", "methods", "calibration"),
 
 OPTIONS = {"sha": ("short", "none")}          # option -> allowed values
 DEFAULT_OPTIONS = {"sha": "short"}
+# The cover picture (see ``covers``): a design id, the file for the 'image'
+# design, and the accent colour ('' = the default one).
+DEFAULT_COVER = {"design": "ribbon", "image": "", "accent": ""}
 
 
 def default_spec():
     """Every section on, in the default (results-first) order."""
     return {"version": VERSION,
             "sections": [{"id": i, "on": True} for i in SECTION_IDS],
-            "skip": {}, "options": dict(DEFAULT_OPTIONS)}
+            "skip": {}, "options": dict(DEFAULT_OPTIONS),
+            "cover": dict(DEFAULT_COVER)}
 
 
 def sanitise(spec=None):
@@ -100,6 +107,15 @@ def sanitise(spec=None):
     for key, allowed in OPTIONS.items():
         val = opts.get(key) if isinstance(opts, dict) else None
         out["options"][key] = val if val in allowed else DEFAULT_OPTIONS[key]
+    cov = spec.get("cover")
+    if isinstance(cov, dict):
+        design = cov.get("design")
+        if isinstance(design, str) and 0 < len(design) <= 300:
+            out["cover"]["design"] = design
+        image = cov.get("image")
+        if isinstance(image, str) and len(image) <= 1000:
+            out["cover"]["image"] = image
+        out["cover"]["accent"] = covers.valid_accent(cov.get("accent"))
     return out
 
 
@@ -183,6 +199,25 @@ def with_child(spec, sid, child, on):
     return out
 
 
+def cover_of(spec):
+    """The cover choice: ``{"design", "image", "accent"}``."""
+    return dict(sanitise(spec)["cover"])
+
+
+def with_cover(spec, **changes):
+    """``spec`` with the given cover fields changed (``design``, ``image``,
+    ``accent``)."""
+    out = sanitise(spec)
+    out["cover"].update(changes)
+    return sanitise(out)
+
+
+def with_cover_of(spec, other):
+    """``spec`` with the cover of ``other`` (a preset changes what goes in the
+    report, not the look of its cover)."""
+    return with_cover(spec, **cover_of(other))
+
+
 def with_option(spec, key, value):
     out = sanitise(spec)
     out["options"][key] = value
@@ -196,6 +231,7 @@ def spec_from_sections(sections, kind="pdf"):
     on = {sid for name in sections for sid in table.get(name, ())}
     spec = default_spec()
     spec["sections"] = [{"id": sid, "on": sid in on} for sid in LEGACY_ORDER]
+    spec["cover"]["design"] = "none"          # the old reports had no picture
     return spec
 
 

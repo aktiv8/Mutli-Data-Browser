@@ -18,11 +18,13 @@ No Tk here.
 from __future__ import annotations
 
 import datetime
+import io
 import os
 import tempfile
 from xml.sax.saxutils import escape as xml_escape
 
 import appinfo
+import covers
 import reportspec
 
 SECTIONS = ("cover", "metadata", "images", "figures")   # the old names
@@ -74,8 +76,9 @@ def _styles():
     return styles, body, small
 
 
-def title_block(details, logo):
-    """Flowables of the cover: letterhead, title and the details table."""
+def title_block(details, logo, art=None):
+    """Flowables of the cover: the cover picture (``covers.Art``), letterhead,
+    title and the details table."""
     from reportlab.lib import colors
     from reportlab.lib.units import mm
     from reportlab.lib.utils import ImageReader
@@ -84,6 +87,10 @@ def title_block(details, logo):
 
     styles, body, _small = _styles()
     story = []
+    if art is not None and art.data:
+        story += [Image(io.BytesIO(art.data), width=art.width * mm,
+                        height=art.height * mm, hAlign="LEFT"),
+                  Spacer(1, 8 * mm)]
     if logo and os.path.isfile(logo):
         try:
             w, h = ImageReader(logo).getSize()
@@ -166,9 +173,9 @@ def files_table(file_rows, sha="short"):
     return [Spacer(1, 4 * mm), Paragraph("Data files", styles["Heading2"]), t]
 
 
-def _flow_story(items, details, logo, file_rows, docs, sha):
+def _flow_story(items, details, logo, file_rows, docs, sha, art=None):
     """Flowables of consecutive reportlab sections. ``items`` is
-    ``[(section id, skipped child ids)]``."""
+    ``[(section id, skipped child ids)]``; ``art`` the cover picture."""
     from reportlab.platypus import PageBreak
     import exporters
 
@@ -177,7 +184,7 @@ def _flow_story(items, details, logo, file_rows, docs, sha):
     methods = (details.get("methods") or "").strip()
     for sid, skip in items:
         if sid == "cover":
-            story += title_block(details, logo)
+            story += title_block(details, logo, art)
         elif sid == "summary":
             story += text_block("Summary", details.get("summary"))
         elif sid == "methods":
@@ -235,11 +242,13 @@ def _runs(items):
 
 def build_report(path, details, logo, file_rows, docs, figures,
                  render_figure, sections=SECTIONS, render_images=None,
-                 spec=None):
+                 spec=None, cover_data=None, notes=None):
     """Write the report to ``path``; returns the number of pages.
 
     ``spec`` (see ``reportspec``) says which sections go in, in which order,
-    and which figures and files; without it ``sections`` (the old names) do.
+    which figures and files, and the cover picture; without it ``sections``
+    (the old names) do. ``cover_data`` is ``(energy, counts)`` for the "your
+    data" cover; a problem with the cover picture is appended to ``notes``.
     ``figures`` is a list of ``{"name", "caption", "state"}`` and
     ``render_figure(pdf, number, figure)`` draws that figure's pages onto a
     matplotlib ``PdfPages`` and returns how many it wrote.
@@ -255,12 +264,18 @@ def build_report(path, details, logo, file_rows, docs, figures,
         raise ReportError("The experiment report needs reportlab "
                           "(pip install reportlab).")
     mu = _mupdf()
+    art = None
+    if any(sid == "cover" for sid, _s in items):
+        art = covers.art(reportspec.cover_of(spec), "pdf", cover_data)
+        if art.note and notes is not None:
+            notes.append(art.note)
     with tempfile.TemporaryDirectory(prefix="xpsc_report_") as tmp:
         parts = []
         for k, (kind, run) in enumerate(_runs(items)):
             part = os.path.join(tmp, f"part{k}.pdf")
             if kind == "flow":
-                story = _flow_story(run, details, logo, file_rows, docs, sha)
+                story = _flow_story(run, details, logo, file_rows, docs, sha,
+                                    art)
                 if story:
                     _flow_pdf(part, story, details)
                     parts.append(part)

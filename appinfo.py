@@ -40,6 +40,25 @@ def image_path(kind="splash"):
     return None
 
 
+def cover_dir():
+    """The folder the user drops report cover pictures into (it need not
+    exist): ``assets/covers``."""
+    return os.path.join(ASSETS, "covers")
+
+
+def cover_images(folder=None):
+    """``[(file name, path)]`` of the pictures in the cover folder, by name.
+    Never raises (a missing or unreadable folder is an empty list)."""
+    folder = folder or cover_dir()
+    try:
+        names = sorted(os.listdir(folder), key=str.lower)
+    except OSError:
+        return []
+    return [(n, os.path.join(folder, n)) for n in names
+            if os.path.splitext(n)[1].lower() in IMAGE_EXTS
+            and os.path.isfile(os.path.join(folder, n))]
+
+
 def library_versions():
     """``[(label, version or None)]`` for the libraries the app can use;
     None when one is not installed. Never raises."""

@@ -15,6 +15,7 @@ import io
 import os
 
 import appinfo
+import covers
 import metasummary
 import panelview
 import reportspec
@@ -257,9 +258,13 @@ class _Deck:
 
 
 # -- slide builders ------------------------------------------------------------------
-def _title_slide(deck, details, logo):
+def _title_slide(deck, details, logo, art=None):
     slide = deck.prs.slides.add_slide(deck.prs.slide_layouts[0])
     deck.bar(slide)
+    if art is not None and art.data:           # a strip along the bottom
+        slide.shapes.add_picture(
+            io.BytesIO(art.data), 0, deck.Inches(SLIDE_H - art.height),
+            width=deck.Inches(SLIDE_W))
     ph = list(slide.placeholders)
     title = (details.get("title") or "").strip() or "Experiment report"
     t = slide.shapes.title
@@ -523,11 +528,14 @@ def _image_slides(deck, pages, n0):
 
 
 def build_deck(path, details, logo, file_rows, docs, figures, render_images,
-               sections=SECTIONS, image_pages=None, spec=None):
+               sections=SECTIONS, image_pages=None, spec=None,
+               cover_data=None, notes=None):
     """Write the .pptx to ``path``; returns the number of slides.
 
     ``spec`` (see ``reportspec``) says which sections go in, in which order,
-    and which figures and files; without it ``sections`` (the old names) do.
+    which figures and files, and the cover picture; without it ``sections``
+    (the old names) do. ``cover_data`` is ``(energy, counts)`` for the "your
+    data" cover; a problem with the cover picture is appended to ``notes``.
     ``figures``: ``[{"name", "caption", "state"}]``;
     ``render_images(number, figure)`` returns one PNG (bytes) per page of that
     figure, sized ``FIGURE_SIZE`` inches. ``image_pages()`` returns the camera
@@ -547,7 +555,10 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
     cal_text = cal if cal and not ("methods" in ids and cal in methods) else ""
     for sid, skip in items:
         if sid == "cover":
-            _title_slide(deck, details, logo)
+            art = covers.art(reportspec.cover_of(spec), "pptx", cover_data)
+            if art.note and notes is not None:
+                notes.append(art.note)
+            _title_slide(deck, details, logo, art)
             n += 1
         elif sid == "summary":
             paras = paragraphs(details.get("summary"))

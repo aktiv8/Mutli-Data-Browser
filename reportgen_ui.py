@@ -18,9 +18,13 @@ Not modal. Talks to the app through ``report_spec``, ``report_presets``,
 
 from __future__ import annotations
 
+import base64
+import os
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import (colorchooser, filedialog, messagebox, simpledialog,
+                     ttk)
 
+import covers
 import reportspec
 from workbook_ui import _finish
 
@@ -46,8 +50,8 @@ class ReportGeneratorDialog(tk.Toplevel):
         self.populate()
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
-        _finish(self, app, 960, 620)
-        self.minsize(820, 540)
+        _finish(self, app, 960, 660)
+        self.minsize(820, 560)
 
     # -- layout ----------------------------------------------------------------
     def _build(self):
@@ -146,15 +150,120 @@ class ReportGeneratorDialog(tk.Toplevel):
     def _cover_tab(self, nb):
         tab = ttk.Frame(nb, padding=10)
         nb.add(tab, text="Cover")
-        ttk.Label(tab, style="Muted.TLabel", wraplength=300, justify="left",
-                  text="The cover page takes its words from the workbook "
-                       "details."
-                  ).pack(anchor="w")
-        self.cover_text = ttk.Label(tab, justify="left", wraplength=300)
-        self.cover_text.pack(anchor="w", pady=(10, 10))
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
+        ttk.Label(tab, text="Cover picture").grid(row=0, column=0,
+                                                  sticky="w")
+        holder = ttk.Frame(tab)
+        holder.grid(row=1, column=0, sticky="nsew", pady=(4, 6))
+        holder.rowconfigure(0, weight=1)
+        holder.columnconfigure(0, weight=1)
+        self.cover_canvas = tk.Canvas(holder, highlightthickness=0,
+                                      bg=self.app.palette["bg"], height=230)
+        sb = ttk.Scrollbar(holder, orient="vertical",
+                           command=self.cover_canvas.yview)
+        self.cover_canvas.configure(yscrollcommand=sb.set)
+        self.cover_canvas.grid(row=0, column=0, sticky="nsew")
+        sb.grid(row=0, column=1, sticky="ns")
+        self.cover_list = ttk.Frame(self.cover_canvas)
+        self.cover_canvas.create_window((0, 0), window=self.cover_list,
+                                        anchor="nw")
+        self.cover_list.bind("<Configure>", lambda e: self.cover_canvas
+                             .configure(scrollregion=self.cover_canvas
+                                        .bbox("all")))
+        self.cover_canvas.bind("<MouseWheel>", lambda e: self.cover_canvas
+                               .yview_scroll(-1 * (e.delta // 120), "units"))
+        self.design = tk.StringVar(
+            value=reportspec.cover_of(self.spec)["design"])
+        self._thumbs = []
+        self.build_cover_list()
+
+        row = ttk.Frame(tab)
+        row.grid(row=2, column=0, sticky="ew")
+        ttk.Button(row, text="Use my own picture…",
+                   command=self._browse_picture).pack(side="left")
+        acc = ttk.Frame(tab)
+        acc.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        ttk.Label(acc, text="Colour").pack(side="left")
+        for name, hexv in covers.ACCENTS:
+            b = tk.Button(acc, bg=hexv, activebackground=hexv, width=2,
+                          relief="flat", borderwidth=1,
+                          command=lambda h=hexv: self.set_accent(h))
+            b.pack(side="left", padx=(5, 0))
+        ttk.Button(acc, text="Other…",
+                   command=self._pick_accent).pack(side="left", padx=(8, 0))
+        self.cover_text = ttk.Label(tab, style="Muted.TLabel", wraplength=340,
+                                    justify="left")
+        self.cover_text.grid(row=4, column=0, sticky="w", pady=(10, 2))
         ttk.Button(tab, text="Edit details…",
-                   command=self._edit_details).pack(anchor="w")
+                   command=self._edit_details).grid(row=5, column=0,
+                                                    sticky="w")
         self.refresh_cover()
+
+    # -- the cover picture -----------------------------------------------------------
+    def build_cover_list(self):
+        """(Re)draw the picker: one radio-style entry per design, each with a
+        small picture of what it looks like in the current colour."""
+        for w in self.cover_list.winfo_children():
+            w.destroy()
+        self._thumbs = []
+        cover = reportspec.cover_of(self.spec)
+        entries = [(c.id, c.name, {"design": c.id, "accent": cover["accent"]})
+                   for c in covers.list_covers()]
+        if cover["design"] == "image":
+            name = os.path.basename(cover["image"]) or "picture"
+            entries.append(("image", "Your picture: " + name, cover))
+        data = self.app.cover_data()
+        for design, name, spec in entries:
+            png = covers.thumbnail(spec, data)
+            kw = {}
+            if png:
+                img = tk.PhotoImage(data=base64.b64encode(png))
+                self._thumbs.append(img)
+                kw = {"image": img, "compound": "top"}
+            rb = tk.Radiobutton(
+                self.cover_list, text=name, value=design, variable=self.design,
+                indicatoron=False, anchor="w", padx=6, pady=4,
+                bg=self.app.palette["bg"], fg=self.app.palette["fg"],
+                selectcolor=self.app.palette["panel"],
+                activebackground=self.app.palette["bg"],
+                command=lambda d=design: self.set_cover(design=d), **kw)
+            rb.pack(fill="x", pady=1)
+            rb.bind("<MouseWheel>", lambda e: self.cover_canvas.yview_scroll(
+                -1 * (e.delta // 120), "units"))
+
+    def set_cover(self, **changes):
+        """Change the cover (``design``, ``image``, ``accent``); applied to
+        the app at once."""
+        old = reportspec.cover_of(self.spec)
+        self._set(reportspec.with_cover(self.spec, **changes))
+        new = reportspec.cover_of(self.spec)
+        self.design.set(new["design"])
+        if new["accent"] != old["accent"] or new["image"] != old["image"]:
+            self.build_cover_list()
+        self.refresh_cover()
+
+    def set_accent(self, hexv):
+        self.set_cover(accent=covers.valid_accent(hexv))
+
+    def choose_picture(self, path):
+        """Use the picture at ``path`` as the cover."""
+        self.set_cover(design="image", image=path)
+
+    def _browse_picture(self):
+        path = filedialog.askopenfilename(
+            parent=self, title="Cover picture",
+            filetypes=[("Pictures", "*.png *.jpg *.jpeg *.gif"),
+                       ("All files", "*.*")])
+        if path:
+            self.choose_picture(path)
+
+    def _pick_accent(self):
+        cur = reportspec.cover_of(self.spec)["accent"] or covers.DEFAULT_ACCENT
+        _rgb, hexv = colorchooser.askcolor(color=cur, parent=self,
+                                           title="Cover colour")
+        if hexv:
+            self.set_accent(hexv)
 
     def _options_tab(self, nb):
         tab = ttk.Frame(nb, padding=10)
@@ -290,7 +399,8 @@ class ReportGeneratorDialog(tk.Toplevel):
         presets = reportspec.all_presets(self.app.report_presets)
         if name in presets:
             self.sha.set(reportspec.option(presets[name], "sha"))
-            self._set(presets[name])
+            # a preset says what goes in; the look of the cover stays yours
+            self._set(reportspec.with_cover_of(presets[name], self.spec))
 
     def save_preset(self, name):
         """Store the current choice under ``name``; False when the name is
@@ -337,12 +447,13 @@ class ReportGeneratorDialog(tk.Toplevel):
     # -- cover / output ---------------------------------------------------------------
     def refresh_cover(self):
         d = self.app.details
-        lines = [f"{label}: {d.get(key) or '—'}" for label, key in (
-            ("Title", "title"), ("Customer", "customer"),
-            ("Reference", "reference"), ("Operator", "operator"),
-            ("Date", "date"))]
-        lines.append("Letterhead: " + (self.app.logo or "none"))
-        self.cover_text.config(text="\n".join(lines))
+        who = "  ·  ".join(x for x in (d.get("customer"), d.get("reference"),
+                                       d.get("date")) if x)
+        logo = os.path.basename(self.app.logo) if self.app.logo else "none"
+        self.cover_text.config(
+            text=f"{d.get('title') or 'Untitled report'}\n"
+                 f"{who or 'no customer, reference or date yet'}\n"
+                 f"Letterhead: {logo}")
 
     def _edit_details(self):
         self.app.edit_details()

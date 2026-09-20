@@ -405,6 +405,10 @@ except Exception:                                    # pragma: no cover
 class TestInTheApp(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # a Workspace applies its theme to matplotlib's global settings;
+        # give them back so other tests see the defaults
+        import matplotlib
+        cls._rc = matplotlib.rcParams.copy()
         try:
             cls.root = tk.Tk()
         except tk.TclError:
@@ -436,6 +440,8 @@ class TestInTheApp(unittest.TestCase):
          ee.messagebox.askyesno, ee.filedialog.asksaveasfilename) = cls._boxes
         ee.load_file = cls._load
         cls.root.destroy()
+        import matplotlib
+        matplotlib.rcParams.update(cls._rc)
         shutil.rmtree(cls.dir, ignore_errors=True)
 
     def setUp(self):
