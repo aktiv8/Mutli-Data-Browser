@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import re
 
-from .base import (Region, SpectrumFile, canon_region_name, guess_region_name,
-                   read_bytes)
+from .base import (Region, SpectrumFile, analyser_mode_name, canon_region_name,
+                   guess_region_name, read_bytes)
 
 # X-ray line energies (eV) by the anode named in Kratos flags
 _ANODES = {"AL": 1486.6, "MG": 1253.6, "AG": 2984.2, "ZR": 2042.4,
@@ -98,6 +98,32 @@ class KratosKalFile(SpectrumFile):
                     return f"{sym.title()} anode", e
         return None
 
+    @staticmethod
+    def _aperture(o):
+        """'Slot' from the aperture-size descriptor, plus the iris position
+        when it says something else."""
+        size = o.get("Descriptor for aperture size used in acquisition",
+                     "").strip()
+        iris = o.get("Descriptor for iris position used in acquisition",
+                     "").strip()
+        if iris and iris.lower() != size.lower():
+            return f"{size}, iris {iris}" if size else f"iris {iris}"
+        return size
+
+    @staticmethod
+    def _neutraliser(o):
+        """The neutraliser as the file states it. Units are not given for the
+        filament current, bias and balance, so none are written."""
+        state = o.get("Neutraliser Switch State", "")
+        if not state or "OFF" in state.upper():
+            return ""
+        words = state.replace("F_NEUTRALISER_", "").replace("_", " ").lower()
+        parts = [f"{label} {o[key].strip()}" for label, key in (
+            ("filament current", "Charge Neutraliser Filament Current"),
+            ("bias", "Charge Neutraliser Filament Bias"),
+            ("balance", "Charge Neutraliser Charge Balance")) if o.get(key)]
+        return words + (": " + ", ".join(parts) if parts else "")
+
     def _add_object(self, idx, o):
         vals = _list(o.get("Ordinate values", ""))
         start = _num(o.get("Spectrum scan start"))
@@ -135,9 +161,27 @@ class KratosKalFile(SpectrumFile):
                                                           "").title(),
             date=_date(o.get("Date Acquired", "")),
             anode=anode[0] if anode else "")
-        cur, volt = _num(o.get("Xray Gun current")), _num(o.get("Xray Gun voltage"))
+        # older dumps name the gun current / voltage plainly, newer ones (NICPU
+        # electronics) hold them under "NICPU X-ray Gun ..." as '0.012 A' /
+        # '12000 V'; without the second pair no power was ever found
+        cur = _num(o.get("Xray Gun current")
+                   or o.get("NICPU X-ray Gun Emission Current"))
+        volt = _num(o.get("Xray Gun voltage")
+                    or o.get("NICPU X-ray Gun Anode HT Voltage"))
         if cur and volt:
             reg.conditions["X-ray Power"] = f"{cur * volt:g} W"
+        if volt:
+            reg.conditions["Anode voltage (kV)"] = f"{volt / 1000:g}"
+        if cur:
+            reg.conditions["Emission current (mA)"] = f"{cur * 1000:.3g}"
+        mode = analyser_mode_name(
+            o.get("Analyser Scan Mode", "").replace("F_", "", 1))
+        if mode:
+            reg.extra["analyser_mode"] = mode
+        reg.aperture = self._aperture(o)
+        neut = self._neutraliser(o)
+        if neut:
+            reg.extra["neutraliser"] = neut
         tk_, tv = (_list(o.get("Transmission Function Kinetic Energy", "")),
                    _list(o.get("Transmission Function Value", "")))
         if tk_ and len(tk_) == len(tv):

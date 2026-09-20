@@ -314,6 +314,39 @@ class TestOtherFormats(Tmp):
         self.assertEqual(md["Counting time"], "12 s")     # 1 s x 4 points x 3
         self.assertNotIn("ESCApe", " ".join(md.values()))  # Kratos Vision
 
+    def test_newer_kal_files_give_power_analyser_aperture_and_neutraliser(self):
+        # keys as a real NICPU-era file writes them: no plain "Xray Gun
+        # current", so power used to be missing altogether
+        from test_readers import KAL
+        text = KAL.replace(
+            "  42 Pass energy",
+            " 200 NICPU X-ray Gun Emission Current = 0.012 A\n"
+            " 201 NICPU X-ray Gun Anode HT Voltage = 12000 V\n"
+            " 202 Analyser Scan Mode = F_FAT\n"
+            " 203 Descriptor for aperture size used in acquisition = Slot\n"
+            " 204 Descriptor for iris position used in acquisition = slot\n"
+            " 205 Neutraliser Switch State = F_NEUTRALISER_MANUAL_SETTINGS\n"
+            " 206 Charge Neutraliser Filament Current = 0.168\n"
+            " 207 Charge Neutraliser Filament Bias = 0.28\n"
+            " 208 Charge Neutraliser Charge Balance = 0.84\n"
+            "  42 Pass energy")
+        f = load_file(self.write("n.kal", text))
+        md = f.region_metadata(f.regions[0])
+        self.assertEqual(md["Source power (W)"], "144")
+        self.assertEqual(md["Anode voltage (kV)"], "12")
+        self.assertEqual(md["Emission current (mA)"], "12")
+        self.assertEqual(md["Analyser mode"], CAE)
+        self.assertEqual(md["Aperture"], "Slot")           # iris agrees: no repeat
+        self.assertEqual(md["Charge neutraliser"],
+                         "manual settings: filament current 0.168, bias 0.28, "
+                         "balance 0.84")
+
+    def test_a_neutraliser_that_is_off_is_not_described(self):
+        from readers.kratos_kal import KratosKalFile
+        self.assertEqual(KratosKalFile._neutraliser(
+            {"Neutraliser Switch State": "F_NEUTRALISER_OFF"}), "")
+        self.assertEqual(KratosKalFile._neutraliser({}), "")
+
     def test_scienta_sweeps_become_the_scan_count(self):
         e = [545.0 - 0.5 * i for i in range(6)]
         txt = ["[Info]", "Number of Regions=1", "", "[Region 1]",
