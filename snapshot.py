@@ -78,6 +78,24 @@ def map_rectangle(calib, cube):
             (bottom - top) / uy)
 
 
+def view_of(calib, positions, sites=None):
+    """What lies inside a camera picture: ``(points, outlines)``.
+
+    ``positions`` is ``{label: (x_mm, y_mm)}`` and ``sites`` ``{label: cube}``
+    (one SnapMap per site). ``points`` is ``{label: (column, row)}`` for the
+    positions in the picture, ``outlines`` ``{label: (left, top, width,
+    height)}`` in pixels for the maps taken inside it."""
+    points = markers(calib, positions)
+    outlines = {}
+    for label, cube in (sites or {}).items():
+        if cube.stage_x_mm is None:
+            continue
+        c, r = stage_to_pixel(calib, cube.stage_x_mm, cube.stage_y_mm)
+        if 0 <= c <= calib["width"] and 0 <= r <= calib["height"]:
+            outlines[label] = map_rectangle(calib, cube)
+    return points, outlines
+
+
 def nearest_image(images, x_mm, y_mm, tol_mm=0.1):
     """The calibrated picture centred closest to a stage position, within
     ``tol_mm``; among equals the latest one (images are in time order)."""

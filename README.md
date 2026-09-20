@@ -37,6 +37,7 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
 | `report.py` | the experiment report PDF |
 | `pptx_export.py` | the PowerPoint export (python-pptx) |
+| `imagepages.py` | camera-picture sheets and SnapMap pages, drawn once for the PDF report and the slides |
 | `methods.py` | the methods text, written from what the files record |
 | `handover.py` | the hand-over ZIP (report, spectra, figures, metadata, README, checksums) |
 | `htmlbrowser.py`, `viewer/` | the offline HTML data browser (payload builder and the page: template, CSS, JavaScript) |
@@ -266,17 +267,39 @@ row per region and level.
 **Experiment report** (Workbook menu → *preview…* / *save PDF…*) builds a PDF
 you can hand to a customer as a report or appendix: a cover page (logo, title,
 details, your summary, the list of data files with hashes), the tidied
-metadata of every file, and one page set per saved figure (drawn on white with
-its caption). Tick the sections to include in the preview bar. With no saved
+metadata of every file, the **camera pictures and SnapMaps** (Avantage; see
+below) and one page set per saved figure (drawn on white with its caption).
+Tick the sections to include in the preview bar. With no saved
 figures the current view is used. It needs `reportlab` and `pymupdf`.
 
 **Export PowerPoint…** (Workbook menu) writes a 16:9 `.pptx` from the same
 material: a title slide (logo, customer, reference, operator, date), summary,
-data files, the metadata as native tables, and one slide per saved figure — a
+data files, the metadata as native tables, the camera pictures and SnapMaps, and
+one slide per saved figure — a
 high-resolution picture with an editable caption and speaker notes describing
 the look and the spectra shown. Choose the sections to include in the dialog.
 It needs `python-pptx` (installed by the launcher). Slides are built with
 plain PowerPoint text and tables, so you can restyle them freely.
+
+**Camera pictures and SnapMaps in the report and slides.** When the loaded
+files have them (an Avantage experiment), the report gets pages after the
+metadata and the deck gets slides before the figures:
+
+* **Camera pictures**: six to a report page (three to a slide), each with the
+  analysis points that fall in it (its own highlighted), the outline of any
+  SnapMap taken there and a scale bar. Both pictures of a point (before and
+  after a pass) are shown, so beam damage is visible.
+* **One page (slide) per SnapMap site**: the camera picture taken there beside a
+  grid of element maps, each the counts in the window round that element's
+  strongest peak (the window is in the title), with its own colour bar scaled
+  from the 1st to the 99th percentile. The colour scale is the one chosen in the
+  SnapMap viewer. The speaker notes list the windows.
+
+Names, notes and energy shifts you set are applied. Camera slides are JPEG (the
+deck stays a few MB); the report keeps the pictures at 640 px wide. The
+hand-over ZIP's report includes these pages too. They need matplotlib and
+Pillow; pictures are not repeated per figure, and there is no per-picture
+selection yet.
 
 **Methods text.** *Workbook → Details…* has a **Methods** box holding a
 paragraph written from what your files actually record: instrument and

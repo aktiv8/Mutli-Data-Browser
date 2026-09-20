@@ -2,11 +2,13 @@
 
 Sections (each optional): a **cover** (letterhead logo, title, customer /
 reference / operator / date, the free-text summary and the list of source
-files), the **metadata** of every file (tidied, as in the metadata PDF) and
-the saved **figures** with their captions.
+files), the **metadata** of every file (tidied, as in the metadata PDF), the
+**images** (camera pictures and SnapMaps, see ``imagepages``) and the saved
+**figures** with their captions.
 
-Cover and metadata are typeset with reportlab; the figure pages are drawn by
-the caller (matplotlib, vector) through ``render_figure``. The parts are
+Cover and metadata are typeset with reportlab; the image and figure pages are
+drawn by the caller (matplotlib, vector) through ``render_images`` and
+``render_figure``. The parts are
 joined with PyMuPDF, which also stamps a page footer. No Tk here.
 """
 
@@ -19,7 +21,7 @@ from xml.sax.saxutils import escape as xml_escape
 
 import appinfo
 
-SECTIONS = ("cover", "metadata", "figures")
+SECTIONS = ("cover", "metadata", "images", "figures")
 
 
 class ReportError(Exception):
@@ -176,12 +178,14 @@ def _front_pdf(path, sections, details, logo, file_rows, docs):
 
 
 def build_report(path, details, logo, file_rows, docs, figures,
-                 render_figure, sections=SECTIONS):
+                 render_figure, sections=SECTIONS, render_images=None):
     """Write the report to ``path``; returns the number of pages.
 
     ``figures`` is a list of ``{"name", "caption", "state"}`` and
     ``render_figure(pdf, number, figure)`` draws that figure's pages onto a
-    matplotlib ``PdfPages`` and returns how many it wrote."""
+    matplotlib ``PdfPages`` and returns how many it wrote.
+    ``render_images(pdf)`` does the same for the camera-picture and SnapMap
+    pages (None: there are none)."""
     sections = tuple(s for s in SECTIONS if s in sections)
     try:
         import reportlab  # noqa: F401
@@ -194,6 +198,13 @@ def build_report(path, details, logo, file_rows, docs, figures,
         front = os.path.join(tmp, "front.pdf")
         if _front_pdf(front, sections, details, logo, file_rows, docs):
             parts.append(front)
+        if "images" in sections and render_images is not None:
+            from matplotlib.backends.backend_pdf import PdfPages
+            imgs = os.path.join(tmp, "images.pdf")
+            with PdfPages(imgs) as pdf:
+                written = render_images(pdf)
+            if written:
+                parts.append(imgs)
         if "figures" in sections and figures:
             from matplotlib.backends.backend_pdf import PdfPages
             figs = os.path.join(tmp, "figures.pdf")

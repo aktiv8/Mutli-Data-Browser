@@ -2,7 +2,8 @@
 the PDF report.
 
 Slides: title (logo, details), summary, data files, metadata (the compact
-layout of ``metasummary.layout_file`` as native tables), then one slide per
+layout of ``metasummary.layout_file`` as native tables), the camera pictures
+and SnapMaps (one picture per slide, see ``imagepages``), then one slide per
 figure page (a picture, an editable caption, speaker notes describing the
 look). Needs python-pptx; no Tk here.
 """
@@ -16,7 +17,7 @@ import os
 import appinfo
 import metasummary
 
-SECTIONS = ("title", "files", "metadata", "figures")
+SECTIONS = ("title", "files", "metadata", "images", "figures")
 
 SLIDE_W, SLIDE_H = 13.333, 7.5          # inches (16:9)
 MARGIN = 0.6
@@ -486,13 +487,34 @@ def _figure_slides(deck, figures, render_images, n0):
     return n
 
 
+def _image_slides(deck, pages, n0):
+    """One slide per camera sheet / SnapMap site: ``pages`` is
+    ``[{"title", "png", "notes"}]`` (pictures sized ``FIGURE_SIZE``)."""
+    n = n0
+    for pg in pages:
+        n += 1
+        slide = deck.content_slide(pg["title"], n)
+        width, height = FIGURE_SIZE
+        pic = slide.shapes.add_picture(
+            io.BytesIO(pg["png"]), deck.Inches((SLIDE_W - width) / 2),
+            deck.Inches(1.15), width=deck.Inches(width))
+        if pic.height > deck.Inches(height):
+            ratio = deck.Inches(height) / pic.height
+            pic.height = deck.Inches(height)
+            pic.width = int(pic.width * ratio)
+            pic.left = int((deck.Inches(SLIDE_W) - pic.width) / 2)
+        slide.notes_slide.notes_text_frame.text = pg.get("notes", "")
+    return n
+
+
 def build_deck(path, details, logo, file_rows, docs, figures, render_images,
-               sections=SECTIONS):
+               sections=SECTIONS, image_pages=None):
     """Write the .pptx to ``path``; returns the number of slides.
 
     ``figures``: ``[{"name", "caption", "state"}]``;
     ``render_images(number, figure)`` returns one PNG (bytes) per page of that
-    figure, sized ``FIGURE_SIZE`` inches."""
+    figure, sized ``FIGURE_SIZE`` inches. ``image_pages()`` returns the camera
+    and SnapMap slides as ``[{"title", "png", "notes"}]`` (None: none)."""
     sections = tuple(s for s in SECTIONS if s in sections)
     title = (details.get("title") or "").strip() or "Experiment report"
     deck = _Deck(title)
@@ -505,6 +527,8 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
         n = _files_slides(deck, file_rows, n)
     if "metadata" in sections:
         n = _metadata_slides(deck, docs, n)
+    if "images" in sections and image_pages is not None:
+        n = _image_slides(deck, image_pages(), n)
     if "figures" in sections and figures:
         n = _figure_slides(deck, figures, render_images, n)
     if not deck.prs.slides:

@@ -87,6 +87,7 @@ import casafit
 import elements
 import handover
 import htmlbrowser
+import imagepages
 import snapshot
 import xpslines
 import report
@@ -3123,6 +3124,65 @@ class Workspace:
             return 1
         return len(self._render_figure_pages(fig, consume, number=number))
 
+    # -- camera pictures and SnapMaps for the report and the slides -------------
+    def _has_image_pages(self):
+        return HAVE_MPL and HAVE_PIL and imagepages.available(self.docs)
+
+    def _image_page_plan(self, **kw):
+        def label_of(p, sample):
+            return self.ann.sample_label(self.file_ids.get(id(p), ""), sample)
+        return imagepages.plan(self.docs, label_of=label_of,
+                               display=self._display, **kw)
+
+    def _map_colourmap(self):
+        name = self.cfg.get("snapmap", {}).get("scale", "Viridis")
+        if name not in themes.SCALE_NAMES or name == "Theme default":
+            name = "Viridis"
+        return themes.scale_colourmap(name, False, PRINT)
+
+    def _render_image_pages(self, plan, consume, size, rect, dpi=150,
+                            decorate=True):
+        """Draw the camera and SnapMap pages under the print style (as figure
+        pages are) and hand each, with its plan entry, to ``consume``."""
+        out = []
+        paper = self._plot_palette(PRINT, paper=True)[0]
+        cmap = self._map_colourmap()
+        with matplotlib.rc_context(self._rc(paper)):
+            for pg in plan:
+                page = Figure(figsize=size, dpi=dpi)
+                pg.draw(page, rect, cmap)
+                if decorate:
+                    page.text(0.03, 0.975, pg.title, fontsize=12,
+                              fontweight="bold", va="top")
+                out.append(consume(pg, page))
+        return out
+
+    def _report_image_pages(self, pdf):
+        """Camera sheets and SnapMap pages onto a PdfPages; returns how many."""
+        def consume(_pg, page):
+            pdf.savefig(page)
+            return 1
+        return len(self._render_image_pages(
+            self._image_page_plan(), consume, (11.7, 8.3),
+            (0.0, 0.03, 1.0, 0.93)))
+
+    def _deck_image_pages(self):
+        """The same pages as slide pictures: ``[{"title", "png", "notes"}]``,
+        three camera pictures to a slide."""
+        def consume(pg, page):
+            buf = io.BytesIO()
+            if pg.kind == "camera":            # photographs: JPEG is a tenth the size
+                page.savefig(buf, format="jpeg", dpi=150,
+                             pil_kwargs={"quality": 88})
+            else:
+                page.savefig(buf, format="png", dpi=150)
+            return {"title": pg.title, "png": buf.getvalue(),
+                    "notes": pg.notes()}
+        return self._render_image_pages(
+            self._image_page_plan(per_sheet=3, columns=3), consume,
+            pptx_export.FIGURE_SIZE, (0.0, 0.0, 1.0, 1.0), dpi=150,
+            decorate=False)
+
     def methods_generated(self):
         """The methods text written from the loaded files' metadata."""
         rows = [md for p in self.docs for md in p.metadata_rows()]
@@ -3146,7 +3206,8 @@ class Workspace:
         return report.build_report(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs, figures,
-            self._report_figure_pages, sections)
+            self._report_figure_pages, sections,
+            self._report_image_pages if self._has_image_pages() else None)
 
     def _report_ready(self):
         if not self.docs:
@@ -3342,7 +3403,8 @@ class Workspace:
         return pptx_export.build_deck(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs, figures,
-            self._deck_images, sections)
+            self._deck_images, sections,
+            self._deck_image_pages if self._has_image_pages() else None)
 
     def export_powerpoint(self):
         if not self._report_ready():
@@ -3372,11 +3434,13 @@ class Workspace:
             messagebox.showinfo("Saved",
                                 f"Presentation ({n} slides) saved to\n{path}")
 
-        workbook_ui.SectionsDialog(
-            self.root, self, "Export PowerPoint",
-            [("title", "Title and summary"), ("files", "Data files"),
-             ("metadata", "Acquisition metadata"),
-             ("figures", "Figures (one slide each)")], go)
+        choices = [("title", "Title and summary"), ("files", "Data files"),
+                   ("metadata", "Acquisition metadata")]
+        if self._has_image_pages():
+            choices.append(("images", "Camera pictures and SnapMaps"))
+        choices.append(("figures", "Figures (one slide each)"))
+        workbook_ui.SectionsDialog(self.root, self, "Export PowerPoint",
+                                   choices, go)
 
     def save_report(self):
         if not self._report_ready():
@@ -3408,13 +3472,14 @@ class Workspace:
             return
         pv = self.preview
         pv.clear_options()
-        self._rp_sections = {
-            "cover": tk.BooleanVar(value=True),
-            "metadata": tk.BooleanVar(value=True),
-            "figures": tk.BooleanVar(value=True)}
+        choices = [("cover", "Cover and notes"), ("metadata", "Metadata")]
+        if self._has_image_pages():
+            choices.append(("images", "Camera pictures and SnapMaps"))
+        choices.append(("figures", "Figures"))
+        self._rp_sections = {key: tk.BooleanVar(value=True)
+                             for key, _t in choices}
         ttk.Label(pv.options, text="Include").pack(side="left")
-        for key, text in (("cover", "Cover and notes"),
-                          ("metadata", "Metadata"), ("figures", "Figures")):
+        for key, text in choices:
             ttk.Checkbutton(pv.options, text=text, variable=self._rp_sections[
                 key], command=self._regen_report_preview).pack(
                 side="left", padx=(10, 0))

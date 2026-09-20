@@ -164,9 +164,12 @@ def _camera_views(docs, label_of, notes):
         return views, ids
     used, left_out = 0, 0
     for fi, p in enumerate(docs):
-        positions = p.sample_positions()
-        cubes = [(r, r.extra["cube"]) for r in p.regions
-                 if r.extra.get("cube") is not None]
+        positions = {label_of(p, k): xy
+                     for k, xy in p.sample_positions().items()}
+        sites = {}                                # one map per site
+        for r in p.regions:
+            if r.extra.get("cube") is not None:
+                sites.setdefault(label_of(p, r.sample), r.extra["cube"])
         for blob in p.images:
             if not snapshot.has_calibration(blob.calib):
                 continue
@@ -184,20 +187,11 @@ def _camera_views(docs, label_of, notes):
             used += len(jpeg)
             cal = blob.calib
             k = w / cal["width"]
-            pts = {label_of(p, s): [round(c * k, 1), round(r * k, 1)]
-                   for s, (c, r) in snapshot.markers(cal, positions).items()}
-            outlines, seen = [], set()
-            for r, cube in cubes:
-                if cube.stage_x_mm is None or r.sample in seen:
-                    continue                       # one outline per map site
-                seen.add(r.sample)
-                c, ry = snapshot.stage_to_pixel(cal, cube.stage_x_mm,
-                                                cube.stage_y_mm)
-                if 0 <= c <= cal["width"] and 0 <= ry <= cal["height"]:
-                    left, top, mw, mh = snapshot.map_rectangle(cal, cube)
-                    outlines.append({"sample": label_of(p, r.sample),
-                                     "rect": [round(v * k, 1) for v in
-                                              (left, top, mw, mh)]})
+            found, boxes = snapshot.view_of(cal, positions, sites)
+            pts = {n: [round(c * k, 1), round(r * k, 1)]
+                   for n, (c, r) in found.items()}
+            outlines = [{"sample": n, "rect": [round(v * k, 1) for v in box]}
+                        for n, box in boxes.items()]
             fov = snapshot.field_of_view_mm(cal)
             view = {"id": f"c{len(views)}", "name": blob.name,
                     "sample": label_of(p, blob.sample) if blob.sample else "",
