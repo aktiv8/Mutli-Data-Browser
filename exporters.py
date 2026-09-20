@@ -29,7 +29,7 @@ def fit_columns(r, pre=""):
         return []
     try:
         cvs = casafit.curves(fit, r.energy, r.counts, r.photon_energy,
-                             r.dwell, r.extra.get("n_scans", 1))
+                             *r.dwell_and_scans())
     except ImportError:
         return []
     cols = []
@@ -134,7 +134,8 @@ def export_vamas(regions, path, institution="Not specified",
         power = ""
         if r.conditions.get("X-ray Power"):
             power = r.conditions["X-ray Power"].replace("W", "").strip()
-        dwell = f"{r.dwell:.6g}" if r.dwell else SENT
+        per_sweep, n_scans = r.dwell_and_scans()   # VAMAS: time per scan
+        dwell = f"{per_sweep:.6g}" if per_sweep else SENT
 
         a(r.name)                 # block identifier
         a(r.sample or sample_id)  # sample identifier
@@ -195,7 +196,7 @@ def export_vamas(regions, path, institution="Not specified",
             a("Transmission"); a("d")   # corresponding var 2
         a("pulse counting")       # signal mode
         a(dwell)                  # signal collection time (s)
-        a(str(int(r.extra.get("n_scans") or 1)))   # number of scans
+        a(str(n_scans))           # number of scans
         a("0")                    # signal time correction
         a(SENT)                   # sample normal polar angle of tilt
         a(SENT)                   # sample normal tilt azimuth

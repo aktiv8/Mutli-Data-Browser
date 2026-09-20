@@ -144,6 +144,16 @@ class Region:
     def n_points(self) -> int:
         return len(self.counts) if self.counts else 0
 
+    def dwell_and_scans(self):
+        """(dwell per sweep, sweeps), so that their product is the time each
+        point was counted for. Kratos ESCApe stores the dwell already summed
+        over the sweeps (``extra["dwell_total"]``); VAMAS, CasaXPS and the
+        curve scaling want it per sweep."""
+        scans = int(self.extra.get("n_scans") or 1)
+        if self.dwell and self.extra.get("dwell_total"):
+            return self.dwell / scans, scans
+        return self.dwell, scans
+
     @property
     def kinetic_energy(self):
         """Kinetic-energy axis (eV), or None if not decoded."""

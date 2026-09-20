@@ -15,6 +15,7 @@ import re
 import casafit
 import vamasmeta
 import sputter
+import timing
 from .base import (Region, SpectrumFile, clean, clean_text, canon_region_name,
                    guess_region_name, unset, kv_from_lines,
                    read_bytes, analyser_mode_name)
@@ -468,6 +469,13 @@ class VamasFile(SpectrumFile):
         self._own_calibration(r, b["comments"])
         r.lens_mode = self._lookup("Lens mode", kv)
         r.aperture = self._lookup("Aperture", kv)
+        if "escape .experiment" in kv.get("vendor format", "").lower():
+            # HarwellXPS's import of a Kratos file: it copies ESCApe's dwell,
+            # which is already summed over the sweeps, beside the sweep count
+            # (whole minutes in every region of the file it was checked on)
+            r.extra["dwell_total"] = True
+            if timing.parse_ts(kv.get("acquired")):
+                r.extra["t_start"] = kv["acquired"]
         casa = casa_block_facts(b["comments"])
         r.lens_mode = r.lens_mode or casa.get("lens", "")
         if casa.get("spot"):

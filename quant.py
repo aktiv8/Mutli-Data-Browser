@@ -63,11 +63,11 @@ def fit_rows(r, curves=False):
     except ImportError:
         return []
     hv = float(r.photon_energy)
-    scans = r.extra.get("n_scans", 1) or 1
-    cvs = casafit.curves(fit, r.energy, r.counts, hv, r.dwell, scans)
+    dwell, scans = r.dwell_and_scans()
+    cvs = casafit.curves(fit, r.energy, r.counts, hv, dwell, scans)
     if not cvs:
         return []
-    k = (r.dwell * scans) if r.dwell else 1.0
+    k = (dwell * scans) if dwell else 1.0
     ke = hv - np.asarray(r.energy, dtype=float)
     counts = np.asarray(r.counts, dtype=float)
     tf = r.transmission()

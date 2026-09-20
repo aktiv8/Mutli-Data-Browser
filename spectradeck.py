@@ -2702,7 +2702,7 @@ class Workspace:
         r = disp[0]
         try:
             cvs = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
-                                 r.dwell, r.extra.get("n_scans", 1))
+                                 *r.dwell_and_scans())
         except ImportError:
             return None
         if not cvs:

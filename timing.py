@@ -7,6 +7,11 @@ does not hold is left out (``None``) rather than guessed.
 * *counting time* of a region = dwell × points × scans for a scan; for a
   snapshot the energy channels are recorded in parallel, so it is
   dwell × scans. It needs the number of scans, and is ``None`` without it.
+  Kratos ESCApe stores the dwell already summed over the sweeps (``dwell_total``
+  in ``Region.extra``): there it is dwell × points. (Checked on 372 regions of
+  four ``.experiment`` files: dwell × points is always a whole number of
+  seconds, the sweep-independent per-sweep dwell is constant, and the sum over
+  a group of regions fits inside the wall-clock time to the next group.)
 * a *run* is one acquisition window (start, end). A file that holds several
   points or depth levels records one window for the whole run, so time is
   worked out over the distinct windows, never per point.
@@ -70,10 +75,15 @@ def net_seconds(r):
     """Counting time of one region in seconds, or None when the file does not
     say how many scans were accumulated (or has no dwell)."""
     dwell = r.dwell
-    scans = r.extra.get("n_scans")
-    if not dwell or not scans:
+    if not dwell:
         return None
     dwell = float(f"{dwell:.6g}")      # a float32 dwell (0.05000000075) is 0.05
+    if r.extra.get("dwell_total"):     # already the time over every sweep
+        scans = 1
+    else:
+        scans = r.extra.get("n_scans")
+        if not scans:
+            return None
     if r.extra.get("acq_mode") in SNAPSHOT_MODES:
         points = 1
     else:
@@ -113,12 +123,20 @@ class Summary:
     net: float | None = None          # summed counting time
     n_without_net: int = 0            # regions whose counting time is unknown
     n_without_run: int = 0            # regions with no recorded start and end
-    start: _dt.datetime | None = None
-    end: _dt.datetime | None = None
+    start: _dt.datetime | None = None      # earliest recorded start
+    last_start: _dt.datetime | None = None  # latest recorded start
+    end: _dt.datetime | None = None        # latest recorded end (real ends only)
     tz: str = ""
     active: float | None = None       # union of the runs' windows
     runs: list = field(default_factory=list)      # distinct (start, end)
     notes: list = field(default_factory=list)
+
+    @property
+    def start_span(self):
+        """First start to last start: what starts-only files (Kratos) allow."""
+        if self.start is None or self.last_start is None:
+            return None
+        return (self.last_start - self.start).total_seconds()
 
     @property
     def span(self):
@@ -140,7 +158,7 @@ class Summary:
 def summarise(docs):
     """Timing of a set of loaded files (``Workspace.docs``, or one file)."""
     out = Summary()
-    runs, zones, nets = set(), set(), []
+    runs, starts, zones, nets = set(), set(), set(), []
     for doc in docs:
         for r in doc.regions:
             out.n_regions += 1
@@ -149,21 +167,29 @@ def summarise(docs):
                 out.n_without_net += 1
             else:
                 nets.append(n)
+            st = parse_ts(r.extra.get("t_start"))
+            if st is not None:
+                starts.add(st)
+                zones.add(r.extra.get("tz", ""))
             iv = interval(r)
             if iv is None:
                 out.n_without_run += 1
             else:
                 runs.add(iv)
-                zones.add(r.extra.get("tz", ""))
     out.net = sum(nets) if nets else None
     out.runs = sorted(runs)
-    if runs:
-        out.start = min(a for a, _b in runs)
-        out.end = max(b for _a, b in runs)
+    if starts:
+        out.start, out.last_start = min(starts), max(starts)
         out.tz = zones.pop() if len(zones) == 1 else ""
+    if runs:
+        out.end = max(b for _a, b in runs)
         out.active = union_seconds(runs)
-    if out.n_regions and not runs:
+    if out.n_regions and not starts:
         out.notes.append("Start and end times are not recorded in these files.")
+    elif out.n_regions and not runs:
+        out.notes.append("Only when each run started is recorded, not when it "
+                         "ended, so the time in use and the time not counting "
+                         "cannot be worked out.")
     elif out.n_without_run:
         out.notes.append(f"Start and end times are missing for "
                          f"{out.n_without_run} of {out.n_regions} regions.")
@@ -191,6 +217,10 @@ def describe(summary):
         rows.append(("First start", fmt_ts(summary.start, summary.tz)))
         rows.append(("Last finish", fmt_ts(summary.end, summary.tz)))
         rows.append(("First start to last finish", fmt_duration(summary.span)))
+    elif summary.start:
+        rows.append(("First start", fmt_ts(summary.start, summary.tz)))
+        if summary.last_start != summary.start:
+            rows.append(("Last start", fmt_ts(summary.last_start, summary.tz)))
     if summary.active is not None:
         rows.append(("Instrument in use", fmt_duration(summary.active)))
     if summary.net is not None:

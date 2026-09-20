@@ -142,6 +142,40 @@ class EscapeParser(SpectrumFile):
         return owners[-1][1] if owners else (self.samples[0][1]
                                              if self.samples else "Sample")
 
+    # A timestamp is six consecutive int32: year, month, day, hour, minute,
+    # second. One precedes each group of regions acquired together; verified
+    # against HarwellXPS's own export of the same file (144 of 144 regions)
+    # and, on four files, for the calendar day the file states.
+    _YEAR_RE = re.compile(rb"[\xd0-\xff]\x07\x00\x00|[\x00-\x33]\x08\x00\x00")
+
+    def _stamps(self):
+        """[(byte offset, 'YYYY-MM-DD HH:MM:SS')] of every timestamp record."""
+        if getattr(self, "_stamp_cache", None) is None:
+            out = []
+            raw = self.raw
+            for m in self._YEAR_RE.finditer(raw):
+                k = m.start()
+                if k + 24 > len(raw):
+                    continue
+                y, mo, d, h, mi, sec = struct.unpack_from("<6i", raw, k)
+                try:
+                    when = datetime.datetime(y, mo, d, h, mi, sec)
+                except ValueError:
+                    continue
+                out.append((k, when.strftime("%Y-%m-%d %H:%M:%S")))
+            self._stamp_cache = out
+        return self._stamp_cache
+
+    def _start_for(self, offset: int) -> str:
+        """Start of the group of regions the block at ``offset`` belongs to:
+        the last timestamp record before it ('' when there is none)."""
+        best = ""
+        for k, when in self._stamps():
+            if k > offset:
+                break
+            best = when
+        return best
+
     def _date_for(self, offset: int) -> str:
         dates = getattr(self, "dates", [])
         if not dates:
@@ -246,6 +280,9 @@ class EscapeParser(SpectrumFile):
         reg.pass_energy = self._pass_energy_for(off)
         reg.aperture, reg.lens_mode = self._settings_for(off)
         self._decode_spectrum(reg, off, end)
+        start = self._start_for(off)
+        if start:
+            reg.extra["t_start"] = start
         if reg.pass_energy is not None:
             reg.conditions.setdefault("Pass energy", f"{reg.pass_energy:g} eV")
         if reg.dwell is not None:
@@ -324,7 +361,7 @@ class EscapeParser(SpectrumFile):
             hv = d(ue)            # photon energy (e.g. 1486.69 eV, Al Ka)
             ke_a = d(ue + 8)      # kinetic-energy start
             ke_b = d(ue + 16)     # kinetic-energy end
-            dwell = d(ue + 24)    # dwell time per step (seconds)
+            dwell = d(ue + 24)    # dwell per step, summed over all the sweeps
             if not (50.0 < hv < 6000.0 and 0.0 <= ke_a < hv + 50
                     and 0.0 <= ke_b < hv + 50):
                 return False
@@ -366,6 +403,14 @@ class EscapeParser(SpectrumFile):
             reg.photon_energy = hv
             reg.anode = self._anode_from_hv(hv)
             reg.dwell = dwell if (dwell == dwell and 0 < dwell < 1e4) else None
+            if reg.dwell:
+                # a Kratos file keeps the dwell already multiplied by the number
+                # of sweeps: dwell x points is a whole number of seconds in all
+                # 372 regions of four files, while dwell / sweeps is constant
+                reg.extra["dwell_total"] = True
+            sweeps = i32(ue - 88)   # int32 = HarwellXPS's sweeps, 144 of 144
+            if 0 < sweeps <= 100000:
+                reg.extra["n_scans"] = sweeps
             reg.step = abs(step)
             reg.tf_ke = tf_ke
             reg.tf_values = tf_val
@@ -553,4 +598,4 @@ class EscapeParser(SpectrumFile):
 
 
     def date_for_region(self, r):
-        return self._date_for(r.offset)
+        return r.extra.get("t_start") or self._date_for(r.offset)

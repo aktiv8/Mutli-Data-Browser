@@ -10,6 +10,7 @@ Run:  python -m unittest discover tests
 
 import datetime as dt
 import os
+import struct
 import sys
 import tempfile
 import unittest
@@ -367,6 +368,146 @@ class TestOtherFormats(Tmp):
         p.raw, p.strings = b"..MI-XPS-12 AxisChargeNeutraliser..", []
         p._parse_instrument()
         self.assertEqual(p.instrument["Acquisition software"], "Kratos ESCApe")
+
+
+def escape_block(sweeps, dwell, n=5):
+    """The bytes of one Kratos spectrum block the reader decodes: the sweep
+    count 88 bytes before the end of the "Uninitialized" tag, then hv, the
+    kinetic-energy range and the dwell, a transmission table (empty) and the
+    ordinates."""
+    tag = b"Uninitialized"
+    head = struct.pack("<i", sweeps) + b"\x00" * (88 - len(tag) - 4) + tag
+    body = struct.pack("<4d", 1486.69, 200.0, 220.0, dwell)
+    tf = b"TransFunc.Core.VisionTf" + b"\x00" * 4 + struct.pack("<i", 0)
+    return (head + body + tf + struct.pack("<i", n)
+            + struct.pack(f"<{n}d", *range(1, n + 1)))
+
+
+class TestKratosExperiment(unittest.TestCase):
+    """The reader of Kratos .experiment files (validated on four real files
+    and against HarwellXPS's export of one: sweeps and start times equal in
+    144 of 144 regions)."""
+
+    def parser(self, raw):
+        from readers.kratos_experiment import EscapeParser
+        p = EscapeParser()
+        p.raw = raw
+        return p
+
+    def test_sweeps_and_a_total_dwell_are_read_from_the_block(self):
+        from readers.kratos_experiment import EscapeParser  # noqa: F401
+        raw = escape_block(sweeps=8, dwell=0.6, n=800)
+        p = self.parser(raw)
+        r = Region(name="O KLL", index=0, offset=0)
+        self.assertTrue(p._decode_structured(r, 0, len(raw)))
+        self.assertEqual(r.extra["n_scans"], 8)
+        self.assertTrue(r.extra["dwell_total"])
+        # 0.6 s x 800 points is the whole 8 minutes: the dwell is not per sweep
+        self.assertAlmostEqual(timing.net_seconds(r), 480.0)
+        per_sweep, scans = r.dwell_and_scans()
+        self.assertAlmostEqual(per_sweep * scans * r.n_points, 480.0)
+        self.assertAlmostEqual(per_sweep, 0.075)
+
+    def test_an_absurd_sweep_count_is_not_believed(self):
+        raw = escape_block(sweeps=-3, dwell=0.6)
+        r = Region(name="x", index=0, offset=0)
+        self.parser(raw)._decode_structured(r, 0, len(raw))
+        self.assertNotIn("n_scans", r.extra)
+
+    def test_a_region_takes_the_start_of_its_group(self):
+        def stamp(y, mo, d, h, mi, s):
+            return struct.pack("<6i", y, mo, d, h, mi, s)
+        raw = (b"\x00" * 10 + stamp(2026, 9, 12, 9, 46, 19) + b"\x01" * 40
+               + stamp(2026, 9, 12, 9, 48, 53) + b"\x02" * 40)
+        p = self.parser(raw)
+        self.assertEqual([w for _k, w in p._stamps()],
+                         ["2026-09-12 09:46:19", "2026-09-12 09:48:53"])
+        self.assertEqual(p._start_for(30), "2026-09-12 09:46:19")
+        self.assertEqual(p._start_for(len(raw)), "2026-09-12 09:48:53")
+        self.assertEqual(p._start_for(5), "")          # before any record
+
+    def test_a_year_like_number_that_is_not_a_date_is_ignored(self):
+        junk = struct.pack("<6i", 2026, 13, 40, 25, 61, 99)   # not a date
+        self.assertEqual(self.parser(b"\x00" * 8 + junk)._stamps(), [])
+
+    def test_the_date_shown_carries_the_time_when_it_is_known(self):
+        p = self.parser(b"")
+        r = Region(name="x", index=0, offset=0)
+        r.extra["t_start"] = "2026-09-12 09:48:53"
+        self.assertEqual(p.date_for_region(r), "2026-09-12 09:48:53")
+
+    def test_only_starts_are_recorded_so_no_overhead_is_claimed(self):
+        a = region(dwell=0.6, points=800, scans=8, mode="",
+                   start="2026-09-12 09:48:53", tz="")
+        a.extra["dwell_total"] = True
+        b = region(dwell=0.6, points=800, scans=8, mode="",
+                   start="2026-09-13 16:41:00", tz="")
+        b.extra["dwell_total"] = True
+        s = timing.summarise([doc(a, b)])
+        self.assertEqual(s.net, 960.0)
+        self.assertEqual(s.start, dt.datetime(2026, 9, 12, 9, 48, 53))
+        self.assertEqual(s.last_start, dt.datetime(2026, 9, 13, 16, 41, 0))
+        self.assertIsNone(s.end)
+        self.assertIsNone(s.active)
+        self.assertIsNone(s.overhead)
+        self.assertTrue(any("started" in n for n in s.notes))
+        rows = dict(timing.describe(s))
+        self.assertEqual(list(rows), ["First start", "Last start",
+                                      "Counting time"])
+        self.assertNotIn("Last finish", rows)
+
+    def test_a_total_dwell_needs_no_scan_count(self):
+        r = region(dwell=0.6, points=800, scans=None, mode="")
+        r.extra["dwell_total"] = True
+        self.assertAlmostEqual(timing.net_seconds(r), 480.0)
+
+
+class TestHarwellVamasOfAKratosFile(Tmp):
+    """HarwellXPS writes a Kratos file's summed dwell next to the sweeps."""
+
+    def test_the_comment_marks_the_dwell_as_a_total(self):
+        r = region(dwell=0.6, points=21, scans=8, mode="")
+        r.energy = [280.0 + 0.5 * i for i in range(21)]
+        r.photon_energy, r.pass_energy, r.step = 1486.69, 40.0, 0.5
+        p = os.path.join(self.dir.name, "k.vms")
+        export_vamas([r], p, include_transmission=False)
+        with open(p, encoding="latin-1", newline="") as fh:
+            lines = fh.read().splitlines()
+        i = lines.index("XPS")               # technique: after the comment
+        self.assertEqual(lines[i - 1], "0")  # an empty comment block
+        lines[i - 1:i] = ["2", "Vendor format : Kratos ESCApe .experiment",
+                          "Acquired : 2026-09-12 09:48:53"]
+        q = os.path.join(self.dir.name, "harwell.vms")
+        with open(q, "w", encoding="latin-1", newline="\r\n") as fh:
+            fh.write("\n".join(lines) + "\n")
+        back = load_file(q).regions[0]
+        self.assertTrue(back.extra.get("dwell_total"))
+        self.assertEqual(back.extra["t_start"], "2026-09-12 09:48:53")
+
+
+class TestExportKeepsTheTotal(Tmp):
+    def test_a_total_dwell_is_written_per_sweep(self):
+        r = region(dwell=0.6, points=21, scans=8, mode="")
+        r.energy = [280.0 + 0.5 * i for i in range(21)]
+        r.photon_energy, r.pass_energy, r.step = 1486.69, 40.0, 0.5
+        r.extra["dwell_total"] = True
+        p = os.path.join(self.dir.name, "t.vms")
+        export_vamas([r], p, include_transmission=False)
+        back = load_file(p).regions[0]
+        self.assertAlmostEqual(back.dwell, 0.075)         # per sweep, as VAMAS
+        self.assertEqual(back.extra["n_scans"], 8)
+        self.assertNotIn("dwell_total", back.extra)
+        self.assertAlmostEqual(timing.net_seconds(back),
+                               timing.net_seconds(r))     # same 12.6 s
+
+    def test_a_per_sweep_dwell_is_written_as_it_is(self):
+        r = region(dwell=0.05, points=21, scans=10, mode="")
+        r.energy = [280.0 + 0.5 * i for i in range(21)]
+        r.photon_energy, r.pass_energy, r.step = 1486.68, 50.0, 0.5
+        self.assertEqual(r.dwell_and_scans(), (0.05, 10))
+        p = os.path.join(self.dir.name, "s.vms")
+        export_vamas([r], p, include_transmission=False)
+        self.assertAlmostEqual(load_file(p).regions[0].dwell, 0.05)
 
 
 class TestMethodsText(unittest.TestCase):
