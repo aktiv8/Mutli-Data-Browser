@@ -35,8 +35,12 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `snapshot.py` | camera-image geometry: stage position ↔ picture pixel |
 | `exporters.py` | CSV, VAMAS and metadata (CSV/PDF) writers |
 | `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
-| `report.py` | the experiment report PDF |
-| `pptx_export.py` | the PowerPoint export (python-pptx) |
+| `report.py`, `pdfstyle.py` | the experiment report PDF (contents, bookmarks, section footer) and its typeface and colours |
+| `pptx_export.py` | the PowerPoint export (python-pptx): contents, dividers, quantification, figures |
+| `reportspec.py`, `reportgen_ui.py` | what a report contains and in what order (one choice for the PDF, the slides and the hand-over), and the Report generator dialog |
+| `covers.py`, `assets/covers/` | the cover pictures of the report and the slides |
+| `quant.py`, `resultspages.py` | atomic percent from CasaXPS fits, and its tables and depth-profile charts for the report and the slides |
+| `timing.py` | how long an analysis took (counting time, span, overhead) |
 | `imagepages.py` | camera-picture sheets and SnapMap pages, drawn once for the PDF report and the slides |
 | `methods.py` | the methods text, written from what the files record |
 | `handover.py` | the hand-over ZIP (report, spectra, figures, metadata, README, checksums) |
@@ -286,22 +290,43 @@ exactly; otherwise (irregular etch times, per-level timestamps) a compact
 "per-level details" table lists every level. The metadata CSV still has one
 row per region and level.
 
-**Experiment report** (Workbook menu → *preview…* / *save PDF…*) builds a PDF
-you can hand to a customer as a report or appendix: a cover page (logo, title,
-details, your summary, the list of data files with hashes), the tidied
-metadata of every file, the **camera pictures and SnapMaps** (Avantage; see
-below) and one page set per saved figure (drawn on white with its caption).
-Tick the sections to include in the preview bar. With no saved
-figures the current view is used. It needs `reportlab` and `pymupdf`.
+**Report generator** (Workbook menu → *Report generator…*, or Report ▸ Generator
+on the ribbon) is where you say what a report contains. Tick the sections and
+put them in the order you want; the same choice is used for the **PDF report**
+(*Save PDF…*), the **PowerPoint deck** (*Export PowerPoint…*), the previews and
+the report inside the hand-over package, is remembered, and is saved with the
+workbook. Sections, in the default results-first order:
 
-**Export PowerPoint…** (Workbook menu) writes a 16:9 `.pptx` from the same
-material: a title slide (logo, customer, reference, operator, date), summary,
-data files, the metadata as native tables, the camera pictures and SnapMaps, and
-one slide per saved figure — a
-high-resolution picture with an editable caption and speaker notes describing
-the look and the spectra shown. Choose the sections to include in the dialog.
-It needs `python-pptx` (installed by the launcher). Slides are built with
-plain PowerPoint text and tables, so you can restyle them freely.
+* **Cover page** — logo, title, customer, reference, operator and date, under a
+  **cover picture** you choose on the *Cover* tab: five designs drawn from one
+  accent colour (spectrum ribbon, band, minimal, your own data, peak map), a
+  picture of your own (or one you drop in `assets/covers/`), or none, in one of
+  six accent colours or your own. Presets never change the cover.
+* **Contents** — the sections and their pages (slides), with the real numbers;
+  the PDF also gets bookmarks. Slides get divider slides before long sections
+  (*Options* tab), and every slide is numbered "n of N".
+* **Summary**, then **Quantification** — atomic percent from CasaXPS areas and
+  sensitivity factors: a table per sample (with chemical states) or, for a depth
+  profile, a chart and a table by level. A region fitted in more than one
+  spectrum is counted once (the dedicated scan, not the survey), an element
+  counted from two lines is flagged, and no transmission correction is applied;
+  the pages say so. Each sample can be ticked separately.
+* **Figures** — one page set per saved figure (drawn on white with its caption);
+  with none saved the current view is used.
+* **Camera pictures and SnapMaps** — see below; each picture and map site can be
+  ticked separately.
+* **Methods**, **Energy calibration**, **Acquisition metadata** (the tidied
+  metadata of every file) and **Data files** (with checksums; the *Options* tab
+  can leave them out) — the audit trail, last.
+
+Built-in presets (*Everything*, *Customer report*, *Quick look*, *Audit trail*)
+and your own saved ones fill the ticks in one go. Sections with many items
+(figures, pictures, files, samples) open with a double-click, and **All / None**
+ticks the items of the selected section. The PDF needs `reportlab` and `pymupdf`,
+the deck `python-pptx` (installed by the launcher); slides use plain PowerPoint
+text and tables, so you can restyle them freely.
+
+A figure slide is a high-resolution picture with an editable caption and speaker notes describing the look and the spectra shown.
 
 **Camera pictures and SnapMaps in the report and slides.** When the loaded
 files have them (an Avantage experiment), the report gets pages after the
@@ -320,8 +345,7 @@ metadata and the deck gets slides before the figures:
 Names, notes and energy shifts you set are applied. Camera slides are JPEG (the
 deck stays a few MB); the report keeps the pictures at 640 px wide. The
 hand-over ZIP's report includes these pages too. They need matplotlib and
-Pillow; pictures are not repeated per figure, and there is no per-picture
-selection yet.
+Pillow; pictures are not repeated per figure, and each picture or map site can be ticked separately in the Report generator.
 
 **Methods text.** *Workbook → Details…* has a **Methods** box holding a
 paragraph written from what your files actually record: instrument and
@@ -548,6 +572,22 @@ dialog then offers **region-type checkboxes** and **level selection** (*All*,
 Level 0 is the surface at t = 0, then the cumulative sputter time; etch level
 and etch time appear in the metadata CSV/PDF and the Details panel, and are
 written into each VAMAS block as comment lines.
+
+## Not there yet
+
+Ideas that are planned or open, so you know what to expect (the developer notes
+in `CLAUDE.md` have the detail):
+
+* a **quantification view in the app itself** (the report, the slides and the
+  data browser have one), and choosing **which regions count** in the report's
+  quantification (today only whole samples can be left out);
+* **stitching neighbouring camera pictures** into one mosaic, and other ways of
+  pairing or arranging pictures in the report;
+* section **divider pages** in the PDF (the slides have them) and clickable
+  entries in the slides' contents;
+* opening a saved workbook **without re-reading** the original files, and
+  importing / exporting the XPSView `.xpsv` package;
+* a command-line **batch mode** (left out on purpose for now).
 
 ## Notes
 
