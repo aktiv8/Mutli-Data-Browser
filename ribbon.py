@@ -78,6 +78,9 @@ PAGES = {
          False),
         ("Figures", "figures", "edit_figures",
          "Save the current look as a figure for the report.", True),
+        ("Generator", "report", "report_generator",
+         "Choose what goes in the report, and in what order, then make the "
+         "PDF or the slides.", True),
         ("|",),
         ("v", "Report PDF", "report", [
             ("Preview…", "preview_report"),

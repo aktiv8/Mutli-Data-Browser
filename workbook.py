@@ -14,6 +14,8 @@ files is JSON: opening a workbook never executes anything from it.
     metadata.json   read-only snapshot of the acquisition metadata
     annotations.json  renames, notes, edited metadata, BE shifts, markers
     holder.json     holder-photo calibration (stage mm -> photo pixels)
+    report.json     optional: what the report contains and in what order
+                    (see reportspec); a build that does not know it ignores it
     cache/spectra.json.gz   optional: the parsed spectra, fits and curves as of
                             the save (the HTML browser's data), with the hash
                             of every source file it was made from
@@ -89,6 +91,7 @@ class Workbook:
     metadata: dict = field(default_factory=dict)
     annotations: dict = field(default_factory=dict)  # annotations.to_json()
     holder: dict = field(default_factory=dict)      # {"calibration": {...}}
+    report: dict = field(default_factory=dict)      # reportspec spec ({} = none)
     cache: dict | None = None    # results to store (write only): see encode_cache
     created: str = ""
     modified: str = ""
@@ -352,6 +355,8 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> list:
             put_json("metadata.json", wb.metadata)
             put_json("annotations.json", wb.annotations)
             put_json("holder.json", wb.holder)
+            if wb.report:                 # optional: older builds ignore it
+                put_json("report.json", wb.report)
             for f, entry in zip(wb.files, manifest["files"]):
                 if f.members:
                     for (src, _rel), m in zip(f.members, entry["members"]):
@@ -434,6 +439,8 @@ def load(path, extract_dir) -> Workbook:
         wb.annotations = ann if isinstance(ann, dict) else {}
         hold = _read_json(zf, "holder.json", {})
         wb.holder = hold if isinstance(hold, dict) else {}
+        rep = _read_json(zf, "report.json", {})
+        wb.report = rep if isinstance(rep, dict) else {}
 
         os.makedirs(extract_dir, exist_ok=True)
         for entry in manifest.get("files", []):

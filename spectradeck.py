@@ -103,6 +103,8 @@ import imagepages
 import snapshot
 import xpslines
 import report
+import reportspec
+import reportgen_ui
 import pptx_export
 import importplan
 import workbook_ui
@@ -490,6 +492,13 @@ class Workspace:
         self.plot_style = plotstyle.sanitise(self.cfg.get("plot_style"))
         self.plot_presets = plotstyle.clean_presets(
             self.cfg.get("plot_presets"))
+        # what the reports contain (PDF, slides and hand-over share it): the
+        # last choice, replaced by a workbook's own when one is opened
+        self.report_spec = reportspec.sanitise(self.cfg.get("report_last"))
+        self.report_presets = reportspec.clean_presets(
+            self.cfg.get("report_presets"))
+        self.report_dlg = None
+        self._rp_vars = {}
         ax_choice = self.cfg.get("axis_colour", "Theme default")
         self.axis_choice = (ax_choice if ax_choice in themes.AXIS_CHOICES
                             else "Theme default")
@@ -631,6 +640,8 @@ class Workspace:
         wbm.add_command(label="Details and notes…", command=self.edit_details)
         wbm.add_command(label="Figures…", command=self.edit_figures)
         wbm.add_separator()
+        wbm.add_command(label="Report generator…",
+                        command=self.report_generator)
         wbm.add_command(label="Experiment report — preview…",
                         command=self.preview_report)
         wbm.add_command(label="Experiment report — save PDF…",
@@ -947,6 +958,8 @@ class Workspace:
         cfg["traces_per_panel"] = self.traces_var.get()
         cfg["plot_style"] = plotstyle.changed(self.plot_style)
         cfg["plot_presets"] = dict(self.plot_presets)
+        cfg["report_last"] = self.report_spec
+        cfg["report_presets"] = dict(self.report_presets)
         save_config(cfg)
         self.root.quit()
 
@@ -3049,7 +3062,8 @@ class Workspace:
                        for p in self.docs)
         return json.dumps({"d": self.details, "l": self.logo,
                            "f": self.figures, "s": st, "files": files,
-                           "a": self.ann.to_json(), "c": self.calib},
+                           "a": self.ann.to_json(), "c": self.calib,
+                           "r": self.report_spec},
                           sort_keys=True, default=str)
 
     def _wb_dirty(self):
@@ -3090,6 +3104,7 @@ class Workspace:
     def _reset_workbook(self):
         self.details = {k: "" for k in wbk.DETAIL_FIELDS}
         self.logo, self.figures = "", []
+        self.report_spec = reportspec.sanitise(self.cfg.get("report_last"))
         self.wb_path, self.wb_extra, self.wb_created = None, {}, ""
         self._fid_used = set()
         self.ann = annotations.Annotations()
@@ -3158,6 +3173,7 @@ class Workspace:
             logo=self.logo, metadata=self._metadata_snapshot(),
             annotations=self.ann.to_json(),
             holder={"calibration": self.calib} if self.calib else {},
+            report=copy.deepcopy(self.report_spec),
             created=self.wb_created, extra=dict(self.wb_extra),
             cache=self._results_cache())
         return book, preview, total
@@ -3233,6 +3249,8 @@ class Workspace:
                                        origin=f.original_path)
         self.details, self.logo = book.details, book.logo
         self.figures = book.figures
+        if book.report:
+            self.report_spec = reportspec.sanitise(book.report)
         self.wb_path, self.wb_extra = path, book.extra
         self.wb_created = book.created
         self._ann_changed()
@@ -3405,17 +3423,68 @@ class Workspace:
         return dict(self.details, calibration=self.calibration_statement(),
                     methods=self.methods_text())
 
-    def _build_report(self, path, sections):
-        figures = self.figures or ([{
+    def _report_figures(self):
+        """The saved figures, or the current view when there are none."""
+        return self.figures or ([{
             "name": "Current view", "caption": "",
             "state": self.capture_state()}] if self._groups() else [])
+
+    def _spec_for_output(self, spec=None):
+        """``spec`` (default: the app's choice), less what this install cannot
+        draw."""
+        spec = reportspec.sanitise(self.report_spec if spec is None else spec)
         if not HAVE_MPL:
-            sections = tuple(s for s in sections if s != "figures")
+            spec = reportspec.with_on(spec, "figures", False)
+        return spec
+
+    def report_inventory(self):
+        """What the loaded data can put in a report (sections with content,
+        figures, files): the Report generator's list."""
+        d = self._report_details()
+        return reportspec.inventory(
+            d, d.get("methods", ""), d.get("calibration", ""),
+            self._report_file_rows(), self.docs, self._report_figures(),
+            self._has_image_pages(), HAVE_MPL)
+
+    def set_report_spec(self, spec):
+        """Remember what the reports contain (config, workbook, the preview's
+        ticks)."""
+        new = reportspec.sanitise(spec)
+        if new == self.report_spec:
+            return
+        self.report_spec = new
+        self.cfg["report_last"] = new
+        for sid, var in list(self._rp_vars.items()):
+            try:
+                var.set(reportspec.is_on(new, sid))
+            except tk.TclError:
+                self._rp_vars.pop(sid, None)
+
+    def set_report_presets(self, presets):
+        self.report_presets = reportspec.clean_presets(presets)
+        self.cfg["report_presets"] = dict(self.report_presets)
+
+    def report_generator(self):
+        """Open the Report generator (one window at a time)."""
+        if not self._report_ready():
+            return
+        dlg = self.report_dlg
+        if dlg is not None:
+            try:
+                dlg.lift()
+                return
+            except tk.TclError:
+                self.report_dlg = None
+        self.report_dlg = reportgen_ui.ReportGeneratorDialog(self.root, self)
+
+    def _build_report(self, path, spec=None):
         return report.build_report(
             path, self._report_details(),
-            self.logo, self._report_file_rows(), self.docs, figures,
-            self._report_figure_pages, sections,
-            self._report_image_pages if self._has_image_pages() else None)
+            self.logo, self._report_file_rows(), self.docs,
+            self._report_figures(), self._report_figure_pages,
+            spec=self._spec_for_output(spec),
+            render_images=(self._report_image_pages
+                           if self._has_image_pages() else None))
 
     def _report_ready(self):
         if not self.docs:
@@ -3533,7 +3602,7 @@ class Workspace:
             else:
                 tmp = self._pdf_tmp("handover_report.pdf")
                 try:
-                    self._build_report(tmp, report.SECTIONS)
+                    self._build_report(tmp)
                     with open(tmp, "rb") as fh:
                         parts.append(handover.Part(
                             "report.pdf", "the experiment report",
@@ -3552,9 +3621,7 @@ class Workspace:
         if "metadata" in sections:
             parts += handover.metadata_parts(self.docs)
         if "figures" in sections and HAVE_MPL:
-            figs = self.figures or ([{
-                "name": "Current view", "caption": "",
-                "state": self.capture_state()}] if self._groups() else [])
+            figs = self._report_figures()
             pages = [self._figure_pngs(f) for f in figs]
             parts += handover.figure_parts(figs, pages)
         if "browser" in sections:
@@ -3638,70 +3705,61 @@ class Workspace:
             fig, consume, size=pptx_export.FIGURE_SIZE, rect=None,
             decorate=False, number=number)
 
-    def _build_deck(self, path, sections):
-        figures = self.figures or ([{
-            "name": "Current view", "caption": "",
-            "state": self.capture_state()}] if self._groups() else [])
-        if not HAVE_MPL:
-            sections = tuple(s for s in sections if s != "figures")
+    def _build_deck(self, path, spec=None):
         return pptx_export.build_deck(
             path, self._report_details(),
-            self.logo, self._report_file_rows(), self.docs, figures,
-            self._deck_images, sections,
-            self._deck_image_pages if self._has_image_pages() else None)
+            self.logo, self._report_file_rows(), self.docs,
+            self._report_figures(), self._deck_images,
+            image_pages=(self._deck_image_pages
+                         if self._has_image_pages() else None),
+            spec=self._spec_for_output(spec))
 
     def export_powerpoint(self):
-        if not self._report_ready():
-            return
-
-        def go(sections):
-            stem = re.sub(r"[^\w.\- ]+", "_", self.details.get("title")
-                          or "experiment").strip()
-            path = filedialog.asksaveasfilename(
-                title="Export PowerPoint", defaultextension=".pptx",
-                initialfile=(stem or "experiment") + ".pptx",
-                filetypes=[("PowerPoint presentation", "*.pptx")])
-            if not path:
-                return
-            self.root.config(cursor="watch")
-            self.root.update_idletasks()
-            try:
-                n = self._build_deck(path, sections)
-            except pptx_export.PptxError as exc:
-                messagebox.showerror("PowerPoint", str(exc))
-                return
-            except Exception as exc:
-                messagebox.showerror("PowerPoint export failed", str(exc))
-                return
-            finally:
-                self.root.config(cursor="")
-            messagebox.showinfo("Saved",
-                                f"Presentation ({n} slides) saved to\n{path}")
-
-        choices = [("title", "Title and summary"), ("files", "Data files"),
-                   ("metadata", "Acquisition metadata")]
-        if self._has_image_pages():
-            choices.append(("images", "Camera pictures and SnapMaps"))
-        choices.append(("figures", "Figures (one slide each)"))
-        workbook_ui.SectionsDialog(self.root, self, "Export PowerPoint",
-                                   choices, go)
+        self.generate_report("pptx")
 
     def save_report(self):
+        self.generate_report("pdf")
+
+    def generate_report(self, kind="pdf"):
+        """Write the PDF report, the PowerPoint deck or both, with what the
+        Report generator says goes in (``kind``: "pdf", "pptx" or "both")."""
         if not self._report_ready():
             return
-        stem = re.sub(r"[^\w.\- ]+", "_",
-                      self.details.get("title") or "experiment report").strip()
-        path = filedialog.asksaveasfilename(
-            title="Save experiment report", defaultextension=".pdf",
-            initialfile=(stem or "experiment report") + ".pdf",
-            filetypes=[("PDF", "*.pdf")])
+        spec = self._spec_for_output()
+        inv = self.report_inventory()
+        if not reportspec.active(spec, inv.present_ids()):
+            messagebox.showinfo(
+                "Report", "Nothing selected has any content. Tick a section "
+                "in the Report generator (Workbook ▸ Report generator…).")
+            return
+        stem = re.sub(r"[^\w.\- ]+", "_", self.details.get("title")
+                      or "experiment report").strip() or "experiment report"
+        if kind == "pptx":
+            path = filedialog.asksaveasfilename(
+                title="Export PowerPoint", defaultextension=".pptx",
+                initialfile=stem + ".pptx",
+                filetypes=[("PowerPoint presentation", "*.pptx")])
+        else:
+            path = filedialog.asksaveasfilename(
+                title=("Save the report (the deck is saved beside it)"
+                       if kind == "both" else "Save experiment report"),
+                defaultextension=".pdf", initialfile=stem + ".pdf",
+                filetypes=[("PDF", "*.pdf")])
         if not path:
             return
+        saved = []
         self.root.config(cursor="watch")
         self.root.update_idletasks()
         try:
-            n = self._build_report(path, report.SECTIONS)
-        except report.ReportError as exc:
+            if kind in ("pdf", "both"):
+                n = self._build_report(path, spec)
+                saved.append((path, f"Report ({n} pages)"))
+            if kind in ("pptx", "both"):
+                deck = path if kind == "pptx" else os.path.splitext(path)[0] \
+                    + ".pptx"
+                n = self._build_deck(deck, spec)
+                saved.append((deck, f"Presentation ({n} slides)"))
+        except (report.ReportError, pptx_export.PptxError) as exc:
             messagebox.showerror("Report", str(exc))
             return
         except Exception as exc:
@@ -3709,39 +3767,52 @@ class Workspace:
             return
         finally:
             self.root.config(cursor="")
-        messagebox.showinfo("Saved", f"Report ({n} pages) saved to\n{path}")
+        text = "\n".join(f"{what} saved to\n{where}" for where, what in saved)
+        text += "\n\nIncluded: " + reportspec.describe(spec, inv)
+        if messagebox.askyesno("Saved", text + "\n\nOpen it now?"):
+            open_external(saved[0][0])
 
     def preview_report(self):
         if not self._report_ready():
             return
         pv = self.preview
         pv.clear_options()
-        choices = [("cover", "Cover and notes"), ("metadata", "Metadata")]
-        if self._has_image_pages():
-            choices.append(("images", "Camera pictures and SnapMaps"))
-        choices.append(("figures", "Figures"))
-        self._rp_sections = {key: tk.BooleanVar(value=True)
-                             for key, _t in choices}
+        inv = self.report_inventory()
+        # the ticks are the app's report choice itself: what is ticked here is
+        # what Save PDF, Export PowerPoint and the hand-over then use
+        self._rp_vars = {}
         ttk.Label(pv.options, text="Include").pack(side="left")
-        for key, text in choices:
-            ttk.Checkbutton(pv.options, text=text, variable=self._rp_sections[
-                key], command=self._regen_report_preview).pack(
-                side="left", padx=(10, 0))
+        for sid in reportspec.order(self.report_spec):
+            if not inv.present.get(sid, False):
+                continue
+            var = tk.BooleanVar(value=reportspec.is_on(self.report_spec, sid))
+            self._rp_vars[sid] = var
+            ttk.Checkbutton(
+                pv.options, text=reportspec.SHORT[sid], variable=var,
+                command=lambda s=sid, v=var: self._preview_toggle(s, v)
+            ).pack(side="left", padx=(8, 0))
+        ttk.Button(pv.options, text="Report generator…",
+                   command=self.report_generator).pack(side="right")
         self.themes.recolor_tk(pv)
         if not self._regen_report_preview():
             return
         self._show_preview()
 
+    def _preview_toggle(self, sid, var):
+        self.set_report_spec(reportspec.with_on(self.report_spec, sid,
+                                                var.get()))
+        self._regen_report_preview()
+
     def _regen_report_preview(self):
-        chosen = tuple(k for k, v in self._rp_sections.items() if v.get())
-        if not chosen:
+        inv = self.report_inventory()
+        if not reportspec.active(self.report_spec, inv.present_ids()):
             messagebox.showinfo("Report", "Choose at least one section.")
             return False
         path = self._pdf_tmp("report.pdf")
         self.root.config(cursor="watch")
         self.root.update_idletasks()
         try:
-            self._build_report(path, chosen)
+            self._build_report(path)
         except report.ReportError as exc:
             messagebox.showerror("Report", str(exc))
             return False

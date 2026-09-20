@@ -17,6 +17,7 @@ import os
 import appinfo
 import metasummary
 import panelview
+import reportspec
 
 SECTIONS = ("title", "files", "metadata", "images", "figures")
 
@@ -312,36 +313,36 @@ def _title_slide(deck, details, logo):
     return slide
 
 
-def _summary_slides(deck, details, n0):
+def _text_slides(deck, title, paras, n0, size=16):
+    """Slides of a heading and free text (paginated); ``paras`` is a list of
+    paragraphs."""
     n = n0
-    paras = paragraphs(details.get("summary"))
-    methods = paragraphs(details.get("methods"))
-    cal = (details.get("calibration") or "").strip()
-    if cal and cal not in (details.get("methods") or ""):
-        paras.append("Energy calibration: " + cal)
-    for title, block in (("Summary", paras), ("Methods", methods)):
-        for i, page in enumerate(chunk_paragraphs(block)):
-            n += 1
-            slide = deck.content_slide(
-                title + (" (continued)" if i else ""), n)
-            deck.text(slide, MARGIN, 1.3, BODY_W, BOTTOM - 1.3, page,
-                      size=16 if title == "Summary" else 14, space_after=10)
+    for i, page in enumerate(chunk_paragraphs(paras)):
+        n += 1
+        slide = deck.content_slide(title + (" (continued)" if i else ""), n)
+        deck.text(slide, MARGIN, 1.3, BODY_W, BOTTOM - 1.3, page,
+                  size=size, space_after=10)
     return n
 
 
-def _files_slides(deck, file_rows, n0):
+def _files_slides(deck, file_rows, n0, sha="short"):
     n = n0
     per = int((BOTTOM - TABLE_TOP) / ROW_H) - 1
+    with_sha = sha != "none"
     for i in range(0, max(1, len(file_rows)), per):
         chunk = file_rows[i:i + per]
         n += 1
         slide = deck.content_slide(
             "Data files" + (" (continued)" if i else ""), n)
         rows = [[r.get("name", ""), r.get("format", ""),
-                 str(r.get("regions", "")), _size(r.get("size", 0)),
-                 (r.get("sha256") or "")[:16]] for r in chunk]
-        deck.table(slide, MARGIN, TABLE_TOP, BODY_W, [4.2, 3.0, 0.9, 1.1, 2.3],
-                   ["File", "Format", "Regions", "Size", "SHA-256"], rows)
+                 str(r.get("regions", "")), _size(r.get("size", 0))]
+                + ([(r.get("sha256") or "")[:16]] if with_sha else [])
+                for r in chunk]
+        deck.table(slide, MARGIN, TABLE_TOP, BODY_W,
+                   [4.2, 3.0, 0.9, 1.1, 2.3] if with_sha
+                   else [6.4, 4.0, 1.0, 1.5],
+                   ["File", "Format", "Regions", "Size"]
+                   + (["SHA-256"] if with_sha else []), rows)
     return n
 
 
@@ -352,10 +353,12 @@ def _size(n):
         n /= 1024.0
 
 
-def _metadata_slides(deck, docs, n0):
+def _metadata_slides(deck, docs, n0, skip=()):
     n = n0
     budget = BOTTOM - TABLE_TOP
     for parser in docs:
+        if reportspec.doc_key(parser) in skip:
+            continue
         samples = parser.samples_metadata()
         if not samples:
             continue
@@ -520,29 +523,52 @@ def _image_slides(deck, pages, n0):
 
 
 def build_deck(path, details, logo, file_rows, docs, figures, render_images,
-               sections=SECTIONS, image_pages=None):
+               sections=SECTIONS, image_pages=None, spec=None):
     """Write the .pptx to ``path``; returns the number of slides.
 
+    ``spec`` (see ``reportspec``) says which sections go in, in which order,
+    and which figures and files; without it ``sections`` (the old names) do.
     ``figures``: ``[{"name", "caption", "state"}]``;
     ``render_images(number, figure)`` returns one PNG (bytes) per page of that
     figure, sized ``FIGURE_SIZE`` inches. ``image_pages()`` returns the camera
     and SnapMap slides as ``[{"title", "png", "notes"}]`` (None: none)."""
-    sections = tuple(s for s in SECTIONS if s in sections)
+    if spec is None:
+        spec = reportspec.spec_from_sections(sections, "deck")
+    items = reportspec.active(spec)
+    sha = reportspec.option(spec, "sha")
     title = (details.get("title") or "").strip() or "Experiment report"
     deck = _Deck(title)
     n = 0
-    if "title" in sections:
-        _title_slide(deck, details, logo)
-        n = 1
-        n = _summary_slides(deck, details, n)
-    if "files" in sections and file_rows:
-        n = _files_slides(deck, file_rows, n)
-    if "metadata" in sections:
-        n = _metadata_slides(deck, docs, n)
-    if "images" in sections and image_pages is not None:
-        n = _image_slides(deck, image_pages(), n)
-    if "figures" in sections and figures:
-        n = _figure_slides(deck, figures, render_images, n)
+    ids = [sid for sid, _skip in items]
+    methods = (details.get("methods") or "").strip()
+    cal = (details.get("calibration") or "").strip()
+    # the calibration statement rides on the summary slide when both are in
+    # (as it always did), else it gets a slide of its own; never twice
+    cal_text = cal if cal and not ("methods" in ids and cal in methods) else ""
+    for sid, skip in items:
+        if sid == "cover":
+            _title_slide(deck, details, logo)
+            n += 1
+        elif sid == "summary":
+            paras = paragraphs(details.get("summary"))
+            if cal_text and "calibration" in ids:
+                paras.append("Energy calibration: " + cal_text)
+            n = _text_slides(deck, "Summary", paras, n, size=16)
+        elif sid == "methods":
+            n = _text_slides(deck, "Methods", paragraphs(methods), n, size=14)
+        elif sid == "calibration":
+            if cal_text and "summary" not in ids:
+                n = _text_slides(deck, "Energy calibration", [cal_text], n)
+        elif sid == "files" and file_rows:
+            n = _files_slides(deck, file_rows, n, sha)
+        elif sid == "metadata":
+            n = _metadata_slides(deck, docs, n, skip)
+        elif sid == "images" and image_pages is not None:
+            n = _image_slides(deck, image_pages(), n)
+        elif sid == "figures" and figures:
+            chosen = [f for i, f in enumerate(figures, 1)
+                      if reportspec.figure_id(f, i) not in skip]
+            n = _figure_slides(deck, chosen, render_images, n)
     if not deck.prs.slides:
         raise PptxError("Nothing to put in the presentation: choose at least "
                         "one section that has content.")
