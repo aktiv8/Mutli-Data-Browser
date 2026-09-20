@@ -1,11 +1,19 @@
 """PowerPoint export of an experiment: a 16:9 deck built from the same data as
 the PDF report.
 
-Slides: title (logo, details), summary, data files, metadata (the compact
-layout of ``metasummary.layout_file`` as native tables), the camera pictures
-and SnapMaps (one picture per slide, see ``imagepages``), then one slide per
-figure page (a picture, an editable caption, speaker notes describing the
-look). Needs python-pptx; no Tk here.
+Slides: title (logo, details), contents, summary, data files, metadata (the
+compact layout of ``metasummary.layout_file`` as native tables), the camera
+pictures and SnapMaps (one picture per slide, see ``imagepages``), then one
+slide per figure page (a picture, an editable caption, speaker notes describing
+the look), in the order of the ``reportspec`` spec.
+
+The slides are built in that order, each noting its section; a last pass then
+adds the **divider** slides (before a section of ``DIVIDER_MIN`` slides or more,
+unless the spec says never) and the **contents** slide(s) (sections and their
+slide numbers, where the spec puts them), moves them into place, and stamps
+every slide but the title and the dividers with "title | section | n of N", so
+the numbers on the contents slide are the real ones. The accent colour is the
+cover's. Needs python-pptx; no Tk here.
 """
 
 from __future__ import annotations
@@ -26,12 +34,12 @@ SLIDE_W, SLIDE_H = 13.333, 7.5          # inches (16:9)
 MARGIN = 0.6
 BODY_W = SLIDE_W - 2 * MARGIN
 FIGURE_SIZE = (12.1, 4.95)              # inches, for the picture on a figure slide
-NAVY = (0x2C, 0x3E, 0x50)
 GREY = (0x6B, 0x77, 0x85)
 INK = (0x1A, 0x21, 0x27)
-ALT = (0xF2, 0xF5, 0xF8)
 FONT = "Calibri"
 
+DIVIDER_MIN = 5                         # slides in a section that earn a divider
+CONTENTS_ROWS = 16                      # lines on a contents slide
 ROW_H = 0.29                            # table row height (10 pt text)
 TABLE_TOP = 1.25
 BOTTOM = SLIDE_H - 0.55                 # keep clear of the footer
@@ -154,13 +162,21 @@ def pack_items(items, budget):
 
 # -- drawing -----------------------------------------------------------------------
 class _Deck:
-    def __init__(self, title):
+    def __init__(self, title, accent=""):
         (self.Presentation, self.Inches, self.Pt, self.RGB, self.ANCHOR,
          self.ALIGN, self.SHAPE) = _modules()
         self.prs = self.Presentation()
         self.prs.slide_width = self.Inches(SLIDE_W)
         self.prs.slide_height = self.Inches(SLIDE_H)
         self.title = title
+        # the cover's accent: the bar and rules as it is, text and table
+        # headers darkened (so a pale accent still reads on white)
+        self.accent = _rgb(covers.valid_accent(accent) or covers.DEFAULT_ACCENT)
+        self.ink = _rgb(covers.mix(_hex(self.accent), "#000000", 0.2))
+        self.alt = _rgb(covers.tint(_hex(self.accent), 0.94))
+        self.section = "cover"          # what the slides being added belong to
+        self.slides = []                # (slide, {"sid", "child", "kind"})
+        self.contents_at = None         # index of the slide it goes before
 
     # low level
     def rgb(self, t):
@@ -170,12 +186,8 @@ class _Deck:
         shp = slide.shapes.add_shape(self.SHAPE.RECTANGLE, 0, 0,
                                      self.Inches(SLIDE_W), self.Inches(0.14))
         shp.fill.solid()
-        shp.fill.fore_color.rgb = self.rgb(NAVY)
+        shp.fill.fore_color.rgb = self.rgb(self.accent)
         shp.line.fill.background()
-
-    def footer(self, slide, n):
-        self.text(slide, MARGIN, SLIDE_H - 0.42, BODY_W, 0.3,
-                  [f"{self.title}   |   {n}"], size=9, color=GREY)
 
     def text(self, slide, x, y, w, h, paras, size=14, bold=False,
              color=INK, align=None, space_after=6):
@@ -196,7 +208,11 @@ class _Deck:
             r.font.color.rgb = self.rgb(color)
         return box
 
-    def content_slide(self, title, number):
+    def note(self, slide, sid, child=None, kind="content"):
+        """Record what a slide is (section, sub-entry) for the last pass."""
+        self.slides.append((slide, {"sid": sid, "child": child, "kind": kind}))
+
+    def titled_slide(self, title):
         """A 'Title Only' slide with the title restyled to fit 16:9."""
         slide = self.prs.slides.add_slide(self.prs.slide_layouts[5])
         self.bar(slide)
@@ -213,12 +229,19 @@ class _Deck:
             r.font.size = self.Pt(26 if len(title) <= 52 else 20)
             r.font.bold = True
             r.font.name = FONT
-            r.font.color.rgb = self.rgb(NAVY)
-        self.footer(slide, number)
+            r.font.color.rgb = self.rgb(self.ink)
+        return slide
+
+    def content_slide(self, title, child=None):
+        """A titled slide of the section being built; ``child`` names the
+        file or figure it starts (an entry under the section in the contents)."""
+        slide = self.titled_slide(title)
+        self.note(slide, self.section, child)
         return slide
 
     def table(self, slide, x, y, w, weights, header, rows, size=10,
-              row_h=ROW_H, header_fill=NAVY):
+              row_h=ROW_H, header_fill=None):
+        header_fill = header_fill or self.ink
         nrows = len(rows) + (1 if header else 0)
         shape = slide.shapes.add_table(nrows, len(weights), self.Inches(x),
                                        self.Inches(y), self.Inches(w),
@@ -243,7 +266,7 @@ class _Deck:
                 cell.fill.solid()
                 cell.fill.fore_color.rgb = self.rgb(
                     header_fill if is_head else
-                    (ALT if (ri % 2 == 0) else (255, 255, 255)))
+                    (self.alt if (ri % 2 == 0) else (255, 255, 255)))
                 tf = cell.text_frame
                 tf.word_wrap = True
                 tf.text = str(val)
@@ -255,6 +278,15 @@ class _Deck:
                         r.font.color.rgb = self.rgb((255, 255, 255)
                                                     if is_head else INK)
         return shape
+
+
+def _rgb(hex_colour):
+    h = hex_colour.lstrip("#")
+    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _hex(rgb):
+    return "#%02X%02X%02X" % tuple(rgb)
 
 
 # -- slide builders ------------------------------------------------------------------
@@ -279,7 +311,7 @@ def _title_slide(deck, details, logo, art=None):
             r.font.size = deck.Pt(38)
             r.font.bold = True
             r.font.name = FONT
-            r.font.color.rgb = deck.rgb(NAVY)
+            r.font.color.rgb = deck.rgb(deck.ink)
     date = (details.get("date") or "").strip() \
         or datetime.date.today().isoformat()
     lines = [f"{label}: {v}" for label, v in
@@ -318,27 +350,22 @@ def _title_slide(deck, details, logo, art=None):
     return slide
 
 
-def _text_slides(deck, title, paras, n0, size=16):
+def _text_slides(deck, title, paras, size=16):
     """Slides of a heading and free text (paginated); ``paras`` is a list of
     paragraphs."""
-    n = n0
     for i, page in enumerate(chunk_paragraphs(paras)):
-        n += 1
-        slide = deck.content_slide(title + (" (continued)" if i else ""), n)
+        slide = deck.content_slide(title + (" (continued)" if i else ""))
         deck.text(slide, MARGIN, 1.3, BODY_W, BOTTOM - 1.3, page,
                   size=size, space_after=10)
-    return n
 
 
-def _files_slides(deck, file_rows, n0, sha="short"):
-    n = n0
+def _files_slides(deck, file_rows, sha="short"):
     per = int((BOTTOM - TABLE_TOP) / ROW_H) - 1
     with_sha = sha != "none"
     for i in range(0, max(1, len(file_rows)), per):
         chunk = file_rows[i:i + per]
-        n += 1
         slide = deck.content_slide(
-            "Data files" + (" (continued)" if i else ""), n)
+            "Data files" + (" (continued)" if i else ""))
         rows = [[r.get("name", ""), r.get("format", ""),
                  str(r.get("regions", "")), _size(r.get("size", 0))]
                 + ([(r.get("sha256") or "")[:16]] if with_sha else [])
@@ -348,7 +375,6 @@ def _files_slides(deck, file_rows, n0, sha="short"):
                    else [6.4, 4.0, 1.0, 1.5],
                    ["File", "Format", "Regions", "Size"]
                    + (["SHA-256"] if with_sha else []), rows)
-    return n
 
 
 def _size(n):
@@ -358,8 +384,7 @@ def _size(n):
         n /= 1024.0
 
 
-def _metadata_slides(deck, docs, n0, skip=()):
-    n = n0
+def _metadata_slides(deck, docs, skip=()):
     budget = BOTTOM - TABLE_TOP
     for parser in docs:
         if reportspec.doc_key(parser) in skip:
@@ -399,17 +424,16 @@ def _metadata_slides(deck, docs, n0, skip=()):
                 strips.append((f"{sl.name}: {title}", entries))
 
         for pi, page in enumerate(pack_items(items, budget)):
-            n += 1
             slide = deck.content_slide(
                 f"Acquisition metadata – {name}"
-                + (" (continued)" if pi else ""), n)
+                + (" (continued)" if pi else ""), None if pi else name)
             y = TABLE_TOP
             for item in page:
                 if item[0] == "common":
                     _, rows, width = item
                     deck.text(slide, MARGIN, y, BODY_W, 0.3,
                               ["Common to every region"], size=12,
-                              bold=True, color=NAVY, space_after=0)
+                              bold=True, color=deck.ink, space_after=0)
                     y += 0.32
                     _kv_table(deck, slide, y, rows, width)
                     y += ROW_H * len(rows)
@@ -419,7 +443,7 @@ def _metadata_slides(deck, docs, n0, skip=()):
                         f"  ({sl.n_regions} regions)" if first else
                         "  (continued)")
                     deck.text(slide, MARGIN, y, BODY_W, 0.3, [label],
-                              size=12, bold=True, color=NAVY, space_after=0)
+                              size=12, bold=True, color=deck.ink, space_after=0)
                     y += 0.36
                     if first and line_rows:
                         _kv_table(deck, slide, y, line_rows,
@@ -435,10 +459,8 @@ def _metadata_slides(deck, docs, n0, skip=()):
             per_slide = 60
             for i in range(0, len(entries), per_slide):
                 part = entries[i:i + per_slide]
-                n += 1
                 slide = deck.content_slide(
-                    f"{title} – {name}"
-                    + (" (continued)" if i else ""), n)
+                    f"{title} – {name}" + (" (continued)" if i else ""))
                 percol = -(-len(part) // 3)
                 grid = []
                 for r in range(percol):
@@ -452,15 +474,13 @@ def _metadata_slides(deck, docs, n0, skip=()):
                            [0.5, 0.8, 2.2] * 3,
                            ["Level", "Etch (s)", "Acquired"] * 3, grid,
                            size=9, row_h=0.26)
-    return n
 
 
 def _kv_table(deck, slide, y, rows, width):
     """Key/value pairs laid out across (label, value, label, value ...)."""
     pairs = width // 2
     weights = [1.0, 1.6] * pairs
-    shape = deck.table(slide, MARGIN, y, BODY_W, weights, None, rows,
-                       header_fill=NAVY)
+    shape = deck.table(slide, MARGIN, y, BODY_W, weights, None, rows)
     tbl = shape.table
     for ri, row in enumerate(rows):
         for ci in range(0, width, 2):
@@ -470,7 +490,7 @@ def _kv_table(deck, slide, y, rows, width):
             for p in cell.text_frame.paragraphs:
                 for r in p.runs:
                     r.font.bold = True
-                    r.font.color.rgb = deck.rgb(NAVY)
+                    r.font.color.rgb = deck.rgb(deck.ink)
             for cj in (ci + 1,):
                 c2 = tbl.cell(ri, cj)
                 c2.fill.solid()
@@ -478,17 +498,15 @@ def _kv_table(deck, slide, y, rows, width):
     return shape
 
 
-def _figure_slides(deck, figures, render_images, n0):
-    n = n0
+def _figure_slides(deck, figures, render_images):
     for number, fig in enumerate(figures, 1):
         images = render_images(number, fig)
         caption = (fig.get("caption") or "").strip()
         for pi, png in enumerate(images):
-            n += 1
             title = f"Figure {number} – {fig.get('name', '')}"
             if pi:
                 title += " (continued)"
-            slide = deck.content_slide(title, n)
+            slide = deck.content_slide(title, None if pi else title)
             width, height = FIGURE_SIZE
             pic = slide.shapes.add_picture(
                 io.BytesIO(png), deck.Inches((SLIDE_W - width) / 2),
@@ -504,16 +522,13 @@ def _figure_slides(deck, figures, render_images, n0):
             notes = slide.notes_slide.notes_text_frame
             notes.text = ((caption + "\n\n") if caption else "") \
                 + look_notes(fig.get("state"))
-    return n
 
 
-def _image_slides(deck, pages, n0):
+def _image_slides(deck, pages):
     """One slide per camera sheet / SnapMap site: ``pages`` is
     ``[{"title", "png", "notes"}]`` (pictures sized ``FIGURE_SIZE``)."""
-    n = n0
     for pg in pages:
-        n += 1
-        slide = deck.content_slide(pg["title"], n)
+        slide = deck.content_slide(pg["title"])
         width, height = FIGURE_SIZE
         pic = slide.shapes.add_picture(
             io.BytesIO(pg["png"]), deck.Inches((SLIDE_W - width) / 2),
@@ -524,7 +539,142 @@ def _image_slides(deck, pages, n0):
             pic.width = int(pic.width * ratio)
             pic.left = int((deck.Inches(SLIDE_W) - pic.width) / 2)
         slide.notes_slide.notes_text_frame.text = pg.get("notes", "")
-    return n
+
+
+# -- the last pass: dividers, contents, order, footers -----------------------------
+def _entries(deck):
+    """``[(section, level, title, slide index)]`` for the contents: one line
+    per section, and under it its files or figures when there are two or more.
+    The index is into ``deck.slides`` (creation order)."""
+    heads, kids, order = {}, {}, []
+    for i, (_slide, m) in enumerate(deck.slides):
+        if m["kind"] != "content":
+            continue
+        if m["sid"] not in heads:
+            heads[m["sid"]] = i
+            order.append(m["sid"])
+        if m["child"]:
+            kids.setdefault(m["sid"], []).append((m["child"], i))
+    out = []
+    for sid in order:
+        out.append((sid, 1, reportspec.LABELS[sid], heads[sid]))
+        if len(kids.get(sid, ())) >= 2:
+            out += [(sid, 2, title, i) for title, i in kids[sid]]
+    return out
+
+
+def _divider_slide(deck, sid, count):
+    """A full-bleed slide naming a section (and how many slides it has)."""
+    slide = deck.prs.slides.add_slide(deck.prs.slide_layouts[6])
+    back = slide.shapes.add_shape(deck.SHAPE.RECTANGLE, 0, 0,
+                                  deck.Inches(SLIDE_W), deck.Inches(SLIDE_H))
+    back.fill.solid()
+    back.fill.fore_color.rgb = deck.rgb(deck.ink)
+    back.line.fill.background()
+    stripe = slide.shapes.add_shape(deck.SHAPE.RECTANGLE, deck.Inches(0.8),
+                                    deck.Inches(3.75), deck.Inches(1.4),
+                                    deck.Inches(0.07))
+    stripe.fill.solid()
+    stripe.fill.fore_color.rgb = deck.rgb(_rgb(covers.tint(_hex(deck.accent),
+                                                           0.55)))
+    stripe.line.fill.background()
+    deck.text(slide, 0.8, 2.55, SLIDE_W - 1.6, 1.1, [reportspec.LABELS[sid]],
+              size=44, bold=True, color=(255, 255, 255))
+    deck.text(slide, 0.8, 4.0, SLIDE_W - 1.6, 0.6,
+              [f"{reportspec.HINTS[sid]}  •  {count} slides"], size=18,
+              color=_rgb(covers.tint(_hex(deck.accent), 0.8)))
+    return slide
+
+
+def _contents_slide(deck, rows, first):
+    """One slide of the contents: ``rows`` is ``[(level, title, number)]``."""
+    slide = deck.titled_slide("Contents" + ("" if first else " (continued)"))
+    cells = [[("    " if lvl == 2 else "") + title, str(num)]
+             for lvl, title, num in rows]
+    shape = deck.table(slide, MARGIN, TABLE_TOP, BODY_W, [11.0, 1.0], None,
+                       cells, size=12, row_h=0.32)
+    for ri, (lvl, _title, _num) in enumerate(rows):
+        for ci in (0, 1):
+            cell = shape.table.cell(ri, ci)
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = deck.rgb(deck.alt if lvl == 1
+                                                else (255, 255, 255))
+            for p in cell.text_frame.paragraphs:
+                if ci:
+                    p.alignment = deck.ALIGN.RIGHT
+                for r in p.runs:
+                    r.font.bold = lvl == 1
+                    r.font.size = deck.Pt(12 if lvl == 1 else 11)
+                    r.font.color.rgb = deck.rgb(deck.ink if lvl == 1 else INK)
+    return slide
+
+
+def _assemble(deck, dividers="auto"):
+    """Add the divider and contents slides, put every slide in its place and
+    stamp the footers. The slide numbers on the contents are the final ones."""
+    main = len(deck.slides)
+    entries = _entries(deck)
+    counts = {}
+    for _slide, m in deck.slides:
+        if m["kind"] == "content":
+            counts[m["sid"]] = counts.get(m["sid"], 0) + 1
+    firsts = {sid: i for sid, lvl, _t, i in entries if lvl == 1}
+    divided = {firsts[sid]: sid for sid in firsts
+               if dividers == "auto" and counts[sid] >= DIVIDER_MIN}
+    pages = -(-len(entries) // CONTENTS_ROWS) \
+        if entries and deck.contents_at is not None else 0
+
+    layout = []            # ("slide", i) | ("divider", sid) | ("contents", j)
+    for i in range(main + 1):
+        if i == deck.contents_at:
+            layout += [("contents", j) for j in range(pages)]
+        if i in divided:
+            layout.append(("divider", divided[i]))
+        if i < main:
+            layout.append(("slide", i))
+    number = {item: k for k, item in enumerate(layout, 1)}
+
+    made = []              # the extra slides, in creation order
+    for sid in divided.values():
+        made.append((("divider", sid),
+                     _divider_slide(deck, sid, counts[sid])))
+    rows = []
+    for sid, lvl, title, i in entries:
+        own = ("divider", sid)
+        rows.append((lvl, title,
+                     number[own] if lvl == 1 and own in number
+                     else number[("slide", i)]))
+    for j in range(pages):
+        chunk = rows[j * CONTENTS_ROWS:(j + 1) * CONTENTS_ROWS]
+        made.append((("contents", j), _contents_slide(deck, chunk, j == 0)))
+
+    lst = deck.prs.slides._sldIdLst
+    elems = list(lst)      # creation order: the slides, then ``made``
+    by_item = {("slide", i): elems[i] for i in range(main)}
+    by_item.update({item: elems[main + k]
+                    for k, (item, _s) in enumerate(made)})
+    for el in elems:
+        lst.remove(el)
+    for item in layout:
+        lst.append(by_item[item])
+
+    slide_of = {("slide", i): slide
+                for i, (slide, _m) in enumerate(deck.slides)}
+    slide_of.update(dict(made))
+    total = len(layout)
+    for item in layout:
+        if item[0] == "divider":
+            continue
+        label = "Contents"
+        if item[0] == "slide":
+            meta = deck.slides[item[1]][1]
+            if meta["kind"] == "cover":
+                continue
+            label = reportspec.LABELS.get(meta["sid"], "")
+        deck.text(slide_of[item], MARGIN, SLIDE_H - 0.42, BODY_W, 0.3,
+                  ["   |   ".join(x for x in (deck.title, label,
+                                               f"{number[item]} of {total}")
+                                  if x)], size=9, color=GREY)
 
 
 def build_deck(path, details, logo, file_rows, docs, figures, render_images,
@@ -533,9 +683,10 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
     """Write the .pptx to ``path``; returns the number of slides.
 
     ``spec`` (see ``reportspec``) says which sections go in, in which order,
-    which figures and files, and the cover picture; without it ``sections``
-    (the old names) do. ``cover_data`` is ``(energy, counts)`` for the "your
-    data" cover; a problem with the cover picture is appended to ``notes``.
+    which figures and files, the cover picture and accent colour, and whether
+    long sections get a divider slide; without it ``sections`` (the old names)
+    do. ``cover_data`` is ``(energy, counts)`` for the "your data" cover; a
+    problem with the cover picture is appended to ``notes``.
     ``figures``: ``[{"name", "caption", "state"}]``;
     ``render_images(number, figure)`` returns one PNG (bytes) per page of that
     figure, sized ``FIGURE_SIZE`` inches. ``image_pages()`` returns the camera
@@ -545,8 +696,7 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
     items = reportspec.active(spec)
     sha = reportspec.option(spec, "sha")
     title = (details.get("title") or "").strip() or "Experiment report"
-    deck = _Deck(title)
-    n = 0
+    deck = _Deck(title, reportspec.cover_of(spec)["accent"])
     ids = [sid for sid, _skip in items]
     methods = (details.get("methods") or "").strip()
     cal = (details.get("calibration") or "").strip()
@@ -554,35 +704,39 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
     # (as it always did), else it gets a slide of its own; never twice
     cal_text = cal if cal and not ("methods" in ids and cal in methods) else ""
     for sid, skip in items:
+        deck.section = sid
         if sid == "cover":
             art = covers.art(reportspec.cover_of(spec), "pptx", cover_data)
             if art.note and notes is not None:
                 notes.append(art.note)
-            _title_slide(deck, details, logo, art)
-            n += 1
+            deck.note(_title_slide(deck, details, logo, art), sid,
+                      kind="cover")
+        elif sid == "contents":
+            deck.contents_at = len(deck.slides)      # made in ``_assemble``
         elif sid == "summary":
             paras = paragraphs(details.get("summary"))
             if cal_text and "calibration" in ids:
                 paras.append("Energy calibration: " + cal_text)
-            n = _text_slides(deck, "Summary", paras, n, size=16)
+            _text_slides(deck, "Summary", paras, size=16)
         elif sid == "methods":
-            n = _text_slides(deck, "Methods", paragraphs(methods), n, size=14)
+            _text_slides(deck, "Methods", paragraphs(methods), size=14)
         elif sid == "calibration":
             if cal_text and "summary" not in ids:
-                n = _text_slides(deck, "Energy calibration", [cal_text], n)
+                _text_slides(deck, "Energy calibration", [cal_text])
         elif sid == "files" and file_rows:
-            n = _files_slides(deck, file_rows, n, sha)
+            _files_slides(deck, file_rows, sha)
         elif sid == "metadata":
-            n = _metadata_slides(deck, docs, n, skip)
+            _metadata_slides(deck, docs, skip)
         elif sid == "images" and image_pages is not None:
-            n = _image_slides(deck, image_pages(), n)
+            _image_slides(deck, image_pages())
         elif sid == "figures" and figures:
             chosen = [f for i, f in enumerate(figures, 1)
                       if reportspec.figure_id(f, i) not in skip]
-            n = _figure_slides(deck, chosen, render_images, n)
-    if not deck.prs.slides:
+            _figure_slides(deck, chosen, render_images)
+    if not deck.slides:
         raise PptxError("Nothing to put in the presentation: choose at least "
                         "one section that has content.")
+    _assemble(deck, reportspec.option(spec, "dividers"))
     cp = deck.prs.core_properties
     cp.title = title
     cp.author = (details.get("operator") or "").strip() or appinfo.NAME

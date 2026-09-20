@@ -45,6 +45,8 @@ class ReportGeneratorDialog(tk.Toplevel):
         self.rows = {}                        # tree iid -> (section, child|None)
         self.output = tk.StringVar(value="pdf")
         self.sha = tk.StringVar(value=reportspec.option(self.spec, "sha"))
+        self.dividers = tk.StringVar(
+            value=reportspec.option(self.spec, "dividers"))
         self.preset = tk.StringVar()
         self._build()
         self.populate()
@@ -276,6 +278,15 @@ class ReportGeneratorDialog(tk.Toplevel):
                             command=lambda: self.set_option(
                                 "sha", self.sha.get())).pack(
                 anchor="w", padx=(12, 0), pady=2)
+        ttk.Label(tab, text="Divider slides in the PowerPoint").pack(
+            anchor="w", pady=(14, 0))
+        for value, text in (("auto", "Before a section of 5 slides or more"),
+                            ("none", "Never")):
+            ttk.Radiobutton(tab, text=text, value=value,
+                            variable=self.dividers,
+                            command=lambda: self.set_option(
+                                "dividers", self.dividers.get())).pack(
+                anchor="w", padx=(12, 0), pady=2)
 
     # -- the tree ----------------------------------------------------------------
     def populate(self):
@@ -399,6 +410,7 @@ class ReportGeneratorDialog(tk.Toplevel):
         presets = reportspec.all_presets(self.app.report_presets)
         if name in presets:
             self.sha.set(reportspec.option(presets[name], "sha"))
+            self.dividers.set(reportspec.option(presets[name], "dividers"))
             # a preset says what goes in; the look of the cover stays yours
             self._set(reportspec.with_cover_of(presets[name], self.spec))
 
