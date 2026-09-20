@@ -14,6 +14,9 @@ files is JSON: opening a workbook never executes anything from it.
     metadata.json   read-only snapshot of the acquisition metadata
     annotations.json  renames, notes, edited metadata, BE shifts, markers
     holder.json     holder-photo calibration (stage mm -> photo pixels)
+    cache/spectra.json.gz   optional: the parsed spectra, fits and curves as of
+                            the save (the HTML browser's data), with the hash
+                            of every source file it was made from
     data/<id>/<original file name>      the instrument files, byte-for-byte
     data/<id>/<name>/<folders>/<file>   an experiment folder (a session of many
                                         files, e.g. Avantage): same, keeping the
@@ -27,6 +30,7 @@ No Tk and no matplotlib here, so it is unit-testable on its own.
 from __future__ import annotations
 
 import datetime
+import gzip
 import hashlib
 import json
 import os
@@ -34,6 +38,7 @@ import re
 import shutil
 import tempfile
 import zipfile
+import zlib
 from dataclasses import dataclass, field
 
 import appinfo
@@ -42,6 +47,10 @@ FORMAT = "xpscontainer"
 FORMAT_VERSION = 2             # 2 adds sessions (a FileEntry with members); a
                                # workbook without one is still written as 1
 EXT = ".xpscontainer"
+CACHE_MEMBER = "cache/spectra.json.gz"
+CACHE_VERSION = 1                 # of the cache's own layout
+CACHE_MAX_BYTES = 64 * 1024 * 1024        # compressed; a bigger cache is left out
+CACHE_MAX_JSON = 1024 * 1024 * 1024       # what a cache may expand to when read
 
 DETAIL_FIELDS = ("title", "customer", "reference", "operator", "date",
                  "summary", "methods")      # methods: the user's own text, or ""
@@ -80,6 +89,7 @@ class Workbook:
     metadata: dict = field(default_factory=dict)
     annotations: dict = field(default_factory=dict)  # annotations.to_json()
     holder: dict = field(default_factory=dict)      # {"calibration": {...}}
+    cache: dict | None = None    # results to store (write only): see encode_cache
     created: str = ""
     modified: str = ""
     extra: dict = field(default_factory=dict)       # unknown manifest keys
@@ -174,11 +184,89 @@ def resolve_refs(refs, regions_by_file):
     return out, missing
 
 
+# -- the results cache -------------------------------------------------------------
+def encode_cache(payload, files) -> bytes:
+    """The gzip of the results ``payload`` (a JSON-able dict) stamped with the
+    layout version and the id, name, size and hash of every source file it was
+    made from; what ``read_cache`` checks against the manifest."""
+    doc = dict(payload)
+    doc["cache_version"] = CACHE_VERSION
+    doc["source_files"] = [{"id": f.id, "name": f.name, "size": f.size,
+                            "sha256": f.sha256} for f in files]
+    raw = json.dumps(doc, ensure_ascii=False,
+                     separators=(",", ":")).encode("utf-8")
+    return gzip.compress(raw, 6, mtime=0)
+
+
+def _gunzip_limited(data: bytes, limit: int) -> bytes:
+    """Decompress gzip ``data``, refusing to expand beyond ``limit`` bytes (a
+    small crafted file must not fill the memory)."""
+    d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    out = d.decompress(data, limit + 1)
+    if len(out) > limit or d.unconsumed_tail:
+        raise ValueError("the cache expands to an unreasonable size")
+    return out
+
+
+def read_cache(path):
+    """``(payload, "")`` when the workbook carries results that are still in
+    step with it, else ``(None, reason)``. Never raises: the cache is advisory
+    (the original files stay the source of truth). It is used only if the
+    manifest names it, its bytes match the recorded hash, its layout version
+    is known, and the source files it was made from are exactly the manifest's
+    (same ids and hashes)."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = set(zf.namelist())
+            manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+            if not isinstance(manifest, dict) or \
+                    manifest.get("format") != FORMAT:
+                return None, "not a workbook"
+            entry = manifest.get("cache")
+            if not isinstance(entry, dict):
+                return None, "the workbook has no stored results"
+            if entry.get("cache_version") != CACHE_VERSION:
+                return None, "the stored results are of another version"
+            member = entry.get("member")
+            if member != CACHE_MEMBER or member not in names:
+                return None, "the stored results are missing"
+            data = zf.read(member)
+    except (zipfile.BadZipFile, OSError, KeyError, ValueError,
+            UnicodeDecodeError):
+        return None, "the workbook could not be read"
+    if hashlib.sha256(data).hexdigest() != entry.get("sha256"):
+        return None, "the stored results are damaged"
+    try:
+        payload = json.loads(_gunzip_limited(data, CACHE_MAX_JSON)
+                             .decode("utf-8"))
+    except (OSError, ValueError, zlib.error, UnicodeDecodeError):
+        return None, "the stored results are damaged"
+    if not isinstance(payload, dict) or \
+            payload.get("cache_version") != CACHE_VERSION:
+        return None, "the stored results are of another version"
+    want = {str(f.get("id")): f.get("sha256")
+            for f in manifest.get("files", []) if isinstance(f, dict)}
+    have = {str(f.get("id")): f.get("sha256")
+            for f in payload.get("source_files", []) if isinstance(f, dict)}
+    if want != have or not want:
+        return None, "the data files changed after the results were stored"
+    return payload, ""
+
+
+def load_cache(path):
+    """The stored results of a workbook (see ``read_cache``) or None."""
+    return read_cache(path)[0]
+
+
 # -- writing -----------------------------------------------------------------------
-def save(path, wb: Workbook, preview_png: bytes | None = None) -> None:
+def save(path, wb: Workbook, preview_png: bytes | None = None) -> list:
     """Write ``wb`` to ``path`` (atomically: a temp file, then a rename).
 
-    Each ``FileEntry.path`` must exist; its size and hash are refreshed."""
+    Each ``FileEntry.path`` must exist; its size and hash are refreshed. If
+    ``wb.cache`` holds a results payload it is stored beside the data (unless
+    it is over ``CACHE_MAX_BYTES``). Returns a list of notes for the user
+    (things that were left out); usually empty."""
+    notes = []
     missing = []
     for f in wb.files:
         if f.members:
@@ -200,6 +288,15 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> None:
             f.sha256 = sha256_file(f.path)
     wb.modified = _now()
     wb.created = wb.created or wb.modified
+
+    cache_bytes = None
+    if wb.cache:
+        cache_bytes = encode_cache(wb.cache, wb.files)
+        if len(cache_bytes) > CACHE_MAX_BYTES:
+            notes.append(f"The parsed results ({len(cache_bytes) / 1048576:.0f}"
+                         f" MB) were not stored in the workbook: too large. "
+                         f"The data files themselves are all there.")
+            cache_bytes = None
 
     logo_member = ""
     if wb.logo:
@@ -231,6 +328,13 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> None:
         "files": [entry_of(f) for f in wb.files],
         "logo": logo_member,
     })
+    manifest.pop("cache", None)
+    if cache_bytes is not None:
+        manifest["cache"] = {
+            "member": CACHE_MEMBER, "cache_version": CACHE_VERSION,
+            "size": len(cache_bytes),
+            "sha256": hashlib.sha256(cache_bytes).hexdigest(),
+            "files": [{"id": f.id, "sha256": f.sha256} for f in wb.files]}
     folder = os.path.dirname(os.path.abspath(path))
     fd, tmp = tempfile.mkstemp(prefix=".xpsc_", suffix=".tmp", dir=folder)
     os.close(fd)
@@ -258,11 +362,15 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> None:
                 zf.write(wb.logo, logo_member)
             if preview_png:
                 zf.writestr("preview.png", preview_png)
+            if cache_bytes is not None:
+                zf.writestr(zipfile.ZipInfo(CACHE_MEMBER, (2000, 1, 1, 0, 0, 0)),
+                            cache_bytes, compress_type=zipfile.ZIP_STORED)
         os.replace(tmp, path)
     except BaseException:
         if os.path.exists(tmp):
             os.remove(tmp)
         raise
+    return notes
 
 
 # -- reading -----------------------------------------------------------------------
@@ -306,7 +414,7 @@ def load(path, extract_dir) -> Workbook:
                 f"Please update {appinfo.NAME}.")
 
         known = {"format", "format_version", "created", "modified",
-                 "created_with", "files", "logo"}
+                 "created_with", "files", "logo", "cache"}
         wb = Workbook(created=str(manifest.get("created", "")),
                       modified=str(manifest.get("modified", "")),
                       extra={k: v for k, v in manifest.items()

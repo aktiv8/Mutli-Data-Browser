@@ -575,6 +575,30 @@ def write_html(path, payload) -> int:
     return len(data)
 
 
+def write_html_from_workbook(book_path, html_path) -> int:
+    """Write the data browser of a saved workbook from the results stored in it
+    (``workbook.read_cache``), without loading any instrument file. The saved
+    figures, holder photo, camera pictures and SnapMaps are not part of those
+    results, so the page lacks them (it says so). Raises ``ViewerError`` with
+    the reason when the workbook has no usable stored results. Returns the
+    size written."""
+    import workbook
+    payload, why = workbook.read_cache(book_path)
+    if payload is None:
+        raise ViewerError(f"{os.path.basename(book_path)}: {why}. Open it in "
+                          "the app and save it again to store them.")
+    if not isinstance(payload.get("samples"), list) or not payload["samples"]:
+        raise ViewerError(f"{os.path.basename(book_path)}: the stored results "
+                          "hold no spectra.")
+    page = {k: v for k, v in payload.items()
+            if k not in ("cache_version", "source_files")}
+    page["build_notes"] = list(page.get("build_notes") or []) + [
+        "This page was made from the results stored in the workbook. Saved "
+        "figures, the holder photo, camera pictures and SnapMaps are not "
+        "included."]
+    return write_html(html_path, page)
+
+
 def default_name(details) -> str:
     stem = re.sub(r"[^\w.\- ]+", "_",
                   (details or {}).get("title") or "experiment").strip()

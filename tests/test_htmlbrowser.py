@@ -821,5 +821,63 @@ class TestJavaScript(unittest.TestCase):
         self.assertEqual(len(got.splitlines()), len(want.splitlines()))
 
 
+class TestFromWorkbook(unittest.TestCase):
+    """A page made from the results stored in a saved workbook, without
+    loading any instrument file."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.data = os.path.join(self.tmp.name, "a.vms")
+        with open(self.data, "wb") as fh:
+            fh.write(b"instrument data")
+
+    def book(self, with_results=True):
+        import workbook as wbk
+        d = doc("a.vms", [region("C 1s", "A"), region("O 1s", "A", lo=525,
+                                                     hi=540, peak=532)])
+        payload = hb.build_payload([d], details={"title": "Stored"},
+                                   methods_text="How.")
+        payload["files"][0]["id"] = "f1"
+        wb = wbk.Workbook(files=[wbk.FileEntry("f1", "a.vms", self.data)],
+                          cache=payload if with_results else None)
+        path = os.path.join(self.tmp.name, "w.xpscontainer")
+        wbk.save(path, wb)
+        return path, payload
+
+    def test_page_from_stored_results(self):
+        path, payload = self.book()
+        out = os.path.join(self.tmp.name, "page.html")
+        size = hb.write_html_from_workbook(path, out)
+        with open(out, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertEqual(size, len(text.encode("utf-8")))
+        blob = re.search(r'<script id="xps-data"[^>]*>(.*?)</script>', text,
+                         re.S).group(1)
+        got = hb.decode_payload(blob)
+        self.assertEqual(got["samples"], payload["samples"])
+        self.assertEqual(got["methods"], "How.")
+        self.assertNotIn("cache_version", got)
+        self.assertNotIn("source_files", got)
+        self.assertTrue(any("stored in the workbook" in n
+                            for n in got["build_notes"]))
+        self.assertIn("Stored", text)                       # the title
+
+    def test_no_stored_results_says_why(self):
+        path, _p = self.book(with_results=False)
+        with self.assertRaises(hb.ViewerError) as cm:
+            hb.write_html_from_workbook(path, os.path.join(self.tmp.name, "x.html"))
+        self.assertIn("no stored results", str(cm.exception))
+        self.assertIn("save it again", str(cm.exception))
+        self.assertFalse(os.path.exists(os.path.join(self.tmp.name, "x.html")))
+
+    def test_not_a_workbook(self):
+        junk = os.path.join(self.tmp.name, "j.xpscontainer")
+        with open(junk, "wb") as fh:
+            fh.write(b"nope")
+        with self.assertRaises(hb.ViewerError):
+            hb.write_html_from_workbook(junk, os.path.join(self.tmp.name, "y.html"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -524,5 +524,152 @@ class TestSessionEntries(Tmp):
         self.assertEqual(wbk.safe_rel(""), "file")
 
 
+class TestResultsCache(Tmp):
+    """The parsed results stored beside the data: advisory, hash-checked, and
+    never a reason for a workbook not to open."""
+
+    PAYLOAD = {"v": 1, "tool": "test", "samples": [{"name": "S", "regions": [
+        {"name": "C 1s", "y": [1, 2, 3]}]}], "files": [{"name": "a.vgd"}]}
+
+    def saved(self, cache=True, name="w.xpscontainer"):
+        wb, _a, _b = self.workbook()
+        wb.cache = dict(self.PAYLOAD) if cache else None
+        path = os.path.join(self.dir, name)
+        notes = wbk.save(path, wb)
+        return path, wb, notes
+
+    def rewrite(self, path, change):
+        """Copy the archive with ``change(name, data) -> data or None``."""
+        out = path + ".new"
+        with zipfile.ZipFile(path) as src, zipfile.ZipFile(out, "w") as dst:
+            for info in src.infolist():
+                data = change(info.filename, src.read(info.filename))
+                if data is not None:
+                    dst.writestr(info, data)
+        os.replace(out, path)
+
+    def test_round_trip(self):
+        path, wb, notes = self.saved()
+        self.assertEqual(notes, [])
+        payload, why = wbk.read_cache(path)
+        self.assertEqual(why, "")
+        self.assertEqual(payload["samples"], self.PAYLOAD["samples"])
+        self.assertEqual(payload["cache_version"], wbk.CACHE_VERSION)
+        self.assertEqual({f["id"]: f["sha256"] for f in payload["source_files"]},
+                         {f.id: f.sha256 for f in wb.files})
+        self.assertEqual(wbk.load_cache(path), payload)
+        with zipfile.ZipFile(path) as zf:
+            info = zf.getinfo(wbk.CACHE_MEMBER)
+            self.assertEqual(info.compress_type, zipfile.ZIP_STORED)
+            manifest = json.loads(zf.read("manifest.json"))
+        self.assertEqual(manifest["cache"]["member"], wbk.CACHE_MEMBER)
+        self.assertEqual(manifest["format_version"], 1)      # no bump
+
+    def test_no_cache_when_none_given(self):
+        path, _wb, _n = self.saved(cache=False)
+        payload, why = wbk.read_cache(path)
+        self.assertIsNone(payload)
+        self.assertIn("no stored results", why)
+        with zipfile.ZipFile(path) as zf:
+            self.assertNotIn("cache", json.loads(zf.read("manifest.json")))
+            self.assertNotIn(wbk.CACHE_MEMBER, zf.namelist())
+
+    def test_the_workbook_still_loads_and_the_cache_is_not_an_extra(self):
+        path, _wb, _n = self.saved()
+        out = wbk.load(path, os.path.join(self.dir, "x"))
+        self.assertEqual(out.extra, {"future_key": {"x": 1}})
+        self.assertEqual([f.name for f in out.files], ["a.vgd", "b.avg"])
+        self.assertEqual(out.warnings, [])
+
+    def test_saving_again_without_results_leaves_no_stale_cache(self):
+        path, _wb, _n = self.saved()
+        book = wbk.load(path, os.path.join(self.dir, "x"))
+        again = os.path.join(self.dir, "again.xpscontainer")
+        wbk.save(again, book)
+        self.assertIn("no stored results", wbk.read_cache(again)[1])
+
+    def test_damaged_results_are_ignored(self):
+        path, _wb, _n = self.saved()
+        self.rewrite(path, lambda n, d: d[:-9] + b"corrupted"
+                     if n == wbk.CACHE_MEMBER else d)
+        payload, why = wbk.read_cache(path)
+        self.assertIsNone(payload)
+        self.assertIn("damaged", why)
+
+    def test_changed_source_files_are_noticed(self):
+        path, _wb, _n = self.saved()
+
+        def edit(name, data):
+            if name != "manifest.json":
+                return data
+            m = json.loads(data)
+            m["files"][0]["sha256"] = "0" * 64
+            return json.dumps(m).encode()
+        self.rewrite(path, edit)
+        payload, why = wbk.read_cache(path)
+        self.assertIsNone(payload)
+        self.assertIn("changed", why)
+
+    def test_another_version_is_ignored(self):
+        path, _wb, _n = self.saved()
+
+        def edit(name, data):
+            if name != "manifest.json":
+                return data
+            m = json.loads(data)
+            m["cache"]["cache_version"] = wbk.CACHE_VERSION + 1
+            return json.dumps(m).encode()
+        self.rewrite(path, edit)
+        self.assertIn("another version", wbk.read_cache(path)[1])
+
+    def test_missing_member_and_wrong_member_name(self):
+        path, _wb, _n = self.saved()
+        self.rewrite(path, lambda n, d: None if n == wbk.CACHE_MEMBER else d)
+        self.assertIn("missing", wbk.read_cache(path)[1])
+        path, _wb, _n = self.saved(name="w2.xpscontainer")
+
+        def edit(name, data):
+            if name != "manifest.json":
+                return data
+            m = json.loads(data)
+            m["cache"]["member"] = "../../evil.json"
+            return json.dumps(m).encode()
+        self.rewrite(path, edit)
+        self.assertIn("missing", wbk.read_cache(path)[1])
+
+    def test_a_cache_that_expands_absurdly_is_refused(self):
+        path, _wb, _n = self.saved()
+        old = wbk.CACHE_MAX_JSON
+        wbk.CACHE_MAX_JSON = 50
+        try:
+            payload, why = wbk.read_cache(path)
+        finally:
+            wbk.CACHE_MAX_JSON = old
+        self.assertIsNone(payload)
+        self.assertIn("damaged", why)
+
+    def test_too_large_a_cache_is_left_out_with_a_note(self):
+        old = wbk.CACHE_MAX_BYTES
+        wbk.CACHE_MAX_BYTES = 10
+        try:
+            path, _wb, notes = self.saved()
+        finally:
+            wbk.CACHE_MAX_BYTES = old
+        self.assertEqual(len(notes), 1)
+        self.assertIn("too large", notes[0])
+        self.assertIsNone(wbk.load_cache(path))
+        out = wbk.load(path, os.path.join(self.dir, "x"))        # data all there
+        self.assertEqual(len(out.files), 2)
+
+    def test_reading_never_raises(self):
+        junk = self.write("junk.xpscontainer", b"not a zip")
+        self.assertIsNone(wbk.load_cache(junk))
+        self.assertIsNone(wbk.load_cache(os.path.join(self.dir, "nope")))
+        empty = os.path.join(self.dir, "e.xpscontainer")
+        with zipfile.ZipFile(empty, "w") as zf:
+            zf.writestr("readme.txt", "x")
+        self.assertIsNone(wbk.load_cache(empty))
+
+
 if __name__ == "__main__":
     unittest.main()

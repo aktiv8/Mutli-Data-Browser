@@ -621,6 +621,11 @@ class Workspace:
                         command=self.save_workbook)
         wbm.add_command(label="Save workbook as…",
                         command=lambda: self.save_workbook(as_new=True))
+        self.cache_var = tk.BooleanVar(
+            value=bool(self.cfg.get("cache_in_workbook", True)))
+        wbm.add_checkbutton(
+            label="Store the parsed results in the workbook",
+            variable=self.cache_var)
         wbm.add_separator()
         wbm.add_command(label="Details and notes…", command=self.edit_details)
         wbm.add_command(label="Figures…", command=self.edit_figures)
@@ -635,6 +640,8 @@ class Workspace:
                         command=self.export_handover)
         wbm.add_command(label="Interactive data browser (HTML)…",
                         command=self.export_html_browser)
+        wbm.add_command(label="Data browser from a saved workbook…",
+                        command=self.export_html_from_workbook)
         bar.add_cascade(label="Workbook", menu=wbm)
         tm = tk.Menu(bar, tearoff=0)
         self.themes.register_menu(tm)
@@ -921,6 +928,7 @@ class Workspace:
             shutil.rmtree(self._pdf_dir, ignore_errors=True)
         self.ribbon.save_state(cfg)
         cfg["show_splash"] = bool(self.splash_var.get())
+        cfg["cache_in_workbook"] = bool(self.cache_var.get())
         cfg["colour_scale"] = self.colscale_var.get()
         cfg["colour_reverse"] = bool(self.colrev_var.get())
         for k, v in self.fit_vars.items():
@@ -3106,6 +3114,24 @@ class Workspace:
                                      for s, rows in p.samples_metadata()]}
         return snap
 
+    def _results_cache(self):
+        """The parsed results to store beside the data (what the HTML browser
+        shows: spectra, fits and curves, as of now), or None when switched off
+        or there is nothing to show. Advisory only: the originals stay the
+        source of truth and the app re-parses them on opening."""
+        if not self.cache_var.get() or not self.docs:
+            return None
+        try:
+            payload = htmlbrowser.build_payload(
+                self.docs, self._display_for_export, self._report_details(),
+                self.methods_text(), self.calibration_statement(), [], None,
+                cameras=False, snapmaps=False)
+        except htmlbrowser.ViewerError:
+            return None
+        for f, p in zip(payload["files"], self.docs):
+            f["id"] = self.file_ids.get(id(p), "")
+        return payload
+
     def _make_book(self):
         """``(Workbook, preview PNG bytes or None, bytes of data files)`` for
         the current session (nothing is written or changed)."""
@@ -3131,7 +3157,8 @@ class Workspace:
             logo=self.logo, metadata=self._metadata_snapshot(),
             annotations=self.ann.to_json(),
             holder={"calibration": self.calib} if self.calib else {},
-            created=self.wb_created, extra=dict(self.wb_extra))
+            created=self.wb_created, extra=dict(self.wb_extra),
+            cache=self._results_cache())
         return book, preview, total
 
     def save_workbook(self, as_new=False):
@@ -3156,12 +3183,14 @@ class Workspace:
         self.root.config(cursor="watch")
         self.root.update_idletasks()
         try:
-            wbk.save(path, book, preview)
+            notes = wbk.save(path, book, preview)
         except (wbk.WorkbookError, OSError) as exc:
             messagebox.showerror("Could not save workbook", str(exc))
             return False
         finally:
             self.root.config(cursor="")
+        if notes:
+            messagebox.showinfo("Workbook saved", "\n\n".join(notes))
         self.wb_path, self.wb_created = path, book.created
         self._wb_sig = self._signature()
         self._add_recent(path)
@@ -3455,6 +3484,42 @@ class Workspace:
                 f"{extra}\n\nOpen it now?"):
             open_external(path)
 
+    def export_html_from_workbook(self):
+        """A data browser page from a saved workbook's stored results, without
+        loading its data files."""
+        book = filedialog.askopenfilename(
+            title="Choose a saved workbook",
+            filetypes=[("Experiment workbook", "*" + wbk.EXT),
+                       ("All files", "*.*")])
+        if not book:
+            return
+        stem = os.path.splitext(os.path.basename(book))[0]
+        path = filedialog.asksaveasfilename(
+            title="Save interactive data browser", defaultextension=".html",
+            initialfile=f"{stem} - data browser.html",
+            filetypes=[("HTML page", "*.html")])
+        if not path:
+            return
+        self.root.config(cursor="watch")
+        self.root.update_idletasks()
+        try:
+            size = htmlbrowser.write_html_from_workbook(book, path)
+        except htmlbrowser.ViewerError as exc:
+            messagebox.showinfo("Data browser", str(exc))
+            return
+        except Exception as exc:
+            messagebox.showerror("Data browser failed", str(exc))
+            return
+        finally:
+            self.root.config(cursor="")
+        if messagebox.askyesno(
+                "Data browser saved",
+                f"Saved ({size / 1048576:.1f} MB) to\n{path}\n\nSaved figures, "
+                f"the holder photo, camera pictures and SnapMaps are not in "
+                f"it (they are not part of the stored results).\n\nOpen it "
+                f"now?"):
+            open_external(path)
+
     def handover_parts(self, sections, workbook_tmp=None):
         """The files of a hand-over package for the chosen sections, plus a
         list of notes about anything that had to be left out."""
@@ -3505,7 +3570,7 @@ class Workspace:
                 notes.append(f"data browser: {exc}")
         if "workbook" in sections and workbook_tmp:
             book, preview, _total = self._make_book()
-            wbk.save(workbook_tmp, book, preview)
+            notes += wbk.save(workbook_tmp, book, preview)
             stem = handover.safe_stem(details.get("title"), "experiment")
             parts.append(handover.Part(
                 f"workbook/{stem}{wbk.EXT}",
