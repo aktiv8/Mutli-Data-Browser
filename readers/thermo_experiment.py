@@ -23,7 +23,7 @@ from __future__ import annotations
 import os
 import re
 
-from .base import ImageBlob, SpectrumFile, TreeNode
+from .base import SpectrumFile, TreeNode
 from . import thermo_vgx
 from .thermo_avg import ThermoAvgFile
 from .thermo_vgd import ThermoVgdFile
@@ -171,7 +171,7 @@ class ThermoExperiment(SpectrumFile):
         if not files:
             raise ValueError("no Avantage data files (.vgd / .avg) found here")
 
-        loaded = []                     # (path, sub, sample, config, rank)
+        loaded = []                     # (path, relative path, reader, sample, config)
         for i, f in enumerate(files):
             if progress and progress(i, len(files), os.path.basename(f)):
                 raise LoadCancelled()
