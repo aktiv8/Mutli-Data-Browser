@@ -10,7 +10,11 @@ the data. The data are one JSON document, gzip-compressed and base64-encoded
   and peak markers),
 * the saved figures as pre-rendered PNGs with their captions,
 * the methods text, the calibration statement and the workbook details,
-* the holder photo with the analysis positions already placed on it.
+* the holder photo with the analysis positions already placed on it,
+* the sample-view camera pictures (shrunk to JPEG) with the analysis points and
+  SnapMap outlines that fall in each already placed, and
+* every SnapMap as its pixels (16-bit counts in steps of 1/8, deflated) so the
+  page can redraw the map for any energy window and area.
 
 Display names and binding-energy shifts are applied (``display``), exactly as
 in the app's own exports. No Tk and no matplotlib here.
@@ -22,13 +26,16 @@ import base64
 import datetime
 import gzip
 import html
+import io
 import json
 import os
 import re
+import zlib
 
 import annotations as an
 import appinfo
 import holder
+import snapshot
 import themes
 import viewdata
 
@@ -37,6 +44,11 @@ VIEWER_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "viewer")
 DETAIL_KEYS = ("title", "customer", "reference", "operator", "date",
                "summary")
 MAX_PHOTO_BYTES = 6 * 1024 * 1024        # a bigger photo is left out
+CAMERA_MAX_PX = 800                      # longest side of an embedded camera picture
+CAMERA_QUALITY = 78                      # JPEG quality
+CAMERA_BUDGET = 40 * 1024 * 1024         # pictures beyond this are left out
+MAP_STEP = 0.125                         # counts per step of a stored map value
+MAP_BUDGET = 40 * 1024 * 1024            # compressed SnapMap bytes; see pack_maps
 
 
 class ViewerError(Exception):
@@ -122,6 +134,173 @@ def _holder_views(docs, calib, label_of):
     return out
 
 
+# -- camera pictures --------------------------------------------------------------
+def shrink_picture(data, max_px=CAMERA_MAX_PX, quality=CAMERA_QUALITY):
+    """``(jpeg bytes, width, height)`` of an image, no side longer than
+    ``max_px``; needs Pillow."""
+    from PIL import Image
+    im = Image.open(io.BytesIO(data)).convert("RGB")
+    k = min(1.0, max_px / max(im.size))
+    if k < 1.0:
+        im = im.resize((max(1, round(im.width * k)),
+                        max(1, round(im.height * k))), Image.LANCZOS)
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=quality, optimize=True)
+    return buf.getvalue(), im.width, im.height
+
+
+def _camera_views(docs, label_of, notes):
+    """One entry per calibrated camera picture: the shrunk JPEG, the analysis
+    points inside it and the outline of each SnapMap taken on it (all in the
+    shrunk picture's pixels). Returns ``(views, {id(blob): view id})``."""
+    views, ids = [], {}
+    try:
+        import PIL  # noqa: F401
+    except ImportError:
+        if any(snapshot.has_calibration(b.calib) for p in docs
+               for b in p.images):
+            notes.append("Camera pictures were left out: Pillow is not "
+                         "installed.")
+        return views, ids
+    used, left_out = 0, 0
+    for fi, p in enumerate(docs):
+        positions = p.sample_positions()
+        cubes = [(r, r.extra["cube"]) for r in p.regions
+                 if r.extra.get("cube") is not None]
+        for blob in p.images:
+            if not snapshot.has_calibration(blob.calib):
+                continue
+            png = p.extract_jpeg(blob)
+            if not png:
+                continue
+            try:
+                jpeg, w, h = shrink_picture(png)
+            except Exception:                           # noqa: BLE001
+                left_out += 1
+                continue
+            if used + len(jpeg) > CAMERA_BUDGET:
+                left_out += 1
+                continue
+            used += len(jpeg)
+            cal = blob.calib
+            k = w / cal["width"]
+            pts = {label_of(p, s): [round(c * k, 1), round(r * k, 1)]
+                   for s, (c, r) in snapshot.markers(cal, positions).items()}
+            outlines, seen = [], set()
+            for r, cube in cubes:
+                if cube.stage_x_mm is None or r.sample in seen:
+                    continue                       # one outline per map site
+                seen.add(r.sample)
+                c, ry = snapshot.stage_to_pixel(cal, cube.stage_x_mm,
+                                                cube.stage_y_mm)
+                if 0 <= c <= cal["width"] and 0 <= ry <= cal["height"]:
+                    left, top, mw, mh = snapshot.map_rectangle(cal, cube)
+                    outlines.append({"sample": label_of(p, r.sample),
+                                     "rect": [round(v * k, 1) for v in
+                                              (left, top, mw, mh)]})
+            fov = snapshot.field_of_view_mm(cal)
+            view = {"id": f"c{len(views)}", "name": blob.name,
+                    "sample": label_of(p, blob.sample) if blob.sample else "",
+                    "file": fi, "w": w, "h": h,
+                    "img": data_uri("image/jpeg", jpeg),
+                    "fov": [round(fov[0], 3), round(fov[1], 3)],
+                    "stage": [round(cal["x_mm"], 4), round(cal["y_mm"], 4)],
+                    "points": pts, "maps": outlines,
+                    "bar_px": round(1000.0 / cal["um_per_px_x"] * k, 2)}
+            views.append(view)
+            ids[id(blob)] = view["id"]
+    if left_out:
+        notes.append(f"{left_out} camera picture(s) were left out (size limit "
+                     f"or unreadable).")
+    return views, ids
+
+
+# -- SnapMaps ---------------------------------------------------------------------
+def pack_cube(cube, energy, rebin=1, step=MAP_STEP):
+    """A SnapMap's pixels for the page: counts as 16-bit steps of ``step`` (or
+    coarser when the map is very bright), deflated. ``rebin`` sums that many
+    neighbouring energy channels. Returns ``(entry, compressed bytes)``;
+    needs numpy."""
+    import numpy as np
+    a = cube.array3d().astype(np.float64)
+    e = np.asarray(energy, dtype=float)
+    if rebin > 1:
+        n = a.shape[2] // rebin * rebin
+        a = a[:, :, :n].reshape(cube.ny, cube.nx, n // rebin,
+                                rebin).sum(axis=3)
+        e = e[:n].reshape(-1, rebin).mean(axis=1)
+    q = max(step, float(a.max()) / 65535.0)
+    z = zlib.compress(
+        np.clip(np.rint(a / q), 0, 65535).astype("<u2").tobytes(), 6)
+    return ({"nx": cube.nx, "ny": cube.ny, "x0": cube.x0, "dx": cube.dx,
+             "y0": cube.y0, "dy": cube.dy, "n": int(a.shape[2]),
+             "e": pack_axis(list(e)), "q": q,
+             "z": base64.b64encode(z).decode("ascii")}, len(z))
+
+
+def pack_maps(items, budget=MAP_BUDGET):
+    """Pack ``items`` (``[(cube, energy)]``) within ``budget`` compressed bytes:
+    at full energy resolution if that fits, else summing 2, then 4 channels,
+    else leaving out the last maps. Returns ``(entries, rebin, n_left_out)``
+    with ``entries`` aligned to the maps kept (a prefix of ``items``)."""
+    for rebin in (1, 2, 4):
+        packed = [pack_cube(c, e, rebin) for c, e in items]
+        if sum(n for _e, n in packed) <= budget:
+            return [e for e, _n in packed], rebin, 0
+    kept, total = [], 0
+    for entry, n in packed:
+        if total + n > budget:
+            break
+        kept.append(entry)
+        total += n
+    return kept, 4, len(items) - len(kept)
+
+
+def _map_entries(src, cam_ids, label_of, notes):
+    """The page's SnapMap list; also sets ``reg["map"]`` on each map's
+    spectrum so the tree can offer to open it."""
+    if not src:
+        return []
+    try:
+        import numpy  # noqa: F401
+    except ImportError:
+        notes.append("SnapMaps were left out: numpy is not installed.")
+        return []
+    packed, rebin, dropped = pack_maps(
+        [(r.extra["cube"], d.energy) for _p, r, d, _reg in src],
+        budget=MAP_BUDGET)
+    if rebin > 1:
+        notes.append(f"SnapMaps are stored with {rebin} energy channels summed "
+                     f"into one (size limit).")
+    if dropped:
+        notes.append(f"{dropped} SnapMap(s) were left out (size limit).")
+    out = []
+    for (p, r, d, reg), entry in zip(src, packed):
+        cube = r.extra["cube"]
+        mid = f"m{len(out)}"
+        entry.update(id=mid, region=reg["id"], sample=label_of(p, r.sample),
+                     name=d.name, stage=None, cam=None)
+        if cube.stage_x_mm is not None:
+            entry["stage"] = [round(cube.stage_x_mm, 4),
+                              round(cube.stage_y_mm, 4)]
+            near = snapshot.nearest_image(
+                [b for b in p.images if id(b) in cam_ids],
+                cube.stage_x_mm, cube.stage_y_mm)
+            if near is not None:
+                cal = near.calib
+                cx, cy = snapshot.stage_to_pixel(cal, cube.stage_x_mm,
+                                                 cube.stage_y_mm)
+                ux, uy = cal["um_per_px_x"], cal["um_per_px_y"]
+                # the picture's edges in the map's own micrometres
+                entry["cam"] = {"id": cam_ids[id(near)], "ext": [
+                    round(v, 2) for v in (-cx * ux, (cal["width"] - cx) * ux,
+                                          (cal["height"] - cy) * uy,
+                                          -cy * uy)]}
+        reg["map"] = mid
+        out.append(entry)
+    return out
+
+
 # -- the payload --------------------------------------------------------------------
 def _meta(md):
     """Non-empty metadata values as strings, order kept."""
@@ -129,14 +308,18 @@ def _meta(md):
 
 
 def build_payload(docs, display=None, details=None, methods_text="",
-                  calibration="", figures=(), calib=None, generated=None):
+                  calibration="", figures=(), calib=None, generated=None,
+                  cameras=True, snapmaps=True):
     """The data of the browser as a JSON-able dict.
 
     ``figures`` is ``[{"name", "caption", "pages": [png bytes]}]``; ``calib``
     the holder calibration (or None). ``display(region)`` gives a region as
-    exported (renamed, shifted)."""
+    exported (renamed, shifted). ``cameras`` / ``snapmaps`` switch the camera
+    pictures and the SnapMap pixels off; anything left out or thinned to fit
+    the size limits is said in ``build_notes``."""
     details = details or {}
-    samples, files = [], []
+    samples, files, notes = [], [], []
+    map_src = []                     # (parser, region, shown region, its dict)
     n_regions = 0
     label_map = {}                       # (id(parser), original sample) -> label
     for fi, p in enumerate(docs):
@@ -182,6 +365,8 @@ def build_payload(docs, display=None, details=None, methods_text="",
                 "markers": marks,
             }
             entry["regions"].append(reg)
+            if snapmaps and r.extra.get("cube") is not None:
+                map_src.append((p, r, d, reg))
             n_regions += 1
         samples += [by_sample[k] for k in order]
     if not n_regions:
@@ -199,8 +384,11 @@ def build_payload(docs, display=None, details=None, methods_text="",
             figs.append({"name": f.get("name", ""),
                          "caption": f.get("caption", ""), "pages": pages})
     calib = holder.sanitise(calib) if calib else None
-    holders = _holder_views(
-        docs, calib, lambda p, s: label_map.get((id(p), s), s))
+    label_of = lambda p, s: label_map.get((id(p), s), s)       # noqa: E731
+    holders = _holder_views(docs, calib, label_of)
+    cams, cam_ids = (_camera_views(docs, label_of, notes) if cameras
+                     else ([], {}))
+    maps = _map_entries(map_src, cam_ids, label_of, notes)
     light, dark = themes.PALETTES["Light"], themes.PALETTES["Dark"]
     return {
         "v": FORMAT_VERSION,
@@ -210,7 +398,8 @@ def build_payload(docs, display=None, details=None, methods_text="",
         "details": {k: str(details.get(k, "") or "") for k in DETAIL_KEYS},
         "methods": methods_text or "", "calibration": calibration or "",
         "files": files, "samples": samples, "figures": figs,
-        "holders": holders,
+        "holders": holders, "cameras": cams, "maps": maps,
+        "build_notes": notes,
         "palette": {"light": list(light["cycle"]), "dark": list(dark["cycle"]),
                     "bg": {"light": light["plot_bg"], "dark": dark["plot_bg"]}},
     }

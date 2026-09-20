@@ -3194,7 +3194,8 @@ class Workspace:
         self.status.config(text="Building the data browser…")
         self.root.update_idletasks()
         try:
-            size = htmlbrowser.write_html(path, self.browser_payload())
+            payload = self.browser_payload()
+            size = htmlbrowser.write_html(path, payload)
         except htmlbrowser.ViewerError as exc:
             messagebox.showerror("Data browser", str(exc))
             return
@@ -3204,11 +3205,16 @@ class Workspace:
         finally:
             self.root.config(cursor="")
             self.status.config(text="")
+        extra = "".join(f"\n• {n}" for n in payload.get("build_notes", []))
+        kinds = [f"{len(payload[k])} {w}" for k, w in
+                 (("cameras", "camera pictures"), ("maps", "SnapMaps"))
+                 if payload.get(k)]
         if messagebox.askyesno(
                 "Data browser saved",
                 f"Saved ({size / 1048576:.1f} MB) to\n{path}\n\nIt is one "
-                f"file that opens in any modern browser, offline.\n\nOpen "
-                f"it now?"):
+                f"file that opens in any modern browser, offline"
+                f"{' and holds ' + ' and '.join(kinds) if kinds else ''}."
+                f"{extra}\n\nOpen it now?"):
             open_external(path)
 
     def handover_parts(self, sections, workbook_tmp=None):

@@ -15,8 +15,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zlib
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT =os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import annotations  # noqa: E402
@@ -211,6 +212,184 @@ class TestPayload(unittest.TestCase):
         self.assertEqual(p["holders"][0]["points"], {})
 
 
+try:
+    import numpy as np
+    HAVE_NP = True
+except Exception:
+    HAVE_NP = False
+
+CAMERA_CAL = {"width": 64, "height": 48, "um_per_px_x": 50.0,
+              "um_per_px_y": 50.0, "x_mm": 10.0, "y_mm": 20.0}
+
+
+def eighths(v):
+    """A value the page stores exactly (multiples of 1/8)."""
+    return round(v * 8) / 8
+
+
+def map_cube(nx=6, ny=4, ne=40, seed=1):
+    """A small SnapMap: a peak on a sloping baseline, brighter to one side,
+    with reproducible noise; every value a multiple of 1/8."""
+    import snapmap
+    energy = [300.0 - 0.25 * i for i in range(ne)]
+    rng = np.random.RandomState(seed)
+    blocks = []
+    for iy in range(ny):
+        for ix in range(nx):
+            f = 1.0 + 0.1 * ix + 0.05 * iy
+            y = [eighths(20 + 0.5 * c + 60 * f * 2.718 ** (-((c - 18) / 3.0) ** 2)
+                         + rng.uniform(-3, 3)) for c in range(ne)]
+            blocks.append(((ix, iy), y))
+    cube = snapmap.build(energy, nx, ny, -25.0, 10.0, -15.0, 10.0, blocks)
+    cube.stage_x_mm, cube.stage_y_mm = 10.0, 20.0
+    return cube
+
+
+def cube_region(cube, name="C 1s", sample="S1"):
+    r = region(name, sample, n=cube.n_energy)
+    r.energy = list(cube.energy)
+    r.counts = cube.total()
+    r.extra["cube"] = cube
+    return r
+
+
+def camera_blob(name="S1 Pt #001a  10:00"):
+    from readers.imaging import encode_png
+    px = bytes((x * 4) % 256 if c == 0 else (y * 5) % 256 if c == 1 else 90
+               for y in range(48) for x in range(64) for c in range(3))
+    return ImageBlob(name=name, offset=0, data=encode_png(64, 48, px),
+                     is_jpeg_intact=False, fmt="png", sample="S1",
+                     calib=dict(CAMERA_CAL))
+
+
+@unittest.skipUnless(HAVE_NP and HAVE_PIL, "numpy and Pillow needed")
+class TestCamerasAndMaps(unittest.TestCase):
+    def payload(self, **kw):
+        cube = map_cube()
+        d = doc("a.vgd", [region("C 1s", "S2"), cube_region(cube)],
+                positions={"S1": (10.0, 20.0), "S2": (10.1, 20.1)},
+                images=[camera_blob()])
+        return hb.build_payload([d], **kw), cube
+
+    def test_the_picture_is_shrunk_and_carries_its_points(self):
+        p, _cube = self.payload()
+        (cam,) = p["cameras"]
+        self.assertTrue(cam["img"].startswith("data:image/jpeg;base64,"))
+        self.assertEqual((cam["w"], cam["h"]), (64, 48))
+        self.assertEqual(cam["fov"], [3.2, 2.4])
+        self.assertEqual(cam["sample"], "S1")
+        self.assertEqual(cam["bar_px"], 20.0)               # 1 mm at 50 um/px
+        # image x runs against stage X, y with stage Y (snapshot.py)
+        self.assertEqual(cam["points"]["S1"], [32.0, 24.0])
+        self.assertEqual(cam["points"]["S2"], [30.0, 26.0])
+        (out,) = cam["maps"]
+        self.assertEqual(out["sample"], "S1")
+        left, top, w, h = out["rect"]
+        self.assertAlmostEqual(left + w / 2, 32.0, places=1)
+        self.assertAlmostEqual(top + h / 2, 24.0, places=1)
+        self.assertAlmostEqual(w, 6 * 10 / 50, places=1)       # 60 um at 50 um/px
+
+    def test_a_large_picture_is_scaled_down_and_points_follow(self):
+        from readers.imaging import encode_png
+        w, h = 1600, 1200
+        blob = ImageBlob("big", 0, encode_png(w, h, bytes(w * h * 3)), False,
+                         fmt="png", sample="S1",
+                         calib=dict(CAMERA_CAL, width=w, height=h,
+                                    um_per_px_x=5.0, um_per_px_y=5.0))
+        d = doc("a.vgd", [region("C 1s", "S1")], positions={"S1": (10.0, 20.0)},
+                images=[blob])
+        (cam,) = hb.build_payload([d])["cameras"]
+        self.assertEqual((cam["w"], cam["h"]), (800, 600))
+        self.assertEqual(cam["points"]["S1"], [400.0, 300.0])     # centre, halved
+        self.assertEqual(cam["bar_px"], 100.0)                    # 1 mm = 200 px, halved
+
+    def test_map_pixels_survive_the_round_trip(self):
+        p, cube = self.payload()
+        (m,) = p["maps"]
+        self.assertEqual((m["nx"], m["ny"], m["n"]), (6, 4, 40))
+        raw = np.frombuffer(zlib.decompress(base64.b64decode(m["z"])), "<u2")
+        got = raw.reshape(4, 6, 40).astype(float) * m["q"]
+        self.assertEqual(m["q"], hb.MAP_STEP)
+        self.assertLessEqual(np.abs(got - cube.array3d()).max(), m["q"] / 2)
+        self.assertTrue(np.array_equal(got, cube.array3d()))     # eighths: exact
+        self.assertEqual(hb.pack_axis(list(cube.energy)), m["e"])
+        self.assertEqual((m["x0"], m["dx"], m["y0"], m["dy"]),
+                         (-25.0, 10.0, -15.0, 10.0))
+        # linked both ways: the spectrum knows its map, the map its spectrum
+        reg = [r for s in p["samples"] for r in s["regions"] if r.get("map")][0]
+        self.assertEqual(reg["map"], m["id"])
+        self.assertEqual(m["region"], reg["id"])
+        self.assertEqual((m["sample"], m["name"]), ("S1", "C 1s"))
+
+    def test_the_map_knows_which_picture_it_lies_on(self):
+        p, _cube = self.payload()
+        (m,) = p["maps"]
+        self.assertEqual(m["cam"]["id"], p["cameras"][0]["id"])
+        # the picture's edges in the map's own micrometres (map centred on it)
+        self.assertEqual(m["cam"]["ext"], [-1600.0, 1600.0, 1200.0, -1200.0])
+        self.assertEqual(m["stage"], [10.0, 20.0])
+
+    def test_switches_leave_things_out(self):
+        p, _c = self.payload(cameras=False)
+        self.assertEqual(p["cameras"], [])
+        self.assertIsNone(p["maps"][0]["cam"])
+        p, _c = self.payload(snapmaps=False)
+        self.assertEqual(p["maps"], [])
+        self.assertTrue(all("map" not in r for s in p["samples"]
+                            for r in s["regions"]))
+        self.assertEqual(len(p["cameras"]), 1)
+
+    def test_no_maps_or_pictures_still_gives_the_keys(self):
+        p = hb.build_payload([doc("a.vms", [region("C 1s", "S1")])])
+        self.assertEqual((p["cameras"], p["maps"], p["build_notes"]), ([], [], []))
+
+    def test_an_uncalibrated_picture_is_not_a_camera_view(self):
+        blob = ImageBlob("holder", 0, jpeg(50, 40), True)
+        p = hb.build_payload([doc("a.vms", [region("C 1s", "S1")], images=[blob])])
+        self.assertEqual(p["cameras"], [])
+
+    def test_maps_are_thinned_to_fit_a_size_budget(self):
+        items = [(map_cube(seed=s), map_cube().energy) for s in (1, 2, 3)]
+        full = sum(n for _e, n in (hb.pack_cube(c, e) for c, e in items))
+        half = sum(n for _e, n in (hb.pack_cube(c, e, 2) for c, e in items))
+        self.assertLess(half, full)
+        entries, rebin, dropped = hb.pack_maps(items, budget=full)
+        self.assertEqual((len(entries), rebin, dropped), (3, 1, 0))
+        entries, rebin, dropped = hb.pack_maps(items, budget=(full + half) // 2)
+        self.assertEqual((len(entries), rebin, dropped), (3, 2, 0))
+        self.assertEqual(entries[0]["n"], 20)
+        self.assertEqual(entries[0]["e"]["n"], 20)
+        entries, rebin, dropped = hb.pack_maps(items, budget=1)
+        self.assertEqual((entries, dropped), ([], 3))
+
+    def test_the_payload_says_when_it_thinned_or_dropped_maps(self):
+        cube = map_cube()
+        d = doc("a.vgd", [cube_region(cube)], positions={"S1": (10.0, 20.0)})
+        full = hb.pack_cube(cube, cube.energy)[1]
+        half = hb.pack_cube(cube, cube.energy, 2)[1]
+        old = hb.MAP_BUDGET
+        self.addCleanup(setattr, hb, "MAP_BUDGET", old)
+        hb.MAP_BUDGET = (full + half) // 2
+        p = hb.build_payload([d])
+        self.assertEqual(p["maps"][0]["n"], 20)
+        self.assertTrue(any("2 energy channels summed" in n
+                            for n in p["build_notes"]))
+        hb.MAP_BUDGET = 1
+        p = hb.build_payload([d])
+        self.assertEqual(p["maps"], [])
+        self.assertTrue(any("left out" in n for n in p["build_notes"]))
+        # and the spectrum stays, with no link to a map that is not there
+        self.assertNotIn("map", p["samples"][0]["regions"][0])
+
+    def test_rebinned_map_sums_the_channels(self):
+        cube = map_cube()
+        entry, _n = hb.pack_cube(cube, cube.energy, rebin=2)
+        raw = np.frombuffer(zlib.decompress(base64.b64decode(entry["z"])), "<u2")
+        got = raw.reshape(4, 6, 20) * entry["q"]
+        want = cube.array3d().reshape(4, 6, 20, 2).sum(axis=3)
+        self.assertLessEqual(np.abs(got - want).max(), entry["q"] / 2 + 1e-9)
+
+
 class TestEncoding(unittest.TestCase):
     def test_round_trip(self):
         payload = {"a": [1, 2, 3], "t": "café ✓", "n": None}
@@ -307,9 +486,57 @@ def _node():
     return None
 
 
+def _window_case(y, ne=None):
+    """A spectrum on every pixel of a tiny map and what snapmap.default_window
+    says about it."""
+    import snapmap
+    ne = len(y)
+    energy = [300.0 - 0.25 * i for i in range(ne)]
+    cube = snapmap.build(energy, 2, 2, 0.0, 1.0, 0.0, 1.0,
+                         [((ix, iy), y) for ix in range(2) for iy in range(2)])
+    return {"energy": energy, "y": y, "expect": list(snapmap.default_window(cube))}
+
+
 @unittest.skipUnless(_node(), "Node.js not installed")
 class TestJavaScript(unittest.TestCase):
     """viewer.js against numbers computed by the Python side."""
+
+    def map_fixture(self):
+        """The SnapMap page maths against snapmap.py on the same map."""
+        import snapmap
+        cube = map_cube()
+        d = doc("a.vgd", [cube_region(cube)], positions={"S1": (10.0, 20.0)})
+        entry = hb.build_payload([d])["maps"][0]
+        e = cube.energy
+        lo, hi = e[22], e[15]
+        rect = (-25.0, -15.0, 5.0, 5.0)
+        mask = cube.rect_mask(*rect)
+        img = cube.image(lo, hi)
+        n = cube.nx * cube.ny
+        cases = []
+        peak = [eighths(20 + 0.5 * c + 60 * 2.718 ** (-((c - 18) / 3.0) ** 2))
+                for c in range(60)]
+        cases.append(_window_case(peak))
+        # the background climbs to the scan edge, higher than the peak
+        cases.append(_window_case([eighths(150 - 2.0 * c + 25 * 2.718 ** (-((c - 40) / 3.0) ** 2)
+                                           + (0 if c > 8 else 30)) for c in range(60)]))
+        cases.append(_window_case([10.0] * 40))                    # nothing there
+        cases.append(_window_case([eighths(5 + 0.3 * c) for c in range(30)]))
+        return {
+            "entry": entry, "energy": list(e), "win": [lo, hi], "rect": list(rect),
+            "image": img.ravel().tolist(),
+            "image_bg": cube.image(lo, hi, background=True).ravel().tolist(),
+            "total_mean": (np.asarray(cube.total()) / n).tolist(),
+            "roi_mean": (np.asarray(cube.roi_spectrum(mask))
+                         / int(mask.sum())).tolist(),
+            "mask": mask.ravel().astype(int).tolist(), "mask_count": int(mask.sum()),
+            "window_cases": cases, "range": list(snapmap.colour_range(img)),
+            "csv": snapmap.to_csv_grid(cube, img),
+            "pixels": [[-25.0, -15.0, [0, 0]], [15.0, 5.0, [4, 2]],
+                       [30.0, 0.0, None], [-25.0, 40.0, None], [-21.0, -12.0, [0, 0]]],
+            "channels": [[e[3], e[9]],
+                         np.flatnonzero(cube.channels(e[3], e[9])).tolist()],
+        }
 
     def test_pure_half_agrees_with_python(self):
         regs = [region("C 1s", "A", n=61), region("O 1s", "A", n=41, lo=525,
@@ -343,6 +570,8 @@ class TestJavaScript(unittest.TestCase):
                 "csv_ids": [payload["samples"][0]["regions"][0]["id"],
                             payload["samples"][0]["regions"][1]["id"]],
             }
+            if HAVE_NP:
+                fx["map"] = self.map_fixture()
             fx_path = os.path.join(tmp, "fx.json")
             with open(fx_path, "w", encoding="utf-8") as fh:
                 json.dump(fx, fh)

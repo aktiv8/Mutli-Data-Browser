@@ -305,8 +305,25 @@ values), step through depth levels one at a time, read the acquisition
 metadata, notes and methods, look at your saved figures with their captions,
 see the holder photo with the analysis positions (click a marker to select
 that sample) and download the ticked spectra as CSV. It has light, dark and
-print styles. The data are compressed inside the file (a few MB at most for a
-large experiment); it uses no libraries and makes no network requests.
+print styles. The data are compressed inside the file; it uses no libraries and
+makes no network requests.
+
+For an Avantage experiment it also holds the **camera images** and **SnapMaps**:
+
+* **Camera images** tab: each picture (shrunk to 800 px, JPEG) with the analysis
+  points that fall in it, the outline of any SnapMap taken there and a scale bar.
+  Click a marker to select that sample; selecting a sample in the list brings up
+  its picture.
+* **SnapMaps** tab (or the small *map* button beside a SnapMap in the list): the
+  same viewer as in the app. Drag across the spectrum to choose the energy window
+  and the map redraws; drag a box (or click a pixel) for that area's spectrum
+  against the whole map's; switch element (the area is kept); choose the colour
+  scale; remove a sloping background; lay the map over the camera image; download
+  the map values or the spectra as CSV. The pixels are stored as counts in steps
+  of 1/8 (well below the counting noise), compressed. A whole point's eight maps
+  add roughly 7 MB; if the maps would pass 40 MB the energy channels are summed
+  in twos, then fours, and as a last resort the last maps are left out, and the
+  dialog that reports the saved file says so.
 
 ## Plot style
 

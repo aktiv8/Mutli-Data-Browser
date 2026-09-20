@@ -219,6 +219,150 @@
     return specs;
   };
 
+  /* ------------------------------------------------------------- SnapMaps */
+  /* A map arrives as 16-bit steps of m.q counts, [row][column][channel],
+     deflated. The functions below mirror snapmap.py so the page can redraw a
+     map for any energy window and area; tests compare them with Python. */
+  V.decodeMap = function (m) {
+    if (typeof DecompressionStream === 'undefined') {
+      return Promise.reject(new Error('This browser has no DecompressionStream'));
+    }
+    var stream = new Blob([V.b64ToBytes(m.z)]).stream()
+      .pipeThrough(new DecompressionStream('deflate'));
+    return new Response(stream).arrayBuffer().then(function (buf) {
+      var data = new Uint16Array(buf);
+      if (data.length !== m.nx * m.ny * m.n) throw new Error('the map data has the wrong size');
+      return data;
+    });
+  };
+  V.mapChannels = function (energy, lo, hi) {
+    var a = Math.min(lo, hi), b = Math.max(lo, hi), idx = [];
+    for (var i = 0; i < energy.length; i++) if (energy[i] >= a && energy[i] <= b) idx.push(i);
+    return idx;
+  };
+  /* counts summed over an energy window, one value per pixel; `background`
+     takes a straight line through the ends of the window off first */
+  V.mapImage = function (m, data, energy, lo, hi, background) {
+    var np = m.nx * m.ny, out = new Float64Array(np), idx = V.mapChannels(energy, lo, hi), n = idx.length;
+    if (!n) return out;
+    var k = Math.max(1, Math.floor(n / 8)), bg = !!background && n >= 4, p, j, base, s, a, b, t;
+    for (p = 0; p < np; p++) {
+      base = p * m.n; s = 0;
+      if (bg) {
+        a = 0; b = 0;
+        for (j = 0; j < k; j++) { a += data[base + idx[j]]; b += data[base + idx[n - 1 - j]]; }
+        a = a * m.q / k; b = b * m.q / k;
+        for (j = 0; j < n; j++) s += data[base + idx[j]] * m.q - (a + (b - a) * (j / (n - 1)));
+      } else {
+        for (j = 0; j < n; j++) s += data[base + idx[j]];
+        s *= m.q;
+      }
+      out[p] = s;
+    }
+    return out;
+  };
+  /* boolean mask (1 = in) of the pixels whose centres lie in a rectangle (µm) */
+  V.rectMask = function (m, xa, ya, xb, yb) {
+    var mask = new Uint8Array(m.nx * m.ny), n = 0, ix, iy, x, y;
+    var x0 = Math.min(xa, xb), x1 = Math.max(xa, xb), y0 = Math.min(ya, yb), y1 = Math.max(ya, yb);
+    for (iy = 0; iy < m.ny; iy++) {
+      y = m.y0 + iy * m.dy;
+      if (y < y0 || y > y1) continue;
+      for (ix = 0; ix < m.nx; ix++) {
+        x = m.x0 + ix * m.dx;
+        if (x >= x0 && x <= x1) { mask[iy * m.nx + ix] = 1; n++; }
+      }
+    }
+    return { mask: mask, count: n };
+  };
+  V.pixelAt = function (m, x, y) {
+    var ix = m.dx ? Math.round((x - m.x0) / m.dx) : -1, iy = m.dy ? Math.round((y - m.y0) / m.dy) : -1;
+    return ix >= 0 && ix < m.nx && iy >= 0 && iy < m.ny ? [ix, iy] : null;
+  };
+  /* counts per pixel at every channel, over a mask (or the whole map) */
+  V.meanSpectrum = function (m, data, mask) {
+    var out = new Float64Array(m.n), np = m.nx * m.ny, cnt = 0, p, c, base;
+    for (p = 0; p < np; p++) {
+      if (mask && !mask[p]) continue;
+      cnt++; base = p * m.n;
+      for (c = 0; c < m.n; c++) out[c] += data[base + c];
+    }
+    for (c = 0; c < m.n; c++) out[c] = cnt ? out[c] * m.q / cnt : 0;
+    return out;
+  };
+  /* the window round the strongest peak (see snapmap.default_window) */
+  V.defaultWindow = function (energy, y, fraction, minWidth) {
+    fraction = fraction === undefined ? 0.3 : fraction;
+    minWidth = minWidth === undefined ? 2.0 : minWidth;
+    var n = y.length, i, lo = Infinity, hi = -Infinity;
+    for (i = 0; i < n; i++) { if (energy[i] < lo) lo = energy[i]; if (energy[i] > hi) hi = energy[i]; }
+    if (n < 10) return [lo, hi];
+    var ys = new Array(n), res = new Array(n), score = new Array(n);
+    for (i = 0; i < n; i++) ys[i] = (y[Math.max(0, i - 1)] + y[i] + y[Math.min(n - 1, i + 1)]) / 3;
+    var k = Math.max(2, Math.floor(n / 20)), a0 = 0, b0 = 0;
+    for (i = 0; i < k; i++) { a0 += ys[i]; b0 += ys[n - 1 - i]; }
+    a0 /= k; b0 /= k;
+    for (i = 0; i < n; i++) {
+      var x = -1 + 2 * i / (n - 1);
+      res[i] = ys[i] - (a0 + (b0 - a0) * (i / (n - 1)));
+      score[i] = res[i] * Math.exp(-Math.pow(x / 0.6, 2));
+    }
+    var tenth = Math.floor(n / 10), best = -1;
+    for (i = 0; i < n; i++) {
+      if (i < tenth || i >= n - tenth) score[i] = -Infinity;
+      if (best < 0 || score[i] > score[best]) best = i;
+    }
+    if (!(res[best] > 0)) return [lo, hi];
+    var thr = fraction * res[best], a = best, b = best;
+    while (a > 0 && res[a - 1] >= thr) a--;
+    while (b < n - 1 && res[b + 1] >= thr) b++;
+    a = Math.max(0, a - 1); b = Math.min(n - 1, b + 1);
+    var step = Math.abs(energy[n - 1] - energy[0]) / (n - 1), want = step > 0 ? Math.round(minWidth / step) : 0;
+    while (b - a < want && (a > 0 || b < n - 1)) { a = Math.max(0, a - 1); b = Math.min(n - 1, b + 1); }
+    return [Math.min(energy[a], energy[b]), Math.max(energy[a], energy[b])];
+  };
+  /* colour range of an image: 1st and 99th percentile (linear, as numpy) */
+  V.percentile = function (sorted, p) {
+    var pos = (sorted.length - 1) * p / 100, lo = Math.floor(pos), hi = Math.ceil(pos);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  };
+  V.colourRange = function (img, low, high) {
+    var a = [], i;
+    for (i = 0; i < img.length; i++) if (isFinite(img[i])) a.push(img[i]);
+    if (!a.length) return [0, 1];
+    a.sort(function (x, y) { return x - y; });
+    var lo = V.percentile(a, low === undefined ? 1 : low), hi = V.percentile(a, high === undefined ? 99 : high);
+    if (hi <= lo) { lo = a[0]; hi = a[a.length - 1]; }
+    if (hi <= lo) hi = lo + 1;
+    return [lo, hi];
+  };
+  /* colour scales as anchor colours (close to matplotlib's, not identical) */
+  V.SCALES = {
+    Viridis: ['#440154', '#482878', '#3E4A89', '#31688E', '#26828E', '#1F9E89', '#35B779', '#6DCD59', '#B4DE2C', '#FDE725'],
+    Magma: ['#000004', '#180F3E', '#451077', '#721F81', '#9F2F7F', '#CD4071', '#F1605D', '#FD9567', '#FEC98D', '#FCFDBF'],
+    Cividis: ['#00204D', '#00336F', '#39486B', '#575C6C', '#707173', '#8A8779', '#A69D75', '#C4B56C', '#E4CF5B', '#FFEA46'],
+    Greys: ['#0A0A0A', '#FFFFFF']
+  };
+  V.scaleColour = function (name, t) {      /* t in [0, 1] -> [r, g, b] */
+    var st = V.SCALES[name] || V.SCALES.Viridis;
+    t = Math.max(0, Math.min(1, t)) * (st.length - 1);
+    var i = Math.min(st.length - 2, Math.floor(t)), f = t - i;
+    var a = V.hexToRgb(st[i]), b = V.hexToRgb(st[i + 1]);
+    return [0, 1, 2].map(function (k) { return a[k] + (b[k] - a[k]) * f; });
+  };
+  /* the map values as CSV: a header row of X (µm), then one row per Y (µm) */
+  V.mapCsv = function (m, img) {
+    var head = ['Y/X (um)'], rows, ix, iy;
+    for (ix = 0; ix < m.nx; ix++) head.push(String(+(m.x0 + ix * m.dx).toPrecision(6)));
+    rows = [head.join(',')];
+    for (iy = 0; iy < m.ny; iy++) {
+      var r = [String(+(m.y0 + iy * m.dy).toPrecision(6))];
+      for (ix = 0; ix < m.nx; ix++) r.push(String(+img[iy * m.nx + ix].toPrecision(7)));
+      rows.push(r.join(','));
+    }
+    return rows.join('\r\n') + '\r\n';
+  };
+
   G.XPSViewer = V;
   if (typeof module !== 'undefined' && module.exports) module.exports = V;
   if (typeof document === 'undefined') return;
@@ -227,7 +371,9 @@
   var S = { data: null, specs: [], byId: {}, ticked: new Set(), selected: null, mode: 'stack',
             norm: 'none', offset: 0.6, scale: 'Binding', levelOn: false, levelIdx: 0, levels: [],
             panels: new Map(), theme: 'auto', printing: false, nodes: [], holderIdx: 0,
-            holderHot: null, tab: 'plot', filter: '' };
+            holderHot: null, tab: 'plot', filter: '', camIdx: 0, mapById: {}, camById: {},
+            M: { id: null, data: null, energy: null, total: null, win: null, mask: null, count: 0,
+                 scale: 'Viridis', bg: false, overlay: false, alpha: 0.65, loading: false, drag: null } };
   var $ = function (id) { return document.getElementById(id); };
 
   function h(tag, attrs) {
@@ -257,7 +403,7 @@
   function applyTheme() {
     document.documentElement.setAttribute('data-eff', isDark() ? 'dark' : 'light');
     requestRender();
-    if (S.tab === 'holder') drawHolder();
+    redrawTab();
   }
   function colours() {
     var cs = G.getComputedStyle(document.documentElement);
@@ -309,7 +455,13 @@
     var lbl = h('span', { class: 'lbl', tabindex: '0', role: 'treeitem', text: label,
                           title: (group ? group + ' – ' : '') + label });
     var sw = h('span', { class: 'swatch' });
-    var li = h('li', null, h('div', { class: 'row' }, h('button', { class: 'tw leaf', tabindex: '-1', 'aria-hidden': 'true', text: '▸' }), chk, sw, lbl));
+    var row = h('div', { class: 'row' }, h('button', { class: 'tw leaf', tabindex: '-1', 'aria-hidden': 'true', text: '▸' }), chk, sw, lbl);
+    if (spec && spec.reg.map) {                 /* a SnapMap: offer its pixels */
+      var mb = h('button', { type: 'button', class: 'mapbtn', text: 'map', title: 'Open the SnapMap (where the signal comes from)' });
+      mb.addEventListener('click', function () { showTab('maps'); openMap(spec.reg.map); });
+      row.appendChild(mb);
+    }
+    var li = h('li', null, row);
     var node = { li: li, chk: chk, lbl: lbl, sw: sw, leaf: id, kids: [], label: label, spec: spec, group: group };
     chk.addEventListener('change', function () { setTicked([id], chk.checked); });
     var pick = function () { select({ kind: 'region', id: id }); };
@@ -377,7 +529,7 @@
     ids.forEach(function (i) { if (on) S.ticked.add(i); else S.ticked.delete(i); });
     refreshChecks();
     requestRender();
-    if (S.tab === 'holder') drawHolder();
+    redrawTab();
   }
   function tickOnly(ids) {
     S.ticked = new Set(ids);
@@ -400,10 +552,11 @@
 
   function select(sel) {
     S.selected = sel;
+    followSelection(sel);
     refreshSelection();
     renderMeta();
     requestRender();
-    if (S.tab === 'holder') drawHolder();
+    redrawTab();
   }
 
   /* -------------------------------------------------------- plot: models */
@@ -740,12 +893,15 @@
 
   /* ---------------------------------------------------------------- tabs */
   var TABS = [['plot', 'Spectra'], ['figures', 'Figures'], ['meta', 'Metadata'],
-              ['notes', 'Notes'], ['methods', 'Methods'], ['holder', 'Holder']];
+              ['notes', 'Notes'], ['methods', 'Methods'], ['holder', 'Holder'],
+              ['cameras', 'Camera images'], ['maps', 'SnapMaps']];
   function availableTabs() {
     var d = S.data;
     return TABS.filter(function (t) {
       if (t[0] === 'figures') return d.figures.length > 0;
       if (t[0] === 'holder') return d.holders.length > 0;
+      if (t[0] === 'cameras') return (d.cameras || []).length > 0;
+      if (t[0] === 'maps') return (d.maps || []).length > 0;
       if (t[0] === 'methods') return !!d.methods.trim();
       return true;
     });
@@ -766,8 +922,13 @@
       if (btn) btn.setAttribute('aria-selected', t[0] === name ? 'true' : 'false');
     });
     if (name === 'plot') requestRender();
-    if (name === 'holder') drawHolder();
+    redrawTab();
     if (name === 'meta') renderMeta();
+  }
+  function redrawTab() {
+    if (S.tab === 'holder') drawHolder();
+    else if (S.tab === 'cameras') drawCamera();
+    else if (S.tab === 'maps') { if (S.M.id) drawMapView(); else if ((S.data.maps || []).length) openMap(S.data.maps[0].id); }
   }
 
   function renderFigures() {
@@ -902,6 +1063,51 @@
       if (sm) select({ kind: 'sample', id: sm.id }); else drawHolder();
     });
   }
+  /* analysis-point markers with their names, halo'd so they read on any
+     picture; `points` is {name: [x, y]} in picture pixels, `k` the display
+     scale, `hot` the names to highlight. Returns the names drawn. */
+  function paintMarkers(ctx, points, k, hot) {
+    ctx.font = '12px system-ui, "Segoe UI", Helvetica, Arial, sans-serif'; ctx.textBaseline = 'middle';
+    var names = Object.keys(points), placed = [];
+    names.sort(function (a, b) { return (hot[b] ? 1 : 0) - (hot[a] ? 1 : 0); });
+    names.forEach(function (name) {
+      var p = points[name], x = p[0] * k, y = p[1] * k, on = !!hot[name];
+      var col = on ? '#FF4D4D' : '#19E0FF', r = on ? 9 : 7;
+      ctx.lineWidth = (on ? 2.4 : 1.8) + 2.6; ctx.strokeStyle = '#0B1116';
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
+      ctx.lineWidth = on ? 2.4 : 1.8; ctx.strokeStyle = col;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
+      var text = name || '(unnamed)', w = ctx.measureText(text).width;
+      var spots = [[r + 4, 10, 'left'], [r + 4, -10, 'left'], [-r - 4, 10, 'right'], [-r - 4, -10, 'right']], at = spots[0];
+      for (var s = 0; s < spots.length; s++) {
+        var lx = x + spots[s][0], ly = y + spots[s][1], x0 = spots[s][2] === 'left' ? lx : lx - w;
+        var box2 = [x0 - 2, ly - 8, w + 4, 16];
+        var hit = placed.some(function (b) { return box2[0] < b[0] + b[2] && box2[0] + box2[2] > b[0] && box2[1] < b[1] + b[3] && box2[1] + box2[3] > b[1]; });
+        if (!hit) { at = spots[s]; placed.push(box2); break; }
+        if (s === spots.length - 1) placed.push(box2);
+      }
+      ctx.textAlign = at[2]; ctx.font = (on ? 'bold ' : '') + '12px system-ui, "Segoe UI", Helvetica, Arial, sans-serif';
+      ctx.lineWidth = 3.2; ctx.strokeStyle = '#0B1116'; ctx.lineJoin = 'round';
+      ctx.strokeText(text, x + at[0], y + at[1]);
+      ctx.fillStyle = col; ctx.fillText(text, x + at[0], y + at[1]);
+    });
+    return names;
+  }
+  /* the picture at its display size on a canvas, drawn once decoded */
+  function withPicture(key, src, then) {
+    var cached = photoCache[key];
+    if (cached && cached.complete) { then(cached); return; }
+    var img = new Image();
+    img.onload = function () { photoCache[key] = img; then(img); };
+    img.src = src;
+  }
+  function sizeCanvas(cv, w, h) {
+    var dpr = G.devicePixelRatio || 1, ctx = cv.getContext('2d');
+    cv.style.width = Math.round(w) + 'px'; cv.style.height = Math.round(h) + 'px';
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return ctx;
+  }
   function drawHolder() {
     var hd = currentHolder(), cv = $('holderCanvas');
     if (!hd || !cv) return;
@@ -914,31 +1120,7 @@
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.drawImage(img, 0, 0, hd.w * k, hd.h * k);
       cv._lay = { k: k };
-      var hot = hotSamples();
-      ctx.font = '12px system-ui, "Segoe UI", Helvetica, Arial, sans-serif'; ctx.textBaseline = 'middle';
-      var names = Object.keys(hd.points), placed = [];
-      names.sort(function (a, b) { return (hot[b] ? 1 : 0) - (hot[a] ? 1 : 0); });
-      names.forEach(function (name) {
-        var p = hd.points[name], x = p[0] * k, y = p[1] * k, on = !!hot[name];
-        var col = on ? '#FF4D4D' : '#19E0FF', r = on ? 9 : 7;
-        ctx.lineWidth = (on ? 2.4 : 1.8) + 2.6; ctx.strokeStyle = '#0B1116';
-        ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
-        ctx.lineWidth = on ? 2.4 : 1.8; ctx.strokeStyle = col;
-        ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
-        var text = name || '(unnamed)', w = ctx.measureText(text).width;
-        var spots = [[r + 4, 10, 'left'], [r + 4, -10, 'left'], [-r - 4, 10, 'right'], [-r - 4, -10, 'right']], at = spots[0];
-        for (var s = 0; s < spots.length; s++) {
-          var lx = x + spots[s][0], ly = y + spots[s][1], x0 = spots[s][2] === 'left' ? lx : lx - w;
-          var box2 = [x0 - 2, ly - 8, w + 4, 16];
-          var hit = placed.some(function (b) { return box2[0] < b[0] + b[2] && box2[0] + box2[2] > b[0] && box2[1] < b[1] + b[3] && box2[1] + box2[3] > b[1]; });
-          if (!hit) { at = spots[s]; placed.push(box2); break; }
-          if (s === spots.length - 1) placed.push(box2);
-        }
-        ctx.textAlign = at[2]; ctx.font = (on ? 'bold ' : '') + '12px system-ui, "Segoe UI", Helvetica, Arial, sans-serif';
-        ctx.lineWidth = 3.2; ctx.strokeStyle = '#0B1116'; ctx.lineJoin = 'round';
-        ctx.strokeText(text, x + at[0], y + at[1]);
-        ctx.fillStyle = col; ctx.fillText(text, x + at[0], y + at[1]);
-      });
+      var names = paintMarkers(ctx, hd.points, k, hotSamples());
       var info = clear($('holderInfo'));
       if (!names.length) {
         info.appendChild(h('span', { class: 'muted', text: 'This file has no calibrated analysis positions for the photo.' }));
@@ -964,6 +1146,314 @@
     img.src = hd.photo;
   }
 
+  /* ------------------------------------------------------ camera pictures */
+  function sampleByName(name) { return S.data.samples.filter(function (s) { return s.name === name; })[0]; }
+  function currentCam() { return S.data.cameras[S.camIdx] || null; }
+  function renderCameras() {
+    var box = clear($('tab-cameras')), cs = S.data.cameras || [];
+    if (!cs.length) return;
+    var sel = h('select', { id: 'camSel', 'aria-label': 'Camera picture' });
+    cs.forEach(function (c, i) { sel.appendChild(h('option', { value: String(i), text: c.name })); });
+    sel.addEventListener('change', function () { S.camIdx = +sel.value; drawCamera(); });
+    box.appendChild(h('p', null, sel));
+    box.appendChild(h('div', { class: 'cam-wrap' }, h('canvas', { id: 'camCanvas', 'aria-label': 'Camera picture with analysis positions', role: 'img' })));
+    box.appendChild(h('div', { class: 'holder-info', id: 'camInfo' }));
+    var cv = $('camCanvas');
+    cv.addEventListener('click', function (e) {
+      var c = currentCam(), lay = cv._lay;
+      if (!c || !lay) return;
+      var rect = cv.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top, best = null, bd = 18;
+      Object.keys(c.points).forEach(function (name) {
+        var p = c.points[name], d = Math.hypot(p[0] * lay.k - x, p[1] * lay.k - y);
+        if (d <= bd) { bd = d; best = name; }
+      });
+      var sm = best ? sampleByName(best) : null;
+      if (sm) select({ kind: 'sample', id: sm.id });
+    });
+  }
+  function drawCamera() {
+    var c = currentCam(), cv = $('camCanvas');
+    if (!c || !cv) return;
+    if ($('camSel')) $('camSel').value = String(S.camIdx);
+    withPicture('cam' + c.id, c.img, function (img) {
+      var box = cv.parentNode.clientWidth || 700, k = Math.min(1, box / c.w);
+      var ctx = sizeCanvas(cv, c.w * k, c.h * k);
+      ctx.drawImage(img, 0, 0, c.w * k, c.h * k);
+      cv._lay = { k: k };
+      ctx.setLineDash([6, 4]); ctx.lineWidth = 1.6; ctx.strokeStyle = '#FFD23F';
+      c.maps.forEach(function (m) { ctx.strokeRect(m.rect[0] * k, m.rect[1] * k, m.rect[2] * k, m.rect[3] * k); });
+      ctx.setLineDash([]);
+      var hot = hotSamples();
+      if (c.sample) hot[c.sample] = true;
+      paintMarkers(ctx, c.points, k, hot);
+      var mm = c.fov[0] >= 4 ? 1 : 0.5, bp = c.bar_px * mm * k, by = c.h * k - 26;
+      ctx.lineCap = 'butt'; ctx.strokeStyle = '#0B1116'; ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(20, by); ctx.lineTo(20 + bp, by); ctx.stroke();
+      ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(20, by); ctx.lineTo(20 + bp, by); ctx.stroke();
+      ctx.font = '12px system-ui, "Segoe UI", Helvetica, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.lineWidth = 3; ctx.strokeStyle = '#0B1116'; ctx.fillStyle = '#FFFFFF';
+      ctx.strokeText(mm + ' mm', 20 + bp / 2, by - 6); ctx.fillText(mm + ' mm', 20 + bp / 2, by - 6);
+      var info = clear($('camInfo'));
+      info.appendChild(h('span', { text: c.name + '  ·  ' + c.fov[0] + ' × ' + c.fov[1] + ' mm   ' }));
+      var seen = {};
+      c.maps.forEach(function (m) {
+        var maps = S.data.maps.filter(function (x) { return x.sample === m.sample; });
+        if (!maps.length || seen[m.sample]) return;
+        seen[m.sample] = true;
+        var b = h('button', { type: 'button', text: 'Open the SnapMap of ' + m.sample });
+        b.addEventListener('click', function () { showTab('maps'); openMap(maps[0].id); });
+        info.appendChild(b);
+      });
+      if (!Object.keys(c.points).length) info.appendChild(h('span', { class: 'muted', text: 'No analysis positions fall inside this picture.' }));
+      else if (!c.maps.length) info.appendChild(h('span', { class: 'muted', text: 'Click a marker to select that sample.' }));
+    });
+  }
+
+  /* ------------------------------------------------------------- SnapMaps */
+  function currentMap() { return S.mapById[S.M.id] || null; }
+  function saveText(name, text, type) {
+    var blob = new Blob(['﻿' + text], { type: type || 'text/csv;charset=utf-8' });
+    var a = h('a', { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+  function renderMaps() {
+    var box = clear($('tab-maps')), M = S.M, maps = S.data.maps || [];
+    if (!maps.length) return;
+    var mapSel = h('select', { id: 'mapSel', 'aria-label': 'SnapMap' });
+    maps.forEach(function (m) { mapSel.appendChild(h('option', { value: m.id, text: m.sample + ' · ' + m.name })); });
+    var scaleSel = h('select', { id: 'mapScale', 'aria-label': 'Colour scale' });
+    Object.keys(V.SCALES).forEach(function (n) { scaleSel.appendChild(h('option', { value: n, text: n })); });
+    var bg = h('input', { type: 'checkbox', id: 'mapBg' }), ov = h('input', { type: 'checkbox', id: 'mapOv' });
+    var al = h('input', { type: 'range', id: 'mapAlpha', min: '0.15', max: '1', step: '0.05', value: String(M.alpha), 'aria-label': 'Map opacity' });
+    var whole = h('button', { type: 'button', text: 'Whole map', title: 'Clear the chosen area' });
+    var csvMap = h('button', { type: 'button', text: 'Map CSV' }), csvSpec = h('button', { type: 'button', text: 'Spectra CSV' });
+    box.appendChild(h('div', { class: 'controls' },
+      h('label', { class: 'field' }, 'Map', mapSel), h('label', { class: 'field' }, 'Colours', scaleSel),
+      h('label', { class: 'field' }, bg, 'Remove background'), h('label', { class: 'field', id: 'mapOvField' }, ov, 'On camera image', al),
+      whole, csvMap, csvSpec));
+    box.appendChild(h('div', { class: 'maps-view' },
+      h('canvas', { id: 'mapCanvas', 'aria-label': 'SnapMap image', role: 'img' }),
+      h('canvas', { id: 'specCanvas', 'aria-label': 'Spectrum of the map', role: 'img' })));
+    box.appendChild(h('p', { class: 'map-read muted', id: 'mapRead' }));
+    box.appendChild(h('p', { class: 'muted small', text: 'Drag across the spectrum to choose the energy window; drag a box (or click a pixel) on the map to see that area\'s spectrum next to the whole map\'s.' }));
+    mapSel.addEventListener('change', function () { openMap(mapSel.value); });
+    scaleSel.addEventListener('change', function () { M.scale = scaleSel.value; drawMapView(); });
+    bg.addEventListener('change', function () { M.bg = bg.checked; drawMapView(); });
+    ov.addEventListener('change', function () { M.overlay = ov.checked; drawMapView(); });
+    al.addEventListener('input', function () { M.alpha = +al.value; drawMapView(); });
+    whole.addEventListener('click', function () { M.mask = null; M.roi = null; drawMapView(); });
+    csvMap.addEventListener('click', function () {
+      var m = currentMap();
+      if (m && M.data) saveText((m.sample + ' ' + m.name + ' map').replace(/[^\w.\- ]+/g, '_') + '.csv', V.mapCsv(m, mapImage(m)));
+    });
+    csvSpec.addEventListener('click', function () {
+      var m = currentMap();
+      if (!m || !M.data) return;
+      var e = M.energy, whole2 = M.total, roi = M.mask ? V.meanSpectrum(m, M.data, M.mask) : null, rows = ['Energy (eV),Whole map (counts per pixel)' + (roi ? ',Area ' + M.count + ' px (counts per pixel)' : '')];
+      for (var i = 0; i < e.length; i++) rows.push(e[i] + ',' + +whole2[i].toPrecision(7) + (roi ? ',' + +roi[i].toPrecision(7) : ''));
+      saveText((m.sample + ' ' + m.name + ' spectra').replace(/[^\w.\- ]+/g, '_') + '.csv', rows.join('\r\n') + '\r\n');
+    });
+    var mc = $('mapCanvas'), sc = $('specCanvas');
+    mc.addEventListener('mousedown', function (e) { var p = mapPoint(e); if (p) { M.drag = { kind: 'roi', a: p, b: p }; } });
+    sc.addEventListener('mousedown', function (e) { var x = specEnergy(e); if (x !== null) M.drag = { kind: 'win', a: x, b: x }; });
+    mc.addEventListener('mousemove', function (e) { mapHover(e); });
+    sc.addEventListener('mousemove', function (e) {
+      var x = specEnergy(e);
+      if (x !== null && !M.drag) $('mapRead').textContent = x.toFixed(2) + ' eV';
+    });
+    G.addEventListener('mousemove', function (e) {
+      if (!M.drag) return;
+      if (M.drag.kind === 'roi') { var p = mapPoint(e, true); if (p) M.drag.b = p; }
+      else { var x = specEnergy(e, true); if (x !== null) { M.drag.b = x; M.win = [Math.min(M.drag.a, x), Math.max(M.drag.a, x)]; } }
+      drawMapLater();
+    });
+    G.addEventListener('mouseup', function () {
+      var d = M.drag, m = currentMap();
+      if (!d) return;
+      M.drag = null;
+      if (d.kind === 'roi' && m && M.data) {
+        var one = Math.abs(d.b[0] - d.a[0]) < Math.abs(m.dx) / 2 && Math.abs(d.b[1] - d.a[1]) < Math.abs(m.dy) / 2, r;
+        if (one) {
+          var px = V.pixelAt(m, d.a[0], d.a[1]);
+          if (!px) { drawMapView(); return; }
+          r = V.rectMask(m, m.x0 + px[0] * m.dx, m.y0 + px[1] * m.dy, m.x0 + px[0] * m.dx, m.y0 + px[1] * m.dy);
+          M.roi = [m.x0 + px[0] * m.dx - m.dx / 2, m.y0 + px[1] * m.dy - m.dy / 2, m.x0 + px[0] * m.dx + m.dx / 2, m.y0 + px[1] * m.dy + m.dy / 2];
+        } else {
+          r = V.rectMask(m, d.a[0], d.a[1], d.b[0], d.b[1]);
+          M.roi = [Math.min(d.a[0], d.b[0]), Math.min(d.a[1], d.b[1]), Math.max(d.a[0], d.b[0]), Math.max(d.a[1], d.b[1])];
+        }
+        if (r.count) { M.mask = r.mask; M.count = r.count; } else M.roi = M.mask ? M.roi : null;
+      }
+      drawMapView();
+    });
+  }
+  var mapJob = 0;
+  function drawMapLater() {
+    if (mapJob) return;
+    mapJob = G.requestAnimationFrame(function () { mapJob = 0; drawMapView(); });
+  }
+  function openMap(id) {
+    var m = S.mapById[id], M = S.M;
+    if (!m) return;
+    M.id = id; M.data = null; M.loading = true; M.cache = null;
+    if (M.mask && M.mask.length !== m.nx * m.ny) { M.mask = null; M.roi = null; }
+    drawMapView();
+    V.decodeMap(m).then(function (data) {
+      if (M.id !== id) return;
+      M.data = data; M.energy = V.axisValues(m.e); M.total = V.meanSpectrum(m, data, null);
+      M.win = V.defaultWindow(M.energy, M.total);
+      M.loading = false;
+      drawMapView();
+    }).catch(function (err) {
+      if (M.id !== id) return;
+      M.loading = false;
+      $('mapRead').textContent = 'This map could not be decoded (' + (err && err.message ? err.message : err) + ').';
+    });
+  }
+  function mapImage(m) {
+    var M = S.M, key = [M.id, M.win[0], M.win[1], M.bg].join('|');
+    if (!M.cache || M.cache.key !== key) {
+      var img = V.mapImage(m, M.data, M.energy, M.win[0], M.win[1], M.bg);
+      M.cache = { key: key, img: img, range: V.colourRange(img) };
+    }
+    return M.cache.img;
+  }
+  function mapPoint(e, clampIt) {
+    var cv = $('mapCanvas'), lay = cv._lay;
+    if (!lay || !S.M.data) return null;
+    var r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    var inside = x >= lay.L && x <= lay.L + lay.pw && y >= lay.T && y <= lay.T + lay.ph;
+    if (!inside && !clampIt) return null;
+    x = Math.max(lay.L, Math.min(lay.L + lay.pw, x)); y = Math.max(lay.T, Math.min(lay.T + lay.ph, y));
+    return [lay.vx0 + (x - lay.L) / lay.pw * (lay.vx1 - lay.vx0), lay.vy0 + (y - lay.T) / lay.ph * (lay.vy1 - lay.vy0)];
+  }
+  function specEnergy(e, clampIt) {
+    var cv = $('specCanvas'), lay = cv._lay;
+    if (!lay || !S.M.data) return null;
+    var r = cv.getBoundingClientRect(), x = e.clientX - r.left;
+    var inside = x >= lay.L && x <= lay.L + lay.pw;
+    if (!inside && !clampIt) return null;
+    x = Math.max(lay.L, Math.min(lay.L + lay.pw, x));
+    return lay.e0 + (x - lay.L) / lay.pw * (lay.e1 - lay.e0);
+  }
+  function mapHover(e) {
+    var m = currentMap(), p = mapPoint(e);
+    if (!m || !p || S.M.drag) return;
+    var px = V.pixelAt(m, p[0], p[1]);
+    if (px) $('mapRead').textContent = 'x ' + Math.round(p[0]) + ' µm   y ' + Math.round(p[1]) + ' µm    pixel (' + px[0] + ', ' + px[1] + ')    value ' + V.fmtY(mapImage(m)[px[1] * m.nx + px[0]]);
+  }
+  function drawMapView() {
+    var m = currentMap(), mc = $('mapCanvas'), sc = $('specCanvas'), M = S.M;
+    if (!m || !mc) return;
+    $('mapSel').value = m.id; $('mapScale').value = M.scale; $('mapBg').checked = M.bg; $('mapOv').checked = M.overlay && !!m.cam;
+    $('mapOvField').style.display = m.cam ? '' : 'none';
+    var C = colours(), W = mc.parentNode.clientWidth || 900, half = Math.max(280, (W - 12) / 2);
+    if (G.matchMedia && G.matchMedia('(max-width: 820px)').matches) half = Math.max(280, W);   /* stacked */
+    var reg = S.byId[m.region] || {};
+    if (!M.data) {
+      [mc, sc].forEach(function (cv) {
+        var ctx = sizeCanvas(cv, half, 200);
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, half, 200);
+        ctx.fillStyle = C.muted; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(M.loading ? 'Decoding the map…' : '', half / 2, 100);
+      });
+      return;
+    }
+    var img = mapImage(m), lo = M.cache.range[0], hi = M.cache.range[1];
+    var ext = [m.x0 - m.dx / 2, m.x0 + (m.nx - 0.5) * m.dx, m.y0 - m.dy / 2, m.y0 + (m.ny - 0.5) * m.dy];   /* l, r, t, b */
+    var cam = M.overlay && m.cam ? S.camById[m.cam.id] : null;
+    var vx0 = ext[0], vx1 = ext[1], vy0 = ext[2], vy1 = ext[3];
+    if (cam) { var px = (ext[1] - ext[0]) * 0.3, py = (ext[3] - ext[2]) * 0.3; vx0 -= px; vx1 += px; vy0 -= py; vy1 += py; }
+    var L = 52, T = 26, B = 32, R = 64, pw = half - L - R, ph = pw * (vy1 - vy0) / (vx1 - vx0), H = ph + T + B;
+    var ctx = sizeCanvas(mc, half, H), sx = pw / (vx1 - vx0), sy = ph / (vy1 - vy0);
+    var X = function (x) { return L + (x - vx0) * sx; }, Y = function (y) { return T + (y - vy0) * sy; };
+    mc._lay = { L: L, T: T, pw: pw, ph: ph, vx0: vx0, vx1: vx1, vy0: vy0, vy1: vy1 };
+    var off = document.createElement('canvas');
+    off.width = m.nx; off.height = m.ny;
+    var octx = off.getContext('2d'), id = octx.createImageData(m.nx, m.ny), i;
+    for (i = 0; i < img.length; i++) {
+      var c3 = V.scaleColour(M.scale, (img[i] - lo) / (hi - lo));
+      id.data[4 * i] = c3[0]; id.data[4 * i + 1] = c3[1]; id.data[4 * i + 2] = c3[2]; id.data[4 * i + 3] = 255;
+    }
+    octx.putImageData(id, 0, 0);
+    var paint = function (photo) {
+      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, half, H);
+      ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+      if (photo) ctx.drawImage(photo, X(m.cam.ext[0]), Y(m.cam.ext[3]), (m.cam.ext[1] - m.cam.ext[0]) * sx, (m.cam.ext[2] - m.cam.ext[3]) * sy);
+      ctx.globalAlpha = photo ? M.alpha : 1; ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(off, X(ext[0]), Y(ext[2]), (ext[1] - ext[0]) * sx, (ext[3] - ext[2]) * sy);
+      ctx.globalAlpha = 1;
+      var roi = M.drag && M.drag.kind === 'roi' ? [Math.min(M.drag.a[0], M.drag.b[0]), Math.min(M.drag.a[1], M.drag.b[1]), Math.max(M.drag.a[0], M.drag.b[0]), Math.max(M.drag.a[1], M.drag.b[1])] : M.roi;
+      if (roi) { ctx.setLineDash([5, 3]); ctx.lineWidth = 1.6; ctx.strokeStyle = C.accent; ctx.strokeRect(X(roi[0]), Y(roi[1]), (roi[2] - roi[0]) * sx, (roi[3] - roi[1]) * sy); ctx.setLineDash([]); }
+      ctx.restore();
+      ctx.strokeStyle = C.muted; ctx.lineWidth = 1; ctx.strokeRect(L, T, pw, ph);
+      ctx.fillStyle = C.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+      V.niceTicks(vx0, vx1, 5).forEach(function (t) { ctx.fillText(String(t), X(t), T + ph + 4); });
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      V.niceTicks(vy0, vy1, 5).forEach(function (t) { ctx.fillText(String(t), L - 5, Y(t)); });
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillStyle = C.fg;
+      ctx.fillText('X (µm)', L + pw / 2, H - 1);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText(m.name + '   ' + M.win[0].toFixed(1) + '–' + M.win[1].toFixed(1) + ' eV', L, 4);
+      for (var s = 0; s < 64; s++) {                                   /* colour bar */
+        var cc = V.scaleColour(M.scale, 1 - s / 63);
+        ctx.fillStyle = V.rgbToHex(cc); ctx.fillRect(L + pw + 12, T + ph * s / 64, 12, ph / 64 + 1);
+      }
+      ctx.fillStyle = C.muted; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(V.fmtY(hi), L + pw + 28, T);
+      ctx.textBaseline = 'bottom'; ctx.fillText(V.fmtY(lo), L + pw + 28, T + ph);
+    };
+    if (cam) withPicture('cam' + cam.id, cam.img, paint); else paint(null);
+    drawSpectrum(m, reg, sc, half, H, C);
+  }
+  function drawSpectrum(m, reg, cv, W, H, C) {
+    var M = S.M, e = M.energy, ctx = sizeCanvas(cv, W, H), L = 58, R = 12, T = 26, B = 32, pw = W - L - R, ph = H - T - B;
+    var roi = M.mask ? V.meanSpectrum(m, M.data, M.mask) : null, i, lo = Infinity, hi = -Infinity;
+    [M.total, roi].forEach(function (s) { if (s) for (i = 0; i < s.length; i++) { if (s[i] < lo) lo = s[i]; if (s[i] > hi) hi = s[i]; } });
+    lo = Math.min(0, lo); hi = hi * 1.08 || 1;
+    var e0 = e[0], e1 = e[e.length - 1], inv = !!reg.binding, a = inv ? Math.max(e0, e1) : Math.min(e0, e1), b = inv ? Math.min(e0, e1) : Math.max(e0, e1);
+    var X = function (v) { return L + (v - a) / (b - a) * pw; }, Y = function (v) { return T + ph - (v - lo) / (hi - lo) * ph; };
+    cv._lay = { L: L, pw: pw, e0: a, e1: b };
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    var wx0 = X(M.win[0]), wx1 = X(M.win[1]);
+    ctx.fillStyle = C.accent; ctx.globalAlpha = 0.18; ctx.fillRect(Math.min(wx0, wx1), T, Math.abs(wx1 - wx0), ph); ctx.globalAlpha = 1;
+    var line = function (s, col) {
+      ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.beginPath();
+      for (var k = 0; k < s.length; k++) { if (k) ctx.lineTo(X(e[k]), Y(s[k])); else ctx.moveTo(X(e[k]), Y(s[k])); }
+      ctx.stroke();
+    };
+    line(M.total, roi ? C.muted : C.accent);
+    if (roi) line(roi, C.accent);
+    ctx.strokeStyle = C.muted; ctx.lineWidth = 1; ctx.strokeRect(L, T, pw, ph);
+    ctx.fillStyle = C.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+    V.niceTicks(Math.min(a, b), Math.max(a, b), 6).forEach(function (t) { ctx.fillText(String(t), X(t), T + ph + 4); });
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    V.niceTicks(lo, hi, 5).forEach(function (t) { ctx.fillText(V.fmtY(t), L - 5, Y(t)); });
+    ctx.fillStyle = C.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText((reg.elabel || 'Binding Energy') + ' (' + (reg.eunits || 'eV') + ')', L + pw / 2, H - 1);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(roi ? 'grey: whole map · blue: area (' + M.count + ' px)' : 'whole map', L, 4);
+    ctx.save(); ctx.translate(12, T + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText('counts per pixel', 0, 0); ctx.restore();
+  }
+  /* selecting a sample (or a map's own spectrum) brings up its picture / map */
+  function followSelection(sel) {
+    if (!sel) return;
+    var name = '', spec = null;
+    if (sel.kind === 'region') { spec = S.byId[sel.id]; name = spec ? spec.sample.name : ''; }
+    else { var sm = S.data.samples.filter(function (s) { return s.id === sel.id; })[0]; name = sm ? sm.name : ''; }
+    var cs = S.data.cameras || [], cur = currentCam();
+    if (cs.length && !(cur && cur.sample === name)) {
+      for (var i = 0; i < cs.length; i++) if (cs[i].sample === name) { S.camIdx = i; break; }
+    }
+    var maps = S.data.maps || [], cm = currentMap();
+    if (maps.length && S.tab === 'maps') {
+      if (spec && spec.reg.map) openMap(spec.reg.map);
+      else if (!(cm && cm.sample === name)) { var hit = maps.filter(function (x) { return x.sample === name; })[0]; if (hit) openMap(hit.id); }
+    }
+  }
+
   /* ------------------------------------------------------------ download */
   function downloadCsv() {
     var specs = S.specs.filter(function (s) { return S.ticked.has(s.id); });
@@ -979,6 +1469,9 @@
     S.data = data;
     S.specs = V.prepare(data);
     S.specs.forEach(function (s) { S.byId[s.id] = s; });
+    (data.maps || []).forEach(function (m) { S.mapById[m.id] = m; });
+    (data.cameras || []).forEach(function (c) { S.camById[c.id] = c; });
+    data.cameras = data.cameras || []; data.maps = data.maps || [];
     var d = data.details;
     $('title').textContent = d.title || 'Experiment data browser';
     document.title = $('title').textContent;
@@ -987,7 +1480,7 @@
       '. Self-contained: it needs no network and opens in any modern browser.';
     buildTree();
     buildTabs();
-    renderFigures(); renderNotes(); renderMethods(); renderHolder(); renderMeta();
+    renderFigures(); renderNotes(); renderMethods(); renderHolder(); renderMeta(); renderCameras(); renderMaps();
     $('boot').hidden = true; $('app').hidden = false;
     showTab('plot');
     applyTheme();
@@ -1008,15 +1501,16 @@
     $('level').addEventListener('input', function (e) { S.levelIdx = +e.target.value; requestRender(); });
     $('theme').addEventListener('change', function (e) { S.theme = e.target.value; applyTheme(); });
     $('print').addEventListener('click', function () { G.print(); });
-    G.addEventListener('beforeprint', function () { S.printing = true; applyTheme(); render(); if (S.tab === 'holder') drawHolder(); });
+    G.addEventListener('beforeprint', function () { S.printing = true; applyTheme(); render(); redrawTab(); });
     G.addEventListener('afterprint', function () { S.printing = false; applyTheme(); });
     if (G.matchMedia) {
       var mq = G.matchMedia('(prefers-color-scheme: dark)');
       if (mq.addEventListener) mq.addEventListener('change', function () { if (S.theme === 'auto') applyTheme(); });
     }
     if (G.ResizeObserver) {
-      new G.ResizeObserver(function () { requestRender(); if (S.tab === 'holder') drawHolder(); }).observe($('panels'));
+      new G.ResizeObserver(function () { requestRender(); redrawTab(); }).observe($('panels'));
     } else G.addEventListener('resize', requestRender);
+    G.addEventListener('resize', function () { if (S.tab === 'cameras' || S.tab === 'maps') redrawTab(); });
     /* start with something on screen: the first sample, all of its spectra */
     if (data.samples.length) {
       var first = data.samples[0];

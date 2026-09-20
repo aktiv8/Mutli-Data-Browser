@@ -96,6 +96,14 @@ table.grid th { background: var(--panel); color: var(--muted); }
 .prose { white-space: pre-wrap; max-width: 78ch; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin: 0 0 10px; font: inherit; }
 .holder-wrap canvas { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; display: block; }
 .holder-info { margin-top: 10px; min-height: 30px; }
+.cam-wrap canvas { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; display: block; }
+.mapbtn { font-size: 11px; padding: 0 6px; border-radius: 4px; }
+.maps-view { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; }
+.maps-view canvas { display: block; width: 100%; background: var(--plot-bg); border: 1px solid var(--border); border-radius: 6px; }
+#mapCanvas { cursor: crosshair; }
+#specCanvas { cursor: col-resize; }
+.map-read { min-height: 20px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.swatch-bar { display: inline-block; width: 90px; height: 10px; border-radius: 3px; vertical-align: middle; border: 1px solid var(--border); }
 .foot { padding: 10px 20px 24px; }
 .note { margin: 6px 0; }
 
@@ -103,6 +111,7 @@ table.grid th { background: var(--panel); color: var(--muted); }
   .layout { grid-template-columns: minmax(0, 1fr); }
   .side { border-right: 0; border-bottom: 1px solid var(--border); max-height: 260px; }
   .panels { grid-template-columns: minmax(0, 1fr); }
+  .maps-view { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media print {

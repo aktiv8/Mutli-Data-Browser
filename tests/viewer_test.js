@@ -140,6 +140,60 @@ function near(a, b, msg, tol) {
   eq(V.paragraphs('a\nb\n\n\nc\r\n\r\nd\n'), ['a\nb', 'c', 'd'], 'paragraphs');
   eq(V.paragraphs(''), [], 'no paragraphs');
 
+  // ---- SnapMaps: the page's maths against snapmap.py on the same map ----
+  if (fx.map) {
+    const m = fx.map.entry, e = fx.map.energy;
+    const data = await V.decodeMap(m);
+    eq(data.length, m.nx * m.ny * m.n, 'map data length');
+    eq(V.axisValues(m.e).length, m.n, 'map energy axis length');
+    const win = fx.map.win;
+    const close = (a, b, msg, tol) => {
+      let worst = 0;
+      eq(a.length, b.length, msg + ' length');
+      for (let i = 0; i < b.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]));
+      check(worst <= (tol || 1e-6), msg + ' (worst difference ' + worst + ')');
+    };
+    eq(V.mapChannels(e, fx.map.channels[0][0], fx.map.channels[0][1]), fx.map.channels[1], 'channels in a window');
+    eq(V.mapChannels(e, fx.map.channels[0][1], fx.map.channels[0][0]), fx.map.channels[1], 'window given either way round');
+    close(V.mapImage(m, data, e, win[0], win[1], false), fx.map.image, 'map image');
+    close(V.mapImage(m, data, e, win[0], win[1], true), fx.map.image_bg, 'map image, background removed');
+    eq(Array.from(V.mapImage(m, data, e, 1e9, 2e9, false)).every((v) => v === 0), true, 'empty window is zeros');
+    close(V.meanSpectrum(m, data, null), fx.map.total_mean, 'whole-map mean spectrum');
+    const r = V.rectMask(m, fx.map.rect[0], fx.map.rect[1], fx.map.rect[2], fx.map.rect[3]);
+    eq(Array.from(r.mask), fx.map.mask, 'rectangle mask');
+    eq(r.count, fx.map.mask_count, 'rectangle pixel count');
+    eq(Array.from(V.rectMask(m, fx.map.rect[2], fx.map.rect[3], fx.map.rect[0], fx.map.rect[1]).mask), fx.map.mask, 'rectangle corners either way');
+    close(V.meanSpectrum(m, data, r.mask), fx.map.roi_mean, 'area mean spectrum');
+    fx.map.pixels.forEach((p) => eq(V.pixelAt(m, p[0], p[1]), p[2], 'pixel at ' + p[0] + ',' + p[1]));
+    const rng = V.colourRange(V.mapImage(m, data, e, win[0], win[1], false));
+    near(rng[0], fx.map.range[0], 'colour range low', 1e-6);
+    near(rng[1], fx.map.range[1], 'colour range high', 1e-6);
+    eq(V.colourRange([NaN, Infinity]), [0, 1], 'colour range of nothing');
+    eq(V.colourRange([5, 5, 5]), [5, 6], 'colour range of a flat map');
+    fx.map.window_cases.forEach((c, i) => {
+      const w = V.defaultWindow(c.energy, c.y);
+      near(w[0], c.expect[0], 'default window low, case ' + i, 1e-9);
+      near(w[1], c.expect[1], 'default window high, case ' + i, 1e-9);
+    });
+    const csv = V.mapCsv(m, fx.map.image).trim().split('\r\n'), want = fx.map.csv.trim().split('\n');
+    eq(csv.length, want.length, 'map CSV rows');
+    eq(csv[0], want[0], 'map CSV header');
+    let cw = 0;
+    for (let i = 1; i < want.length; i++) {
+      const a = csv[i].split(','), b = want[i].split(',');
+      eq(a.length, b.length, 'map CSV columns row ' + i);
+      for (let k = 0; k < b.length; k++) cw = Math.max(cw, Math.abs(parseFloat(a[k]) - parseFloat(b[k])) / (Math.abs(parseFloat(b[k])) + 1e-9));
+    }
+    check(cw < 1e-5, 'map CSV values agree (worst relative ' + cw + ')');
+    eq(V.scaleColour('Viridis', 0).map(Math.round), [68, 1, 84], 'viridis starts dark purple');
+    eq(V.scaleColour('Viridis', 1).map(Math.round), [253, 231, 37], 'viridis ends yellow');
+    eq(V.scaleColour('Nope', 0.5).length, 3, 'unknown scale falls back');
+    eq(V.scaleColour('Greys', -5).map(Math.round), V.scaleColour('Greys', 0).map(Math.round), 'colour position clamps');
+    let bad = false;
+    try { await V.decodeMap(Object.assign({}, m, { n: m.n + 1 })); } catch (err) { bad = true; }
+    check(bad, 'a map of the wrong size is an error');
+  }
+
   // ---- hostile text stays text: nothing in the pure half builds HTML ----
   const src = fs.readFileSync(path.join(__dirname, '..', 'viewer', 'viewer.js'), 'utf8');
   check(src.indexOf('innerHTML') < 0, 'viewer never uses innerHTML');
