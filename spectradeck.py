@@ -70,7 +70,8 @@ except Exception:
 
 from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
                      load_file, reader_for, supported_patterns,
-                     UnsupportedFormat)
+                     UnsupportedFormat, ThermoExperiment, LoadCancelled,
+                     looks_like_experiment)
 import fonts
 import holder
 import plotstyle
@@ -86,6 +87,7 @@ import casafit
 import elements
 import handover
 import htmlbrowser
+import snapshot
 import xpslines
 import report
 import pptx_export
@@ -94,6 +96,7 @@ import workbook_ui
 import iss_ui
 import plotstyle_ui
 import sputter_ui
+import snapmap_ui
 from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
                     ramp)
 from plots import (interp_intensity, trace_label, nice_step, dodge,
@@ -625,6 +628,7 @@ class Workspace:
         tm.add_command(label="Sputter settings…",
                        command=self.open_sputter)
         tm.add_command(label="ISS / REELS…", command=self.open_iss_reels)
+        tm.add_command(label="SnapMap viewer…", command=self.open_snapmap)
         tm.add_command(label="Rename…   (F2)", command=self.rename_selected)
         tm.add_command(label="Notes…", command=self.notes_selected)
         bar.add_cascade(label="Tools", menu=tm)
@@ -976,6 +980,7 @@ class Workspace:
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<space>", self._on_tree_space)
         self.tree.bind("<F2>", lambda e: self.rename_selected())
+        self.tree.bind("<Double-Button-1>", self._on_tree_double)
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<<TreeviewOpen>>", lambda e: self._note_open(True))
         self.tree.bind("<<TreeviewClose>>", lambda e: self._note_open(False))
@@ -1513,6 +1518,12 @@ class Workspace:
 
     def _open_folder_path(self, folder):
         self._add_recent(folder)
+        if looks_like_experiment(folder):       # an Avantage experiment
+            problems = self._add_file(folder)
+            if problems:
+                messagebox.showwarning("Some files need attention",
+                                       "\n\n".join(problems[:12]))
+            return
         paths = []
         for name in sorted(os.listdir(folder)):
             p = os.path.join(folder, name)
@@ -1596,11 +1607,17 @@ class Workspace:
 
     def _add_file(self, path, file_id=None, origin="", refresh=True):
         """Load one file into the tree. Returns a list of problem strings."""
-        name = os.path.basename(path)
-        if any(p.path == path for p in self.docs):
+        name = os.path.basename(path.rstrip("\\/")) or path
+        if any(p.path == os.path.abspath(path) or p.path == path
+               for p in self.docs):
             return [f"{name}: already loaded."]
         try:
-            parser = load_file(path)
+            if os.path.isdir(path) or path.lower().endswith(".vgx"):
+                parser = self._load_experiment(path)
+                if parser is None:                       # cancelled
+                    return []
+            else:
+                parser = load_file(path)
         except UnsupportedFormat as exc:
             return [str(exc)]
         except Exception as exc:
@@ -1620,6 +1637,28 @@ class Workspace:
             problems.append(f"{name}: {parser.corruption['message']}")
         problems += [f"{name}: {w}" for w in parser.warnings]
         return problems
+
+    def _load_experiment(self, path):
+        """An Avantage experiment (folder or .VGX) with a progress box that can
+        cancel. Returns the reader, or None when the user cancelled."""
+        prog = workbook_ui.ProgressDialog(self.root, self, "Loading experiment",
+                                          100)
+        self.root.config(cursor="watch")
+
+        def report(i, n, fname):
+            prog.total = max(1, n)
+            prog.bar.configure(maximum=prog.total)
+            prog.done = i
+            prog.step(f"{i + 1} of {n}:  {fname}")
+            return prog.cancelled
+
+        try:
+            return load_file(path, progress=report)
+        except LoadCancelled:
+            return None
+        finally:
+            self.root.config(cursor="")
+            prog.close()
 
     def _recompute_colours(self):
         self.color_slot = colour_slots(self.docs)
@@ -1905,6 +1944,35 @@ class Workspace:
             return
         iss_ui.IssReelsDialog(self.root, self)
 
+    def open_snapmap(self, region=None):
+        """The map viewer for a SnapMap: the given region, else the first
+        selected or ticked spectrum that has pixels behind it."""
+        if not HAVE_MPL:
+            messagebox.showinfo("SnapMap", "matplotlib is required for the "
+                                           "map viewer.")
+            return
+        if region is None:
+            region = next((r for r in self.sel_regions + self._ticked_regions()
+                           if r.extra.get("cube") is not None), None)
+        if region is None:
+            messagebox.showinfo(
+                "SnapMap", "Select (or tick) a SnapMap first: these are the "
+                           "rows marked “(SnapMap)” in the file tree.")
+            return
+        parser = self.region_parser.get(id(region))
+        if parser is not None:
+            snapmap_ui.SnapMapDialog(self.root, self, parser, region)
+
+    def _on_tree_double(self, event):
+        """Double-click a SnapMap row to open its map."""
+        iid = self.tree.identify_row(event.y)
+        item = self.node_map.get(iid) if iid else None
+        r = item[1].region if item else None
+        if r is not None and r.extra.get("cube") is not None:
+            self.open_snapmap(r)
+            return "break"
+        return None
+
     def identify_remove(self, r, marker):
         self.ann.remove_marker(*self._marker_key(r), marker["be"],
                                marker["label"])
@@ -2144,6 +2212,8 @@ class Workspace:
                   if n.image is not None]
         if len(images) == 1 and not self.sel_regions:
             self._show_image(*images[0])
+        elif self.sel_regions and not images:
+            self._follow_camera_image()
         self._update_metadata()
         self._refresh_side()
 
@@ -2172,6 +2242,12 @@ class Workspace:
         else:
             menu.add_command(label="(no decodable spectra here)",
                              state="disabled")
+        maps = [r for r in self._regions_of(sel)
+                if r.extra.get("cube") is not None]
+        if maps:
+            menu.add_separator()
+            menu.add_command(label="Open SnapMap…",
+                             command=lambda r=maps[0]: self.open_snapmap(r))
         target = self._target_of(row)
         if target is not None:
             menu.add_separator()
@@ -3663,9 +3739,16 @@ class Workspace:
             self.nb.select(self.tab_images)
 
     def _refresh_images(self):
+        if getattr(self, "_thumb_job", None):
+            try:
+                self.root.after_cancel(self._thumb_job)
+            except tk.TclError:
+                pass
+            self._thumb_job = None
         for w in self.thumb_inner.winfo_children():
             w.destroy()
         self._thumb_imgs = []
+        pending = []
         items = [(p, b) for p in self.docs for b in p.images]
         if not items:
             self._cur_image = None
@@ -3676,15 +3759,19 @@ class Workspace:
         for n, (p, blob) in enumerate(items, 1):
             cell = ttk.Frame(self.thumb_inner)
             cell.pack(side="top", padx=4, pady=4)
-            thumb = self._make_thumb(p, blob)
+            slow = blob.loader is not None and not blob.data   # decoded on demand
+            thumb = None if slow else self._make_thumb(p, blob)
             cmd = lambda p=p, b=blob: self._show_image(p, b)
             if thumb is not None:
                 btn = ttk.Button(cell, image=thumb, command=cmd)
                 btn.image = thumb
                 self._thumb_imgs.append(thumb)
             else:
-                btn = ttk.Button(cell, text="[image\nunavailable]", width=12,
-                                 command=cmd)
+                btn = ttk.Button(cell, width=12, command=cmd,
+                                 text="[loading…]" if slow
+                                 else "[image\nunavailable]")
+                if slow:
+                    pending.append((btn, p, blob))
             btn.pack()
             label = blob.name if not multi else \
                 f"{blob.name} — {os.path.basename(p.path or '')}"
@@ -3693,6 +3780,29 @@ class Workspace:
         if self._cur_image is None:
             self._redraw_viewer()
         self._refresh_info()
+        if pending:
+            self._thumb_job = self.root.after(30, self._fill_thumbs, pending)
+
+    def _fill_thumbs(self, pending):
+        """Decode one waiting thumbnail, then hand control back to the UI."""
+        self._thumb_job = None
+        while pending:
+            btn, p, blob = pending.pop(0)
+            try:
+                if not btn.winfo_exists():
+                    return                       # the list was rebuilt
+                thumb = self._make_thumb(p, blob)
+                if thumb is not None:
+                    btn.configure(image=thumb, text="")
+                    btn.image = thumb
+                    self._thumb_imgs.append(thumb)
+                else:
+                    btn.configure(text="[image\nunavailable]")
+            except tk.TclError:
+                return
+            break
+        if pending:
+            self._thumb_job = self.root.after(15, self._fill_thumbs, pending)
 
     def _make_thumb(self, parser, blob, size=(150, 100)):
         if not HAVE_PIL:
@@ -3708,6 +3818,20 @@ class Workspace:
         except Exception:
             return None
 
+    def _follow_camera_image(self):
+        """When the selected spectra belong to a point that has camera images,
+        show one (without leaving the tab the user is on)."""
+        samples = {r.sample for r in self.sel_regions}
+        hits = [(p, b) for p in self.docs for b in p.images
+                if b.sample and b.sample in samples]
+        if not hits or (self._cur_image
+                        and any(b is self._cur_image[1] for _p, b in hits)):
+            return
+        on_images = self.nb.select() == str(self.tab_images)
+        self._cur_image = hits[0]
+        if on_images:
+            self._redraw_viewer()
+
     def _show_image(self, parser, blob):
         self._cur_image = (parser, blob)
         self.nb.select(self.tab_images)
@@ -3722,6 +3846,10 @@ class Workspace:
                       text="Select an image above to view it.").pack()
             return
         parser, blob = self._cur_image
+        if snapshot.has_calibration(blob.calib) and HAVE_MPL and HAVE_PIL:
+            self.overlay_cb.config(state="disabled")     # it has its own scale
+            self._render_snapshot(parser, blob)
+            return
         positions = parser.sample_positions()
         self.overlay_cb.config(
             state="normal" if positions and HAVE_MPL else "disabled")
@@ -3752,6 +3880,66 @@ class Workspace:
             ttk.Label(parent, image=self._view_photo).pack()
         except Exception as exc:
             ttk.Label(parent, padding=20, text=f"Could not render:\n{exc}").pack()
+
+    def _render_snapshot(self, parser, blob):
+        """A sample-view camera image with the analysis points that fall in it
+        (its own calibration places them; see snapshot.py), the footprint of
+        any SnapMap taken here, and a scale bar. Clicking a point selects it."""
+        parent = self.viewer
+        img = self._photo_image(parser, blob)
+        if img is None:
+            self._render_plain_photo(parser, blob)
+            return
+        calib = blob.calib
+        w, h = img.size
+        pal = self.palette
+        positions = parser.sample_positions()
+        points = snapshot.markers(calib, positions)
+        hot = self._highlight_samples(parser) | {blob.sample}
+        fig = Figure(figsize=(7.2, 5.0), dpi=100)
+        ax = fig.add_subplot(111)
+        ax.imshow(img, extent=[0, w, h, 0])
+        # SnapMaps taken on this picture: a dashed outline of their field
+        import matplotlib.patheffects as pe
+        from matplotlib.patches import Rectangle
+        for r in parser.regions:
+            cube = r.extra.get("cube")
+            if cube is None or cube.stage_x_mm is None:
+                continue
+            c, ry = snapshot.stage_to_pixel(calib, cube.stage_x_mm,
+                                            cube.stage_y_mm)
+            if not (0 <= c <= w and 0 <= ry <= h):
+                continue
+            left, top, mw, mh = snapshot.map_rectangle(calib, cube)
+            ax.add_patch(Rectangle((left, top), mw, mh, fill=False, lw=1.4,
+                                   ls="--", ec="#FFD23F", zorder=2))
+        marks = plots_draw_markers(ax, points, hot, filled=False,
+                                   cold="#19E0FF", hot_colour="#FF4D4D",
+                                   halo="#0B1116")
+        # scale bar: 1 mm, or 0.5 mm on a narrow field
+        fov_w, fov_h = snapshot.field_of_view_mm(calib)
+        bar_mm = 1.0 if fov_w >= 4 else 0.5
+        bar_px = bar_mm * 1000.0 / calib["um_per_px_x"]
+        ax.plot([24, 24 + bar_px], [h - 30, h - 30], color="white", lw=3,
+                solid_capstyle="butt", zorder=6,
+                path_effects=[pe.withStroke(linewidth=6, foreground="#0B1116")])
+        ax.text(24 + bar_px / 2, h - 40, f"{bar_mm:g} mm", color="white",
+                ha="center", va="bottom", fontsize=9, zorder=6,
+                path_effects=[pe.withStroke(linewidth=3, foreground="#0B1116")])
+        ax.set_xlim(0, w)
+        ax.set_ylim(h, 0)
+        ax.set_axis_off()
+        ax.set_title(f"{blob.name}   \u00b7   {fov_w:.1f} \u00d7 {fov_h:.1f} mm",
+                     fontsize=9, color=pal["plot_fg"])
+        fig.set_facecolor(pal["plot_bg"])
+        fig.tight_layout()
+        canvas = FigureCanvasTkAgg(fig, master=parent)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        place_marker_labels(ax, marks, hot)
+        canvas.draw()
+        canvas.mpl_connect(
+            "button_press_event",
+            lambda ev: self._pick_marker(ev, ax, points, parser))
 
     def _photo_image(self, parser, blob):
         """The decoded holder photo (RGB), cached so live calibration changes

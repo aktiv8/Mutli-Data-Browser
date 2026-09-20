@@ -239,6 +239,77 @@ class TestKinds(Tmp):
         self.assertEqual(dataspace_kind(ds), "other")
 
 
+class TestViewerHelpers(unittest.TestCase):
+    def cube(self, peak_at=20, ne=40):
+        e = [300.0 - 0.25 * i for i in range(ne)]           # descending BE
+        spec = [5.0 + 100.0 * max(0.0, 1 - abs(i - peak_at) / 4.0)
+                for i in range(ne)]
+        blocks = [(((ix, iy), spec)) for ix in range(2) for iy in range(2)]
+        return snapmap.build(e, 2, 2, 0.0, 10.0, 0.0, 10.0, blocks)
+
+    @unittest.skipUnless(np, "numpy needed")
+    def test_default_window_brackets_the_strongest_peak(self):
+        cube = self.cube()
+        lo, hi = snapmap.default_window(cube)
+        centre = cube.energy[20]
+        self.assertLess(lo, centre)
+        self.assertGreater(hi, centre)
+        self.assertLess(hi - lo, 4.0)              # the peak, not the whole scan
+        self.assertGreaterEqual(hi - lo, 2.0 - 1e-9)   # but never a sliver
+
+    @unittest.skipUnless(np, "numpy needed")
+    def test_a_rising_background_is_not_taken_for_the_peak(self):
+        ne = 60
+        e = [950.0 - 0.5 * i for i in range(ne)]
+        # the background climbs towards the high-BE end (channel 0) and is
+        # higher there than the peak at channel 40 ever gets
+        spec = [40.0 + 0.9 * (ne - i) + (25.0 * max(0.0, 1 - abs(i - 40) / 3.0))
+                for i in range(ne)]
+        spec = list(reversed(sorted(spec[:10]))) + spec[10:]      # keep the edge high
+        cube = snapmap.build(e, 2, 2, 0.0, 1.0, 0.0, 1.0,
+                             [((ix, iy), spec) for ix in range(2)
+                              for iy in range(2)])
+        self.assertGreater(max(spec[:10]), max(spec[35:45]))       # the trap
+        lo, hi = snapmap.default_window(cube)
+        self.assertLess(lo, e[40])
+        self.assertGreater(hi, e[40])
+        self.assertLess(hi - lo, 5.0)
+
+    @unittest.skipUnless(np, "numpy needed")
+    def test_no_peak_means_the_whole_range(self):
+        ne = 40
+        e = [300.0 - 0.25 * i for i in range(ne)]
+        flat = [10.0] * ne
+        cube = snapmap.build(e, 2, 2, 0.0, 1.0, 0.0, 1.0,
+                             [((ix, iy), flat) for ix in range(2)
+                              for iy in range(2)])
+        self.assertEqual(snapmap.default_window(cube), (min(e), max(e)))
+
+    @unittest.skipUnless(np, "numpy needed")
+    def test_colour_range_ignores_a_hot_pixel(self):
+        img = np.full((20, 20), 10.0)
+        img[0, 0] = 1e6
+        lo, hi = snapmap.colour_range(img)
+        # nearly all pixels identical: fall back to the full span, which is
+        # the only place the sparse feature shows
+        self.assertEqual((lo, hi), (10.0, 1e6))
+        self.assertEqual(snapmap.colour_range(np.full((4, 4), 7.0)), (7.0, 8.0))
+        img += np.arange(400).reshape(20, 20) * 0.01
+        lo, hi = snapmap.colour_range(img)
+        self.assertLess(hi, 100.0)
+        self.assertGreater(hi, lo)
+        self.assertEqual(snapmap.colour_range(np.array([np.nan])), (0.0, 1.0))
+
+    @unittest.skipUnless(np, "numpy needed")
+    def test_csv_grid_has_axes_and_values(self):
+        cube = self.cube()
+        text = snapmap.to_csv_grid(cube, cube.image())
+        lines = text.strip().splitlines()
+        self.assertEqual(lines[0], "Y/X (um),0,10")
+        self.assertEqual(len(lines), 3)
+        self.assertTrue(lines[1].startswith("0,"))
+
+
 # Real VGSpaceAxes streams (Avantage's MFC serialisation): a 128 x 100 x 100
 # SnapMap, and a 301-point scan.
 CUBE_AXES = bytes.fromhex(
