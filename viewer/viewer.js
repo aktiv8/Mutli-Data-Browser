@@ -216,6 +216,82 @@
   V.residual = function (y, env) {              /* data - envelope, null where there is no envelope */
     return y.map(function (v, i) { return env && env[i] !== null && env[i] !== undefined ? v - env[i] : null; });
   };
+  /* ------------------------------------------------------- quantification */
+  /* Atomic percent from CasaXPS's own areas and RSFs; mirrors quant.py (the
+     tests compare both on the same rows). Rows of one sample (and one depth
+     level) are normalised together. */
+  V.QUANT_HEADER = ['Sample', 'Level', 'Spectrum', 'Region', 'Background', 'RSF', 'Area (counts/s.eV)',
+                    'Area / RSF', 'at %', 'State', 'State at %', 'Note'];
+  /* the fit rows of these spectra grouped by sample and level, in order of appearance;
+     an entry's key is stable, so a page can remember which rows are ticked */
+  V.quantGroups = function (specs) {
+    var groups = [], by = {};
+    specs.forEach(function (s) {
+      V.fitRows(s.reg).forEach(function (row, ri) {
+        var lv = s.reg.level === undefined ? null : s.reg.level, k = s.sample.id + '|' + lv;
+        if (!by[k]) { by[k] = { sample: s.sample.name || '', sid: s.sample.id, level: lv, etch: s.reg.etch, entries: [] }; groups.push(by[k]); }
+        by[k].entries.push({ key: s.id + ':' + ri, spectrum: s.name, row: row, spec: s });
+      });
+    });
+    return groups;
+  };
+  V.quantNormalise = function (rows, include, transmission) {
+    var out = rows.map(function (row, i) {
+      var area = transmission && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
+      var res = { corrected: null, at: null, why: '' };
+      if (include && include[i] === false) res.why = 'not included';
+      else if (!row.rsf || row.rsf <= 0) res.why = 'no RSF';
+      else if (area === null || area === undefined || !(area > 0)) res.why = 'no area';
+      else res.corrected = area / row.rsf;
+      return res;
+    });
+    var total = out.reduce(function (a, x) { return a + (x.corrected === null ? 0 : x.corrected); }, 0);
+    out.forEach(function (x) { if (x.corrected !== null && total > 0) x.at = 100 * x.corrected / total; });
+    return out;
+  };
+  /* the chemical states of one row: each one's share of the positive component area */
+  V.quantStates = function (row, at) {
+    var groups = [], by = {};
+    (row.components || []).forEach(function (c) {
+      var g = by[c.gk];
+      if (!g) { g = by[c.gk] = { name: c.state, area: 0 }; groups.push(g); }
+      g.area += Math.max(0, c.area || 0);
+    });
+    var tot = groups.reduce(function (a, g) { return a + g.area; }, 0);
+    if (!(tot > 0)) return [];
+    return groups.map(function (g) {
+      return { name: g.name, frac: g.area / tot, at: at === null || at === undefined ? null : at * g.area / tot };
+    });
+  };
+  function sig6(v) { return v === null || v === undefined || v !== v ? '' : String(+v.toPrecision(6)); }
+  /* the table as rows of cells, one per region and one per chemical state under it;
+     `inc` maps an entry's key to false when it is unticked */
+  V.quantTable = function (groups, inc, transmission) {
+    var rows = [V.QUANT_HEADER.slice()];
+    groups.forEach(function (g) {
+      var res = V.quantNormalise(g.entries.map(function (e) { return e.row; }),
+        g.entries.map(function (e) { return !(inc && inc[e.key] === false); }), transmission);
+      var lv = g.level === null || g.level === undefined ? '' : String(g.level);
+      g.entries.forEach(function (e, i) {
+        var row = e.row, x = res[i];
+        var area = transmission && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
+        rows.push([g.sample, lv, e.spectrum, row.region, row.background || '', sig6(row.rsf), sig6(area),
+                   sig6(x.corrected), sig6(x.at), '', '', x.why]);
+        if (x.at !== null) {
+          V.quantStates(row, x.at).forEach(function (st) {
+            rows.push([g.sample, lv, e.spectrum, row.region, '', '', '', '', '', st.name, sig6(st.at), '']);
+          });
+        }
+      });
+    });
+    return rows;
+  };
+  V.quantCsv = function (groups, inc, transmission) {
+    return V.quantTable(groups, inc, transmission).map(function (r) {
+      return r.map(V.csvField).join(',');
+    }).join('\r\n') + '\r\n';
+  };
+
   /* CSV columns of a spectrum's fit, named as the app's export names them */
   V.fitCsvColumns = function (s, pre) {
     var rows = V.fitRows(s.reg).filter(function (r) { return r.curve; }), cols = [], n = s.y.length;
@@ -420,6 +496,7 @@
             panels: new Map(), theme: 'auto', printing: false, nodes: [], holderIdx: 0,
             holderHot: null, tab: 'plot', filter: '', camIdx: 0, mapById: {}, camById: {},
             fit: { components: true, envelope: true, background: true, residual: false, hidden: {} },
+            q: { include: {}, transmission: false, level: {} },
             M: { id: null, data: null, energy: null, total: null, win: null, mask: null, count: 0,
                  scale: 'Viridis', bg: false, overlay: false, alpha: 0.65, loading: false, drag: null } };
   var $ = function (id) { return document.getElementById(id); };
@@ -1107,13 +1184,14 @@
   }
 
   /* ---------------------------------------------------------------- tabs */
-  var TABS = [['plot', 'Spectra'], ['figures', 'Figures'], ['meta', 'Metadata'],
+  var TABS = [['plot', 'Spectra'], ['quant', 'Quantification'], ['figures', 'Figures'], ['meta', 'Metadata'],
               ['notes', 'Notes'], ['methods', 'Methods'], ['holder', 'Holder'],
               ['cameras', 'Camera images'], ['maps', 'SnapMaps']];
   function availableTabs() {
     var d = S.data;
     return TABS.filter(function (t) {
       if (t[0] === 'figures') return d.figures.length > 0;
+      if (t[0] === 'quant') return V.quantGroups(S.specs).length > 0;
       if (t[0] === 'holder') return d.holders.length > 0;
       if (t[0] === 'cameras') return (d.cameras || []).length > 0;
       if (t[0] === 'maps') return (d.maps || []).length > 0;
@@ -1144,6 +1222,70 @@
     if (S.tab === 'holder') drawHolder();
     else if (S.tab === 'cameras') drawCamera();
     else if (S.tab === 'maps') { if (S.M.id) drawMapView(); else if ((S.data.maps || []).length) openMap(S.data.maps[0].id); }
+  }
+
+  /* ------------------------------------------------------- quantification tab */
+  function renderQuant() {
+    var box = clear($('tab-quant')), all = V.quantGroups(S.specs);
+    if (!all.length) return;
+    var q = S.q, hasT = all.some(function (g) { return g.entries.some(function (e) { return e.row.area_t !== null && e.row.area_t !== undefined; }); });
+    box.appendChild(h('p', { class: 'muted small', text: 'Atomic % = (region area ÷ RSF) as a share of the ticked regions of the same sample. Areas and RSFs are ' +
+      'CasaXPS\'s own, read from the fitted VAMAS file; nothing here is refitted. A region without an RSF is left out and says so.' }));
+    var tcb = h('input', { type: 'checkbox', id: 'q-trans' });
+    tcb.checked = q.transmission && hasT; tcb.disabled = !hasT;
+    tcb.addEventListener('change', function () { q.transmission = tcb.checked; renderQuant(); });
+    var dl = h('button', { type: 'button', text: 'Download quantification.csv' });
+    dl.addEventListener('click', function () { saveText('quantification.csv', V.quantCsv(all, q.include, q.transmission && hasT)); });
+    box.appendChild(h('div', { class: 'controls' },
+      h('label', { class: 'field', title: hasT ? 'Divide the spectrometer transmission function out of each region area' : 'These files carry no transmission function' }, tcb, ' Divide out the transmission function'), dl));
+    var bySample = [], seen = {};
+    all.forEach(function (g) { if (!seen[g.sid]) { seen[g.sid] = []; bySample.push(seen[g.sid]); } seen[g.sid].push(g); });
+    bySample.forEach(function (gs) {
+      var sid = gs[0].sid, cur = q.level[sid];
+      var g = gs.filter(function (x) { return String(x.level) === String(cur); })[0] || gs[0];
+      box.appendChild(h('h2', { text: g.sample || '(unnamed)' }));
+      if (gs.length > 1) {
+        var sel = h('select', { 'aria-label': 'Depth level' });
+        gs.forEach(function (x) {
+          var o = h('option', { value: String(x.level), text: 'Level ' + x.level + (x.etch !== null && x.etch !== undefined ? ' (' + +x.etch.toPrecision(6) + ' s)' : '') });
+          if (x === g) o.selected = true;
+          sel.appendChild(o);
+        });
+        sel.addEventListener('change', function () { q.level[sid] = sel.value; renderQuant(); });
+        box.appendChild(h('div', { class: 'controls' }, h('label', { class: 'field' }, 'Depth level ', sel)));
+      }
+      var res = V.quantNormalise(g.entries.map(function (e) { return e.row; }),
+        g.entries.map(function (e) { return q.include[e.key] !== false; }), q.transmission && hasT);
+      var tb = h('tbody');
+      g.entries.forEach(function (e, i) {
+        var row = e.row, x = res[i], off = q.include[e.key] === false;
+        var cb = h('input', { type: 'checkbox', 'aria-label': 'Include ' + row.region });
+        cb.checked = !off;
+        cb.addEventListener('change', function () { q.include[e.key] = cb.checked; renderQuant(); });
+        var area = q.transmission && hasT && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
+        var name = row.region + (e.spectrum !== row.region ? '  (' + e.spectrum + ')' : '');
+        tb.appendChild(h('tr', { class: off ? 'off' : '' },
+          h('td', null, cb), h('td', { text: name }), h('td', { text: row.background }),
+          h('td', { class: 'num', text: row.rsf ? String(+row.rsf.toPrecision(4)) : '' }),
+          h('td', { class: 'num', text: area === null || area === undefined ? '' : Math.round(area).toLocaleString('en-US') + (row.basis === 'components' ? ' *' : '') }),
+          h('td', { class: 'num', text: x.corrected === null ? '' : Math.round(x.corrected).toLocaleString('en-US') }),
+          h('td', { class: 'num', text: x.at === null ? (x.why && x.why !== 'not included' ? x.why : '') : x.at.toFixed(1) })));
+        if (x.at !== null) {
+          V.quantStates(row, x.at).forEach(function (st) {
+            tb.appendChild(h('tr', { class: 'state' }, h('td'), h('td', { text: '↳ ' + st.name }), h('td'), h('td'),
+              h('td', { class: 'num', text: (100 * st.frac).toFixed(0) + ' % of region' }), h('td'), h('td', { class: 'num', text: st.at.toFixed(1) })));
+          });
+        }
+      });
+      var head = h('tr', null, h('th'), h('th', { text: 'Region' }), h('th', { text: 'Background' }), h('th', { class: 'num', text: 'RSF' }),
+        h('th', { class: 'num', text: 'Area (counts/s·eV)' }), h('th', { class: 'num', text: 'Area ÷ RSF' }), h('th', { class: 'num', text: 'at %' }));
+      box.appendChild(h('div', { class: 'scroll' }, h('table', { class: 'grid quant' }, h('thead', null, head), tb)));
+      if (g.entries.some(function (e) { return e.row.basis === 'components'; })) {
+        box.appendChild(h('p', { class: 'muted small', text: '* the sum of the fitted components, because the background of that region is not reproduced here.' }));
+      }
+      var reg = g.entries.length > 1 && g.entries.some(function (e) { return e.row.region === g.entries[0].row.region && e !== g.entries[0]; });
+      if (reg) box.appendChild(h('p', { class: 'muted small', text: 'The same region appears more than once (for example from a survey and from its own scan): untick one to avoid counting it twice.' }));
+    });
   }
 
   function renderFigures() {
@@ -1673,10 +1815,7 @@
   function downloadCsv() {
     var specs = S.specs.filter(function (s) { return S.ticked.has(s.id); });
     if (!specs.length) { $('notes').textContent = 'Tick some spectra first.'; return; }
-    var blob = new Blob(['﻿' + V.buildCsv(specs)], { type: 'text/csv;charset=utf-8' });
-    var a = h('a', { href: URL.createObjectURL(blob), download: 'spectra.csv' });
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+    saveText('spectra.csv', V.buildCsv(specs));
   }
 
   /* ---------------------------------------------------------------- setup */
@@ -1695,7 +1834,7 @@
       '. Self-contained: it needs no network and opens in any modern browser.';
     buildTree();
     buildTabs();
-    renderFigures(); renderNotes(); renderMethods(); renderHolder(); renderMeta(); renderCameras(); renderMaps();
+    renderQuant(); renderFigures(); renderNotes(); renderMethods(); renderHolder(); renderMeta(); renderCameras(); renderMaps();
     $('boot').hidden = true; $('app').hidden = false;
     showTab('plot');
     applyTheme();

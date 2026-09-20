@@ -184,3 +184,40 @@ def states(row, at_pct=None):
     return [{"name": g["name"], "frac": g["area"] / tot,
              "at_pct": None if at_pct is None else at_pct * g["area"] / tot}
             for g in groups.values()]
+
+
+CSV_HEADER = ("Sample", "Level", "Spectrum", "Region", "Background", "RSF",
+              "Area (counts/s.eV)", "Area / RSF", "at %", "State",
+              "State at %", "Note")
+
+
+def _g(v):
+    return "" if v is None else f"{v:.6g}"
+
+
+def csv_rows(groups, include=None, transmission=False):
+    """The quantification table as rows of cells, header first. ``groups`` is
+    ``[{"sample", "level", "entries": [{"spectrum", "row"}]}]``: each group (one
+    sample at one depth level) is normalised on its own. ``include`` is an
+    optional list (per group) of lists of booleans. A region row is followed by
+    one row per chemical state. The HTML browser writes the same table."""
+    out = [list(CSV_HEADER)]
+    for gi, g in enumerate(groups):
+        rows = [e["row"] for e in g["entries"]]
+        res = normalise(rows, None if include is None else include[gi],
+                        transmission)
+        lv = "" if g.get("level") is None else str(g["level"])
+        for e, x in zip(g["entries"], res):
+            row = e["row"]
+            area = (row.get("area_t") if transmission
+                    and row.get("area_t") is not None else row.get("area"))
+            out.append([g["sample"], lv, e["spectrum"], row["region"],
+                        row.get("background", ""), _g(row.get("rsf")),
+                        _g(area), _g(x["corrected"]), _g(x["at_pct"]), "", "",
+                        x["why"]])
+            if x["at_pct"] is not None:
+                for st in states(row, x["at_pct"]):
+                    out.append([g["sample"], lv, e["spectrum"], row["region"],
+                                "", "", "", "", "", st["name"],
+                                _g(st["at_pct"]), ""])
+    return out

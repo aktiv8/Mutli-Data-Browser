@@ -634,7 +634,19 @@ class TestJavaScript(unittest.TestCase):
         exporters.export_csv([r], path)
         with open(path, newline="") as fh:
             text = fh.read()
-        return {"payload_b64": hb.encode_payload(payload), "csv": text,
+        import quant
+        from test_quant import sample_groups
+        groups = sample_groups()
+        keyed = [dict(g, entries=[dict(e, key=f"g{gi}e{ei}")
+                                  for ei, e in enumerate(g["entries"])])
+                 for gi, g in enumerate(groups)]
+        qx = {"groups": keyed,
+              "plain": quant.csv_rows(groups),
+              "excluded": quant.csv_rows(groups, include=[[True, False, True],
+                                                          [True]]),
+              "excluded_keys": {"g0e1": False},
+              "trans": quant.csv_rows(groups, transmission=True)}
+        return {"quant": qx, "payload_b64": hb.encode_payload(payload), "csv": text,
                 "states": [{"gk": c["gk"], "name": c["state"]}
                            for c in payload["samples"][0]["regions"][0]
                            ["fit"]["rows"][0]["components"]]}

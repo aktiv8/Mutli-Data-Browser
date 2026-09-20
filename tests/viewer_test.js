@@ -161,6 +161,33 @@ function near(a, b, msg, tol) {
     eq(V.fitRows({}).length, 0, 'a spectrum without a fit has no rows');
   }
 
+  // ---- quantification: the same table as quant.csv_rows ----
+  if (fx.fit && fx.fit.quant) {
+    const qx = fx.fit.quant;
+    const cmp = (got, want, label) => {
+      eq(got.length, want.length, label + ' row count');
+      got.forEach((row, i) => {
+        eq(row.length, want[i].length, label + ' columns row ' + i);
+        row.forEach((cell, k) => {
+          const w = want[i][k], numeric = i > 0 && k >= 5 && k <= 8 || i > 0 && k === 10;
+          if (numeric && cell !== '' && w !== '') near(parseFloat(cell), parseFloat(w), label + ' cell ' + i + ',' + k, Math.abs(parseFloat(w)) * 1e-5 + 1e-9);
+          else eq(cell, w, label + ' cell ' + i + ',' + k);
+        });
+      });
+    };
+    cmp(V.quantTable(qx.groups, null, false), qx.plain, 'quant table');
+    cmp(V.quantTable(qx.groups, qx.excluded_keys, false), qx.excluded, 'quant table with a region left out');
+    cmp(V.quantTable(qx.groups, null, true), qx.trans, 'quant table with the transmission function');
+    const csv = V.quantCsv(qx.groups, null, false).split('\r\n');
+    eq(csv[0], V.QUANT_HEADER.map(V.csvField).join(','), 'quant CSV header');
+    check(csv[1].indexOf('"S, 1",1,C 1s,C 1s,Shirley,0.278') === 0, 'quant CSV quotes a comma in the sample name: ' + csv[1]);
+    const n = V.quantNormalise([{ area: 1, rsf: 1 }, { area: 3, rsf: 1 }], null, false);
+    near(n[0].at, 25, 'atomic percent'); near(n[1].at, 75, 'atomic percent');
+    eq(V.quantNormalise([{ area: 5, rsf: 0 }], null, false)[0].why, 'no RSF', 'no RSF is said');
+    eq(V.quantStates({ components: [{ gk: 'i1', state: 'A', area: 3 }, { gk: 'i1', state: 'A', area: 1 }, { gk: 'nB', state: 'B', area: -2 }] }, 40)
+      .map((s) => s.name + ':' + s.at), ['A:40', 'B:0'], 'states share the row, negative areas count as zero');
+  }
+
   // ---- metadata summary ----
   const sm = V.summariseMeta([{ A: '1', B: 'x', C: '' }, { A: '1', B: 'y', C: '' }, { A: '1', B: 'x', D: '5' }], []);
   eq(sm.common, [['A', '1']], 'common metadata');

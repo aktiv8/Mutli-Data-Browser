@@ -87,6 +87,10 @@ li.collapsed > ul { display: none; }
 .fitbox table.grid td.num, .fitbox table.grid th.num { text-align: right; }
 .fitbox table.grid tr.off td { opacity: 0.45; }
 .fitbox .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; }
+table.quant { font-variant-numeric: tabular-nums; }
+table.quant td.num, table.quant th.num { text-align: right; }
+table.quant tr.off td { opacity: 0.45; }
+table.quant tr.state td { color: var(--muted); border-top-style: dotted; }
 .empty { color: var(--muted); padding: 40px 10px; text-align: center; }
 .empty[hidden] { display: none; }
 

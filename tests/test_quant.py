@@ -216,6 +216,65 @@ class TestStates(unittest.TestCase):
             {"name": "x", "index": -1, "area": 2.0}]})[0]["at_pct"])
 
 
+def sample_groups():
+    """Two depth levels of one sample, hand-made rows: fixture for the CSV
+    (the HTML browser writes the same table in JavaScript)."""
+    def comp(name, area, idx=-1, group=""):
+        c = {"name": name, "group": group, "index": idx, "area": area}
+        c["gk"], c["state"] = quant.state_of(c, "C 1s")
+        return c
+    a = {"region": "C 1s", "background": "Shirley", "rsf": 0.278, "area": 348.5,
+         "area_t": 300.25, "basis": "data", "components": [
+             comp("C-C", 235.0), comp("C-O", 58.0, 2, "Ether"),
+             comp("C=O", 52.0, 2, "Ether")]}
+    b = {"region": "O 1s", "background": "Shirley", "rsf": 0.78, "area": 512.0,
+         "area_t": 450.0, "basis": "data", "components": []}
+    c = {"region": "N 1s", "background": "Linear", "rsf": 0.0, "area": 12.0,
+         "area_t": None, "basis": "components", "components": []}
+    return [{"sample": "S, 1", "level": 1, "entries": [
+                {"spectrum": "C 1s", "row": a}, {"spectrum": "O 1s", "row": b},
+                {"spectrum": "N 1s", "row": c}]},
+            {"sample": "S, 1", "level": 2, "entries": [
+                {"spectrum": "C 1s", "row": dict(a, area=200.0, area_t=None)}]}]
+
+
+class TestCsvRows(unittest.TestCase):
+    def test_header_regions_and_states(self):
+        rows = quant.csv_rows(sample_groups())
+        self.assertEqual(tuple(rows[0]), quant.CSV_HEADER)
+        # level 1: C 1s, its 2 states, O 1s, N 1s (no RSF); level 2: C 1s + 2
+        self.assertEqual([r[3] for r in rows[1:]].count("C 1s"), 6)
+        c = rows[1]
+        self.assertEqual(c[:5], ["S, 1", "1", "C 1s", "C 1s", "Shirley"])
+        self.assertEqual(c[5], "0.278")
+        total = 348.5 / 0.278 + 512.0 / 0.78
+        self.assertAlmostEqual(float(c[8]), 100 * 348.5 / 0.278 / total,
+                               places=3)
+        states = rows[2:4]
+        self.assertEqual([r[9] for r in states], ["C-C", "Ether"])
+        self.assertAlmostEqual(sum(float(r[10]) for r in states),
+                               float(c[8]), places=3)
+        n = [r for r in rows if r[3] == "N 1s"][0]
+        self.assertEqual((n[8], n[11]), ("", "no RSF"))
+
+    def test_levels_are_normalised_separately(self):
+        rows = quant.csv_rows(sample_groups())
+        level2 = [r for r in rows[1:] if r[1] == "2" and r[9] == ""]
+        self.assertEqual(float(level2[0][8]), 100.0)
+
+    def test_include_and_transmission(self):
+        rows = quant.csv_rows(sample_groups(),
+                              include=[[True, False, True], [True]])
+        o = [r for r in rows if r[3] == "O 1s"][0]
+        self.assertEqual((o[8], o[11]), ("", "not included"))
+        c = [r for r in rows if r[3] == "C 1s"][0]
+        self.assertEqual(float(c[8]), 100.0)
+        t = quant.csv_rows(sample_groups(), transmission=True)
+        c = [r for r in t if r[3] == "C 1s"][0]
+        self.assertEqual(c[6], "300.25")                  # area / T is shown
+        self.assertAlmostEqual(float(c[7]), 300.25 / 0.278, delta=0.01)
+
+
 @unittest.skipUnless(HAVE_NP and os.path.isfile(REAL),
                      "vanadium sample file not present")
 class TestRealVanadium(unittest.TestCase):
