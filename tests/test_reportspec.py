@@ -582,6 +582,58 @@ class TestInTheApp(unittest.TestCase):
         ws._ann_changed(relabel=False)
         self.assertIsNot(ws._results(), first)        # an edit reads it again
 
+    def test_all_or_none_of_a_sections_items(self):
+        ws = self.ws
+        ws._has_image_pages = lambda: True
+        ws._image_items = lambda: [(f"cam:a/{i}", f"Picture {i}")
+                                   for i in range(8)]
+        try:
+            dlg = self.dialog()
+            self.assertTrue(dlg.set_children("images", False))
+            self.assertEqual(len(rs.skipped(ws.report_spec, "images")), 8)
+            self.assertTrue(dlg.set_children("images", True))
+            self.assertEqual(rs.skipped(ws.report_spec, "images"), set())
+            dlg.toggle_child("images", "cam:a/3")               # pick one ...
+            self.assertEqual(rs.skipped(ws.report_spec, "images"),
+                             {"cam:a/3"})
+            self.assertFalse(dlg.set_children("figures", False))  # no items
+            self.assertFalse(dlg.set_children(None, False))
+            self.assertEqual(rs.with_children(
+                rs.default_spec(), "images", ["a", "b"], False)["skip"],
+                {"images": ["a", "b"]})
+            self.assertEqual(rs.with_children(
+                rs.with_children(rs.default_spec(), "images", ["a", "b"],
+                                 False), "images", ["a"], True)["skip"],
+                {"images": ["b"]})
+        finally:
+            for name in ("_has_image_pages", "_image_items"):
+                del ws.__dict__[name]
+
+    def test_the_pictures_left_out_reach_the_report_and_the_deck(self):
+        ws = self.ws
+        seen = []
+        ws._has_image_pages = lambda: True
+        ws._image_items = lambda: [("cam:a/x", "x"), ("map:a/S1", "Map")]
+        ws._report_image_pages = lambda pdf, skip=(): seen.append(
+            ("pdf", set(skip))) or 0
+        ws._deck_image_pages = lambda skip=(): seen.append(
+            ("deck", set(skip))) or []
+        try:
+            self.assertEqual(ws.report_inventory().children["images"],
+                             [("cam:a/x", "x"), ("map:a/S1", "Map")])
+            spec = rs.with_child(rs.default_spec(), "images", "cam:a/x",
+                                 False)
+            ws._build_report(os.path.join(self.dir, "i.pdf"), spec)
+            if HAVE_PPTX:
+                ws._build_deck(os.path.join(self.dir, "i.pptx"), spec)
+        finally:
+            for name in ("_has_image_pages", "_image_items",
+                         "_report_image_pages", "_deck_image_pages"):
+                del ws.__dict__[name]
+        self.assertEqual(seen[0], ("pdf", {"cam:a/x"}))
+        if HAVE_PPTX:
+            self.assertEqual(seen[1], ("deck", {"cam:a/x"}))
+
     def test_fits_in_the_files_reach_the_report_and_the_generator(self):
         import resultspages
         from test_results import sample, three_element_level

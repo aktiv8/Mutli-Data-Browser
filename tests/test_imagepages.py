@@ -109,6 +109,73 @@ class TestPlan(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE, "matplotlib, numpy and Pillow needed")
+class TestPicking(unittest.TestCase):
+    """Which pictures and map sites go in: the Report generator's children."""
+
+    def test_every_picture_and_map_site_has_a_key_and_a_label(self):
+        got = ip.items([site_doc(2)])
+        self.assertEqual(len(got), 3)
+        keys = [k for k, _l in got]
+        self.assertEqual(len(set(keys)), 3)
+        self.assertEqual([k.split(":")[0] for k in keys],
+                         ["cam", "cam", "map"])
+        self.assertIn("SnapMap – S1", [l for _k, l in got])
+        self.assertTrue(all("a.vgd" in k for k in keys))
+        # the picture's name already says its sample: not said twice
+        cam = next(l for k, l in got if k.startswith("cam:"))
+        self.assertEqual(cam.count("S1"), 1)
+
+    def test_uncalibrated_pictures_are_not_offered(self):
+        plain = ImageBlob("holder", 0, b"x", True)
+        d = doc("a.vms", [region("C 1s", "S1")], images=[plain])
+        self.assertEqual(ip.items([d]), [])
+
+    def test_a_picture_left_out_is_not_on_the_sheet(self):
+        d = site_doc(2)
+        first = ip.items([d])[0][0]
+        pages = ip.plan([d], skip=[first])
+        self.assertEqual([(p.kind, p.n_items) for p in pages],
+                         [("camera", 1), ("maps", 1)])
+        self.assertNotIn(first.split("/")[1], pages[0].notes())
+
+    def test_all_pictures_left_out_leave_no_sheet_and_the_map_page_loses_its_photo(
+            self):
+        d = site_doc(2)
+        cams = [k for k, _l in ip.items([d]) if k.startswith("cam:")]
+        pages = ip.plan([d], skip=cams)
+        self.assertEqual([p.kind for p in pages], ["maps"])
+        self.assertNotIn("Camera picture", pages[0].notes())
+        # the same map page with its picture, for comparison
+        self.assertIn("Camera picture", ip.plan([d])[1].notes())
+
+    def test_a_map_site_left_out_has_no_page(self):
+        d = site_doc(1)
+        site = next(k for k, _l in ip.items([d]) if k.startswith("map:"))
+        self.assertEqual([p.kind for p in ip.plan([d], skip=[site])],
+                         ["camera"])
+
+    def test_the_choice_is_per_file(self):
+        a, b = site_doc(1), site_doc(1)
+        b.path = "b.vgd"
+        keys = [k for k, _l in ip.items([a, b])]
+        self.assertEqual(len(set(keys)), 4)
+        pages = ip.plan([a, b], skip=[k for k in keys if "b.vgd" in k])
+        self.assertEqual([(p.kind, p.n_items) for p in pages],
+                         [("camera", 1), ("maps", 1)])
+
+    def test_the_generator_lists_them_as_children_of_pictures(self):
+        import reportspec as rs
+        items = ip.items([site_doc(2)])
+        inv = rs.inventory({}, "", "", [], [], [], True, image_items=items)
+        self.assertEqual(inv.children["images"], items)
+        self.assertEqual(inv.summary("images"), "3 pictures and maps")
+        spec = rs.with_child(rs.default_spec(), "images", items[0][0], False)
+        self.assertEqual(rs.skipped(spec, "images"), {items[0][0]})
+        self.assertIn("Pictures (2 of 3)", rs.describe(spec, inv)
+                      .replace("Camera pictures and SnapMaps", "Pictures"))
+
+
+@unittest.skipUnless(HAVE, "matplotlib, numpy and Pillow needed")
 class TestDrawing(unittest.TestCase):
     def draw(self, page, size=(11.7, 8.3), rect=(0.0, 0.05, 1.0, 0.93)):
         fig = Figure(figsize=size, dpi=50)

@@ -68,8 +68,8 @@ class ReportGeneratorDialog(tk.Toplevel):
                        "you want. The same choice is used for the PDF, the "
                        "slides and the hand-over package; it is remembered, "
                        "and saved with the workbook. Click a box to tick it; "
-                       "double-click a row marked ▸ to list its figures or "
-                       "files and tick them one by one."
+                       "double-click a row marked ▸ to list its figures, "
+                       "pictures or files and tick them one by one."
                   ).grid(row=0, column=0, columnspan=2, sticky="w",
                          pady=(0, 8))
 
@@ -108,9 +108,20 @@ class ReportGeneratorDialog(tk.Toplevel):
         ttk.Button(bar, text="Select all",
                    command=lambda: self.select_all(True)).pack(
             side="right", padx=(0, 6))
+        kids = ttk.Frame(left)
+        kids.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        ttk.Label(kids, text="Items of the selected section:",
+                  style="Muted.TLabel").pack(side="left")
+        ttk.Button(kids, text="None",
+                   command=lambda: self.set_children(
+                       self.selected_any(), False)).pack(side="right")
+        ttk.Button(kids, text="All",
+                   command=lambda: self.set_children(
+                       self.selected_any(), True)).pack(side="right",
+                                                         padx=(0, 6))
         self.summary = ttk.Label(left, style="Muted.TLabel", wraplength=430,
                                  justify="left")
-        self.summary.grid(row=2, column=0, columnspan=2, sticky="w",
+        self.summary.grid(row=3, column=0, columnspan=2, sticky="w",
                           pady=(8, 0))
 
         right = ttk.Notebook(body)
@@ -371,6 +382,22 @@ class ReportGeneratorDialog(tk.Toplevel):
     def toggle_child(self, sid, cid):
         on = cid in reportspec.skipped(self.spec, sid)
         self._set(reportspec.with_child(self.spec, sid, cid, on))
+
+    def selected_any(self):
+        """The section of the selected row, whether it is the section or one
+        of its items."""
+        sel = self.tree.selection()
+        return self.rows[sel[0]][0] if sel and sel[0] in self.rows else None
+
+    def set_children(self, sid, on):
+        """Tick (or untick) every item of ``sid`` (its figures, pictures,
+        files or samples); False when it has none."""
+        ids = ([cid for cid, _label in self.inv.children.get(sid, [])]
+               if sid else [])
+        if not ids:
+            return False
+        self._set(reportspec.with_children(self.spec, sid, ids, on))
+        return True
 
     def selected_section(self):
         sel = self.tree.selection()

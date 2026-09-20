@@ -19,6 +19,7 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass, field
 
+import reportspec
 import snapmap
 import snapshot
 
@@ -34,6 +35,7 @@ class Picture:
     points: dict                 # label -> (column, row) in the full-size picture
     outlines: dict               # label -> (left, top, width, height) in pixels
     _array: object = field(default=None, repr=False)
+    key: str = ""                # what a report choice calls it (``item_key``)
 
     @property
     def calib(self):
@@ -59,6 +61,7 @@ class Site:
     title: str
     maps: list                   # [(shown region, cube)]
     camera: Picture | None = None
+    key: str = ""
 
 
 @dataclass
@@ -79,12 +82,44 @@ class Page:
 
 
 # -- planning ------------------------------------------------------------------------
-def plan(docs, label_of=None, display=None, per_sheet=6, columns=3):
+def item_key(kind, doc, name):
+    """The stable id of one camera picture (``kind`` "cam", ``name`` the
+    picture's) or SnapMap site ("map", the sample's own name) of a file: what
+    a report choice lists as a child of the pictures section."""
+    return f"{kind}:{reportspec.doc_key(doc)}/{name}"
+
+
+def items(docs, label_of=None):
+    """``[(key, label)]`` of every calibrated camera picture and SnapMap site
+    the files hold, for the Report generator (cheap: no picture is read)."""
+    label_of = label_of or (lambda p, s: s)
+    out = []
+    for p in docs:
+        for blob in p.images:
+            if snapshot.has_calibration(blob.calib):
+                sample = label_of(p, blob.sample) if blob.sample else ""
+                # the picture's own name usually says the sample already
+                out.append((item_key("cam", p, blob.name), blob.name + (
+                    f" – {sample}" if sample and sample not in blob.name
+                    else "")))
+        seen = []
+        for r in p.regions:
+            if r.extra.get("cube") is not None and r.sample not in seen:
+                seen.append(r.sample)
+                out.append((item_key("map", p, r.sample),
+                            f"SnapMap – {label_of(p, r.sample)}"))
+    return out
+
+
+def plan(docs, label_of=None, display=None, per_sheet=6, columns=3, skip=()):
     """The pages for ``docs``: camera sheets first, then one page per SnapMap
     site. ``label_of(parser, sample)`` gives a sample's shown name and
-    ``display(region)`` a region as it should appear (names, energy shift)."""
+    ``display(region)`` a region as it should appear (names, energy shift);
+    ``skip`` holds the keys (``items``) of pictures and sites left out (a
+    picture left out is not drawn beside its map either)."""
     label_of = label_of or (lambda p, s: s)
     display = display or (lambda r: r)
+    skip = set(skip)
     pictures, sites = [], []
     for p in docs:
         positions = {label_of(p, k): xy
@@ -101,18 +136,22 @@ def plan(docs, label_of=None, display=None, per_sheet=6, columns=3):
             points, outlines = snapshot.view_of(blob.calib, positions, first)
             mine.append(Picture(blob.name, label_of(p, blob.sample)
                                 if blob.sample else "", p, blob, points,
-                                outlines))
-        pictures += mine
+                                outlines, key=item_key("cam", p, blob.name)))
+        pictures += [m for m in mine if m.key not in skip]
         for sample, rs in cubes.items():
+            if item_key("map", p, sample) in skip:
+                continue
             cube = rs[0].extra["cube"]
             near = None
             if cube.stage_x_mm is not None:
                 b = snapshot.nearest_image([m.blob for m in mine],
                                            cube.stage_x_mm, cube.stage_y_mm)
                 near = next((m for m in mine if m.blob is b), None)
+                if near is not None and near.key in skip:
+                    near = None
             sites.append(Site(label_of(p, sample),
                               [(display(r), r.extra["cube"]) for r in rs],
-                              near))
+                              near, item_key("map", p, sample)))
     pages = []
     slots = -(-per_sheet // columns) * columns
     chunks = [pictures[i:i + per_sheet] for i in range(0, len(pictures),

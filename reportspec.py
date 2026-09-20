@@ -53,7 +53,8 @@ SHORT = {"cover": "Cover", "contents": "Contents", "summary": "Summary",
          "files": "Files"}
 LABELS = {s[0]: s[1] for s in SECTION_DEFS}
 HINTS = {s[0]: s[2] for s in SECTION_DEFS}
-CHILD_KINDS = {"figures": "figure", "metadata": "file", "results": "sample"}
+CHILD_KINDS = {"figures": "figure", "metadata": "file", "results": "sample",
+               "images": "picture"}
 
 # The order the reports had before there was a choice; used for ``sections=``.
 LEGACY_ORDER = ("cover", "contents", "summary", "results", "methods", "calibration", "files",
@@ -208,6 +209,20 @@ def with_child(spec, sid, child, on):
     return out
 
 
+def with_children(spec, sid, ids, on):
+    """``spec`` with all of the children ``ids`` of section ``sid`` on or off."""
+    out = sanitise(spec)
+    ids = [str(i) for i in ids]
+    cur = [c for c in out["skip"].get(sid, []) if c not in ids]
+    if not on:
+        cur += ids
+    if cur:
+        out["skip"][sid] = cur
+    else:
+        out["skip"].pop(sid, None)
+    return sanitise(out)
+
+
 def cover_of(spec):
     """The cover choice: ``{"design", "image", "accent"}``."""
     return dict(sanitise(spec)["cover"])
@@ -325,15 +340,18 @@ class Inventory:
             return f"{n} file{'s' if n != 1 else ''}"
         if sid == "results":
             return f"{n} sample{'s' if n != 1 else ''}"
+        if sid == "images" and n:
+            return f"{n} picture{'s' if n != 1 else ''} and map{'s' if n != 1 else ''}"
         return ""
 
 
 def inventory(details, methods_text, calibration, file_rows, docs, figures,
-              has_images, have_mpl=True, results=()):
+              has_images, have_mpl=True, results=(), image_items=()):
     """Build the ``Inventory`` from what the workspace holds. ``figures`` are
     the saved figures (or the single 'current view' the reports fall back to);
     ``results`` is ``[(sample key, label)]`` of the samples with a quantification
-    (see ``resultspages``)."""
+    (see ``resultspages``); ``image_items`` ``[(key, label)]`` of the camera
+    pictures and SnapMap sites (see ``imagepages.items``)."""
     inv = Inventory()
 
     def put(sid, ok, why="", n=None):
@@ -354,7 +372,8 @@ def inventory(details, methods_text, calibration, file_rows, docs, figures,
     put("metadata", docs, "no files loaded", len(docs or ()))
     put("results", results, "no CasaXPS fits with sensitivity factors in "
         "these files", len(results or ()))
-    put("images", has_images, "no pictures or maps in these files")
+    put("images", has_images, "no pictures or maps in these files",
+        len(image_items or ()))
     put("figures", figures and have_mpl,
         "matplotlib is not installed" if figures and not have_mpl
         else "no saved figures (Workbook ▸ Figures)", len(figures or ()))
@@ -362,6 +381,7 @@ def inventory(details, methods_text, calibration, file_rows, docs, figures,
         (figure_id(f, i), f.get("name") or f"Figure {i}")
         for i, f in enumerate(figures or (), 1)]
     inv.children["results"] = list(results or ())
+    inv.children["images"] = list(image_items or ())
     inv.children["metadata"] = [
         (doc_key(d), os.path.basename((d.path or "").rstrip("\\/")) or "file")
         for d in docs or ()]

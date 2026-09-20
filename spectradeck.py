@@ -3357,10 +3357,18 @@ class Workspace:
     def _has_image_pages(self):
         return HAVE_MPL and HAVE_PIL and imagepages.available(self.docs)
 
+    def _image_label(self, p, sample):
+        return self.ann.sample_label(self.file_ids.get(id(p), ""), sample)
+
+    def _image_items(self):
+        """``[(key, label)]`` of the camera pictures and SnapMap sites a
+        report can hold (the Report generator's children of Pictures)."""
+        if not self._has_image_pages():
+            return []
+        return imagepages.items(self.docs, self._image_label)
+
     def _image_page_plan(self, **kw):
-        def label_of(p, sample):
-            return self.ann.sample_label(self.file_ids.get(id(p), ""), sample)
-        return imagepages.plan(self.docs, label_of=label_of,
+        return imagepages.plan(self.docs, label_of=self._image_label,
                                display=self._display, **kw)
 
     def _map_colourmap(self):
@@ -3386,16 +3394,17 @@ class Workspace:
                 out.append(consume(pg, page))
         return out
 
-    def _report_image_pages(self, pdf):
-        """Camera sheets and SnapMap pages onto a PdfPages; returns how many."""
+    def _report_image_pages(self, pdf, skip=()):
+        """Camera sheets and SnapMap pages onto a PdfPages; returns how many
+        (``skip``: keys of pictures and sites left out)."""
         def consume(_pg, page):
             pdf.savefig(page)
             return 1
         return len(self._render_image_pages(
-            self._image_page_plan(), consume, (11.7, 8.3),
+            self._image_page_plan(skip=skip), consume, (11.7, 8.3),
             (0.0, 0.03, 1.0, 0.93)))
 
-    def _deck_image_pages(self):
+    def _deck_image_pages(self, skip=()):
         """The same pages as slide pictures: ``[{"title", "png", "notes"}]``,
         three camera pictures to a slide."""
         def consume(pg, page):
@@ -3408,7 +3417,7 @@ class Workspace:
             return {"title": pg.title, "png": buf.getvalue(),
                     "notes": pg.notes()}
         return self._render_image_pages(
-            self._image_page_plan(per_sheet=3, columns=3), consume,
+            self._image_page_plan(per_sheet=3, columns=3, skip=skip), consume,
             pptx_export.FIGURE_SIZE, (0.0, 0.0, 1.0, 1.0), dpi=150,
             decorate=False)
 
@@ -3448,7 +3457,8 @@ class Workspace:
         return reportspec.inventory(
             d, d.get("methods", ""), d.get("calibration", ""),
             self._report_file_rows(), self.docs, self._report_figures(),
-            self._has_image_pages(), HAVE_MPL, self._results().children())
+            self._has_image_pages(), HAVE_MPL, self._results().children(),
+            self._image_items())
 
     def set_report_spec(self, spec):
         """Remember what the reports contain (config, workbook, the preview's
@@ -3507,12 +3517,14 @@ class Workspace:
         return self._results_memo[1]
 
     def _build_report(self, path, spec=None, notes=None):
+        spec = self._spec_for_output(spec)
+        left_out = reportspec.skipped(spec, "images")
         return report.build_report(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,
             self._report_figures(), self._report_figure_pages,
-            spec=self._spec_for_output(spec),
-            render_images=(self._report_image_pages
+            spec=spec,
+            render_images=((lambda pdf: self._report_image_pages(pdf, left_out))
                            if self._has_image_pages() else None),
             cover_data=self.cover_data(), notes=notes,
             results=self._results())
@@ -3737,13 +3749,15 @@ class Workspace:
             decorate=False, number=number)
 
     def _build_deck(self, path, spec=None, notes=None):
+        spec = self._spec_for_output(spec)
+        left_out = reportspec.skipped(spec, "images")
         return pptx_export.build_deck(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,
             self._report_figures(), self._deck_images,
-            image_pages=(self._deck_image_pages
+            image_pages=((lambda: self._deck_image_pages(left_out))
                          if self._has_image_pages() else None),
-            spec=self._spec_for_output(spec),
+            spec=spec,
             cover_data=self.cover_data(), notes=notes,
             results=self._results())
 
