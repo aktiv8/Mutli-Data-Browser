@@ -35,6 +35,7 @@ VERSION = 1
 # reader came for first, the audit trail (methods, metadata, checksums) after.
 SECTION_DEFS = (
     ("cover", "Cover page", "Title, customer, date, logo"),
+    ("contents", "Contents", "Sections and their pages"),
     ("summary", "Summary", "Your summary text"),
     ("figures", "Figures", "The saved figures"),
     ("images", "Camera pictures and SnapMaps", "Photos and map sites"),
@@ -44,7 +45,7 @@ SECTION_DEFS = (
     ("files", "Data files", "Names, sizes and checksums"),
 )
 SECTION_IDS = tuple(s[0] for s in SECTION_DEFS)
-SHORT = {"cover": "Cover", "summary": "Summary", "figures": "Figures",
+SHORT = {"cover": "Cover", "contents": "Contents", "summary": "Summary", "figures": "Figures",
          "images": "Pictures", "methods": "Methods",
          "calibration": "Calibration", "metadata": "Metadata",
          "files": "Files"}
@@ -53,7 +54,7 @@ HINTS = {s[0]: s[2] for s in SECTION_DEFS}
 CHILD_KINDS = {"figures": "figure", "metadata": "file"}
 
 # The order the reports had before there was a choice; used for ``sections=``.
-LEGACY_ORDER = ("cover", "summary", "methods", "calibration", "files",
+LEGACY_ORDER = ("cover", "contents", "summary", "methods", "calibration", "files",
                 "metadata", "images", "figures")
 # What each old section name switched on, per output.
 LEGACY_PDF = {"cover": ("cover", "summary", "methods", "calibration", "files"),
@@ -92,9 +93,13 @@ def sanitise(spec=None):
         if sid in SECTION_IDS and sid not in seen:
             seen.add(sid)
             sections.append({"id": sid, "on": bool(item.get("on", True))})
-    for sid in SECTION_IDS:                       # a section the spec predates
-        if sid not in seen:
-            sections.append({"id": sid, "on": True})
+    for k, sid in enumerate(SECTION_IDS):         # a section the spec predates:
+        if sid not in seen:                       # after the one before it
+            before = [x for x in SECTION_IDS[:k] if x in seen]
+            at = 1 + next((i for i, s in enumerate(sections)
+                           if s["id"] == before[-1]), -1) if before else 0
+            sections.insert(at, {"id": sid, "on": True})
+            seen.add(sid)
     out["sections"] = sections
     skip = spec.get("skip")
     if isinstance(skip, dict):
@@ -247,12 +252,14 @@ def _preset(order, on):
 BUILTIN_PRESETS = {
     "Everything": default_spec(),
     "Customer report": _preset(
-        ("cover", "summary", "figures", "images", "methods", "calibration"),
-        {"cover", "summary", "figures", "images", "methods", "calibration"}),
+        ("cover", "contents", "summary", "figures", "images", "methods",
+         "calibration"),
+        {"cover", "contents", "summary", "figures", "images", "methods",
+         "calibration"}),
     "Quick look": _preset(("cover", "figures"), {"cover", "figures"}),
     "Audit trail": _preset(
-        ("cover", "methods", "calibration", "metadata", "files"),
-        {"cover", "methods", "calibration", "metadata", "files"}),
+        ("cover", "contents", "methods", "calibration", "metadata", "files"),
+        {"cover", "contents", "methods", "calibration", "metadata", "files"}),
 }
 MAX_PRESET_NAME = 60
 
@@ -328,6 +335,7 @@ def inventory(details, methods_text, calibration, file_rows, docs, figures,
             inv.counts[sid] = n
 
     put("cover", True)
+    put("contents", True)
     put("summary", (details.get("summary") or "").strip(),
         "no summary written (Details ▸ Summary)")
     put("methods", (methods_text or "").strip(), "no methods text")

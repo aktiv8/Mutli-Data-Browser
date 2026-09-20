@@ -41,7 +41,8 @@ class TestSpec(unittest.TestCase):
     def test_the_default_is_everything_in_the_results_first_order(self):
         s = rs.default_spec()
         self.assertEqual(rs.order(s), list(rs.SECTION_IDS))
-        self.assertEqual(rs.order(s)[:3], ["cover", "summary", "figures"])
+        self.assertEqual(rs.order(s)[:4],
+                         ["cover", "contents", "summary", "figures"])
         self.assertEqual(rs.order(s)[-2:], ["metadata", "files"])   # appendix
         self.assertTrue(all(rs.is_on(s, i) for i in rs.SECTION_IDS))
 
@@ -67,8 +68,8 @@ class TestSpec(unittest.TestCase):
         b = rs.with_on(a, "summary", False)
         self.assertTrue(rs.is_on(a, "summary"))
         self.assertFalse(rs.is_on(b, "summary"))
-        self.assertEqual(rs.order(rs.moved(a, "figures", -2))[:3],
-                         ["figures", "cover", "summary"])
+        self.assertEqual(rs.order(rs.moved(a, "figures", -3))[:3],
+                         ["figures", "cover", "contents"])
         self.assertEqual(rs.order(rs.moved(a, "cover", -5)), rs.order(a))
         self.assertEqual(rs.order(rs.moved(a, "files", 9)), rs.order(a))
         self.assertEqual(rs.order(rs.moved(a, "nothing", 1)), rs.order(a))
@@ -89,7 +90,7 @@ class TestSpec(unittest.TestCase):
                          len(rs.SECTION_IDS))
 
     def test_active_lists_sections_in_order_with_their_skips(self):
-        s = rs.with_child(rs.moved(rs.default_spec(), "files", -7), "metadata",
+        s = rs.with_child(rs.moved(rs.default_spec(), "files", -8), "metadata",
                           "f1", False)
         got = rs.active(s)
         self.assertEqual([i for i, _k in got][0], "files")
@@ -162,7 +163,7 @@ class TestInventory(unittest.TestCase):
     def test_what_is_missing_says_why(self):
         inv = self.inv(details={}, methods_text="", calibration=" ",
                        file_rows=[], docs=[], figures=[], has_images=False)
-        self.assertEqual(inv.present_ids(), {"cover"})
+        self.assertEqual(inv.present_ids(), {"cover", "contents"})
         self.assertIn("summary", inv.summary("summary"))
         self.assertIn("Figures", inv.summary("figures"))
         self.assertIn("loaded", inv.summary("metadata"))
@@ -231,8 +232,8 @@ class TestPdfFollowsTheSpec(Tmp):
         self.assertLess(self.first_page_with(pages, "ACME"),
                         self.first_page_with(pages, "figure 1"))
         self.assertLess(self.first_page_with(pages, "figure 3"),
-                        self.first_page_with(pages, "Acquisition metadata"))
-        first = self.build(rs.moved(rs.default_spec(), "figures", -2))
+                        self.first_page_with(pages, "Acquisition metadata - a.vgd"))
+        first = self.build(rs.moved(rs.default_spec(), "figures", -3))
         self.assertIn("figure 1", first[0])              # figures lead now
         self.assertLess(self.first_page_with(first, "figure 1"),
                         self.first_page_with(first, "ACME"))
@@ -328,7 +329,7 @@ class TestDeckFollowsTheSpec(Tmp):
 
     def test_the_order_is_the_specs_order(self):
         titles = self.titles(self.build(rs.moved(rs.default_spec(), "figures",
-                                                 -2)))
+                                                 -3)))
         self.assertTrue(titles[0].startswith("Figure 1"))
         self.assertTrue(titles[1].startswith("Figure 2"))
         self.assertEqual(titles[-1], "Data files")
@@ -495,7 +496,7 @@ class TestInTheApp(unittest.TestCase):
         dlg = self.dialog()
         self.assertTrue(dlg.toggle_section("summary"))
         self.assertFalse(rs.is_on(self.ws.report_spec, "summary"))
-        dlg.move("files", -7)
+        dlg.move("files", -8)
         self.assertEqual(rs.order(self.ws.report_spec)[0], "files")
         dlg.select_all(False)
         self.assertEqual(rs.active(self.ws.report_spec), [])

@@ -274,13 +274,14 @@ TEXT_WIDTH_MM = 210 - 2 * PAGE_MARGIN_MM          # portrait A4
 
 
 def _metadata_story(parser, samples, title="Acquisition Metadata",
-                    level=1, fname=None):
+                    level=1, fname=None, look=None):
     """Flowables for one file's metadata report (portrait A4, 180 mm wide).
 
     Shared by the metadata PDF and the experiment report. What is the same
     for the whole file is stated once, what is constant within a sample sits
     on the sample's line, and the rest is a compact scan table; nothing is
-    dropped (see ``metasummary.layout_file``)."""
+    dropped (see ``metasummary.layout_file``). ``look`` (a ``pdfstyle.Look``)
+    sets the fonts and the accent colour; without it: navy Helvetica."""
     from xml.sax.saxutils import escape as xml_escape
     from reportlab.lib import colors
     from reportlab.lib.units import mm
@@ -289,22 +290,26 @@ def _metadata_story(parser, samples, title="Acquisition Metadata",
                                     Spacer, Table, TableStyle)
 
     lay = metasummary.layout_file(samples)
-    navy = colors.HexColor(NAVY)
+    font, bold = (("Helvetica", "Helvetica-Bold") if look is None
+                  else (look.font, look.bold))
+    navy = colors.HexColor(NAVY if look is None else look.ink)
+    band = colors.HexColor("#f2f5f8" if look is None else look.tint(0.94))
     styles = getSampleStyleSheet()
-    head = styles["Heading%d" % level]
-    small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8,
-                           leading=10)
-    cell = ParagraphStyle("cell", parent=styles["Normal"], fontSize=7.5,
-                          leading=9)
-    key_style = ParagraphStyle("key", parent=cell, fontName="Helvetica-Bold",
+    normal = ParagraphStyle("mnormal", parent=styles["Normal"], fontName=font)
+    if look is None:
+        head = styles["Heading%d" % level]
+    else:
+        import pdfstyle
+        head = pdfstyle.styles(look)["h%d" % min(level, 2)]
+    small = ParagraphStyle("small", parent=normal, fontSize=8, leading=10)
+    cell = ParagraphStyle("cell", parent=normal, fontSize=7.5, leading=9)
+    key_style = ParagraphStyle("key", parent=cell, fontName=bold,
                                textColor=navy)
-    sample_style = ParagraphStyle("sample", parent=styles["Normal"],
-                                  fontName="Helvetica-Bold", fontSize=10.5,
-                                  leading=13, textColor=navy, spaceBefore=9,
-                                  spaceAfter=3)
+    sample_style = ParagraphStyle("sample", parent=normal, fontName=bold,
+                                  fontSize=10.5, leading=13, textColor=navy,
+                                  spaceBefore=9, spaceAfter=3)
     strip_head = ParagraphStyle("strip", parent=cell, fontSize=7,
-                                fontName="Helvetica-Bold", spaceBefore=4,
-                                spaceAfter=1)
+                                fontName=bold, spaceBefore=4, spaceAfter=1)
     tiny = ParagraphStyle("tiny", parent=cell, fontSize=6.5, leading=8)
 
     def P(text, style=cell):
@@ -334,11 +339,10 @@ def _metadata_story(parser, samples, title="Acquisition Metadata",
     table_style = [
         ("BACKGROUND", (0, 0), (-1, 0), navy),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, 0), bold),
         ("FONTSIZE", (0, 0), (-1, 0), 7.5),
         ("LINEBELOW", (0, 0), (-1, -1), 0.25, colors.HexColor("#c8d0d8")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
-         [colors.white, colors.HexColor("#f2f5f8")]),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, band]),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("LEFTPADDING", (0, 0), (-1, -1), 3),
         ("RIGHTPADDING", (0, 0), (-1, -1), 3),
@@ -380,7 +384,7 @@ def _metadata_story(parser, samples, title="Acquisition Metadata",
         total = sum(weights)
         widths = [TEXT_WIDTH_MM * mm * w / total for w in weights]
         data = [[P(c, ParagraphStyle("h", parent=cell, textColor=colors.white,
-                                     fontName="Helvetica-Bold"))
+                                     fontName=bold))
                  for c in sl.columns]]
         for row in sl.rows:
             data.append([P(row.get(c, "")) for c in sl.columns])
@@ -408,7 +412,7 @@ def _metadata_story(parser, samples, title="Acquisition Metadata",
             st = Table(grid, colWidths=[w * 0.16, w * 0.22, w * 0.62] * 3,
                        repeatRows=1)
             st.setStyle(TableStyle([
-                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, 0), (-1, 0), bold),
                 ("LINEBELOW", (0, 0), (-1, 0), 0.4, navy),
                 ("TOPPADDING", (0, 0), (-1, -1), 0.5),
                 ("BOTTOMPADDING", (0, 0), (-1, -1), 0.5),
