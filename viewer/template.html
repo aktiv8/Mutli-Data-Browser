@@ -15,6 +15,7 @@
       <p id="subtitle" class="muted"></p>
     </div>
     <div class="actions">
+      <span class="badge" title="This page shows the data. Nothing you do here changes the files or is saved back.">Read-only</span>
       <label class="field">Theme
         <select id="theme">
           <option value="auto">Auto</option>
@@ -22,6 +23,7 @@
           <option value="dark">Dark</option>
         </select>
       </label>
+      <button type="button" id="zipall" title="One ZIP with a CSV per spectrum, the quantification table and the text notes">Download everything</button>
       <button type="button" id="print">Print</button>
     </div>
   </header>
@@ -59,7 +61,10 @@
         <div class="idbox" id="idbox" hidden></div>
         <div class="controls levelbar" id="levelbar" hidden>
           <label class="field"><input type="checkbox" id="levelOn"> One depth level at a time</label>
+          <button type="button" id="levPrev" title="Previous level (left arrow)" aria-label="Previous level">&#9664;</button>
           <input type="range" id="level" min="0" max="0" step="1" aria-label="Depth level">
+          <button type="button" id="levNext" title="Next level (right arrow)" aria-label="Next level">&#9654;</button>
+          <button type="button" id="levPlay" aria-pressed="false" title="Step through the levels">Play</button>
           <span id="levelText" class="muted"></span>
         </div>
         <div class="controls fitbar" id="fitbar" hidden>

@@ -316,6 +316,105 @@
     return out;
   };
 
+  /* ------------------------------------------------------------ ZIP download */
+  /* a small store-only ZIP writer (no compression, UTF-8 names), so the page can hand
+     over everything at once without a library; tests read the result back with
+     Python's zipfile */
+  var crcTable = null;
+  V.crc32 = function (bytes) {
+    if (!crcTable) {
+      crcTable = new Uint32Array(256);
+      for (var n = 0; n < 256; n++) {
+        var c = n;
+        for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+        crcTable[n] = c >>> 0;
+      }
+    }
+    var crc = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) crc = crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  };
+  V.utf8 = function (s) { return new TextEncoder().encode(s); };
+  /* files: [{name, data: string | Uint8Array}] -> Uint8Array of the archive */
+  V.zip = function (files, when) {
+    var d = when instanceof Date && !isNaN(when) ? when : new Date(2000, 0, 1);
+    var dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    var dosDate = (Math.max(0, d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    var parts = [], central = [], offset = 0;
+    var u16 = function (v) { return [v & 255, (v >>> 8) & 255]; };
+    var u32 = function (v) { return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]; };
+    files.forEach(function (f) {
+      var name = V.utf8(f.name), data = typeof f.data === 'string' ? V.utf8(f.data) : f.data, crc = V.crc32(data);
+      var common = [].concat(u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0));
+      parts.push(new Uint8Array([0x50, 0x4B, 3, 4].concat(common)), name, data);
+      central.push(new Uint8Array([0x50, 0x4B, 1, 2].concat(u16(20), common, u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+      offset += 30 + name.length + data.length;
+    });
+    var cdSize = central.reduce(function (a, p) { return a + p.length; }, 0);
+    var end = new Uint8Array([0x50, 0x4B, 5, 6].concat(u16(0), u16(0), u16(files.length), u16(files.length), u32(cdSize), u32(offset), u16(0)));
+    var all = parts.concat(central, [end]), total = all.reduce(function (a, p) { return a + p.length; }, 0);
+    var out = new Uint8Array(total), at = 0;
+    all.forEach(function (p) { out.set(p, at); at += p.length; });
+    return out;
+  };
+  /* a name safe as a file or folder name on any system */
+  V.safeName = function (s) {
+    var t = String(s === null || s === undefined ? '' : s).replace(/[^\w.\-() +,]+/g, '_').replace(/\s+/g, ' ').replace(/^[.\s]+|[.\s]+$/g, '');
+    return (t.slice(0, 80) || 'unnamed');
+  };
+  /* everything the page can hand over as files, ready for V.zip: a README, the text
+     notes, one CSV per spectrum name of each sample (all its depth levels side by side)
+     and the quantification table when there are fits */
+  V.bundleFiles = function (data, specs) {
+    var files = [], used = {};
+    var uniq = function (path) {
+      var base = path.replace(/\.csv$/, ''), n = 1, p = path;
+      while (used[p.toLowerCase()]) { n++; p = base + ' (' + n + ').csv'; }
+      used[p.toLowerCase()] = true;
+      return p;
+    };
+    var csvs = [], by = {}, order = [];
+    specs.forEach(function (s) {
+      var k = s.sample.index + '|' + V.normName(s.name);
+      if (!by[k]) { by[k] = { sample: s.sample, name: s.name, items: [] }; order.push(k); }
+      by[k].items.push(s);
+    });
+    order.forEach(function (k) {
+      var g = by[k];
+      csvs.push({ name: uniq('csv/' + V.safeName(g.sample.name || 'sample') + '/' + V.safeName(g.name) + '.csv'),
+                  data: '﻿' + V.buildCsv(g.items) });
+    });
+    var groups = V.quantGroups(specs);
+    if (groups.length) files.push({ name: 'quantification.csv', data: '﻿' + V.quantCsv(groups, null, false) });
+    if ((data.methods || '').trim()) files.push({ name: 'methods.txt', data: data.methods.trim() + '\n' });
+    if ((data.calibration || '').trim()) files.push({ name: 'calibration.txt', data: data.calibration.trim() + '\n' });
+    var d = data.details || {};
+    if ((d.summary || '').trim()) files.push({ name: 'summary.txt', data: d.summary.trim() + '\n' });
+    files.unshift({ name: 'README.txt', data: V.readme(data, specs, csvs.length, groups.length > 0, files.map(function (f) { return f.name; })) });
+    return files.concat(csvs);
+  };
+  V.readme = function (data, specs, nCsv, hasQuant, others) {
+    var d = data.details || {}, L = [];
+    L.push(d.title || 'Experiment data');
+    L.push([d.customer, d.reference, d.operator, d.date].filter(Boolean).join('  ·  '));
+    L.push('Made with ' + data.tool + ' on ' + String(data.generated).replace('T', ' ') + '.');
+    L.push('');
+    L.push('What is in this folder');
+    L.push('  csv/                 ' + nCsv + ' CSV file' + (nCsv === 1 ? '' : 's') + ': one per sample and spectrum name, energy and intensity');
+    L.push('                       columns for every spectrum (every depth level side by side), plus the');
+    L.push('                       fitted curves where a CasaXPS fit was read. The units are in each header.');
+    if (hasQuant) L.push('  quantification.csv   atomic % from the fitted regions (area / RSF, CasaXPS numbers), per sample and level.');
+    if (others.indexOf('methods.txt') >= 0) L.push('  methods.txt          the experimental methods text.');
+    if (others.indexOf('calibration.txt') >= 0) L.push('  calibration.txt      how the binding-energy axis was calibrated.');
+    if (others.indexOf('summary.txt') >= 0) L.push('  summary.txt          the summary written for this experiment.');
+    L.push('');
+    L.push(specs.length + ' spectra from ' + data.samples.length + ' sample' + (data.samples.length === 1 ? '' : 's') + ', from these source files:');
+    (data.files || []).forEach(function (f) { L.push('  ' + f.name + (f.format ? ' (' + f.format + ')' : '')); });
+    L.push('');
+    L.push('Energies are as shown in the data browser (binding-energy corrections applied where the file or the analyst gave one).');
+    return L.join('\n') + '\n';
+  };
+
   /* ---------------------------------------------------------- depth profiles */
   /* mirrors quant.profile: one group per depth level of a sample (from quantGroups,
      in depth order); each level is normalised on its own. mode: 'element' (at % of
@@ -836,6 +935,7 @@
     $('offsetField').style.display = S.mode === 'stack' ? '' : 'none';
     var bar = $('levelbar'), many = S.levels.length > 1;
     bar.hidden = !many;
+    if (!many && playJob) togglePlay(false);
     if (many) {
       $('level').max = String(S.levels.length - 1);
       $('level').value = String(S.levelIdx);
@@ -936,10 +1036,12 @@
   function makePanel(key) {
     var canvas = h('canvas', { 'aria-label': 'Spectrum plot', role: 'img' });
     var readout = h('div', { class: 'readout', 'aria-live': 'off' });
-    var wrap = h('div', { class: 'panel' }, canvas, readout);
+    var png = h('button', { type: 'button', class: 'pngbtn', title: 'Save this plot as a PNG image', text: 'PNG' });
+    var wrap = h('div', { class: 'panel' }, canvas, h('div', { class: 'panel-foot' }, readout, png));
     var p = { key: key, wrap: wrap, canvas: canvas, readout: readout, zoom: null, hover: null,
               drag: null, lay: null, group: null, job: 0 };
     S.panels.set(key, p);
+    png.addEventListener('click', function () { savePanelPng(p); });
     canvas.addEventListener('mousemove', function (e) { onMove(p, e); });
     canvas.addEventListener('mouseleave', function () { p.hover = null; p.readout.textContent = ''; redraw(p); });
     canvas.addEventListener('mousedown', function (e) {
@@ -967,6 +1069,49 @@
     }, { passive: false });
     return p;
   }
+  /* a plot as an image: drawn again off screen in light colours at twice the size, whatever
+     the theme on screen, so it can go straight into a report */
+  function saveBlob(name, blob) {
+    var a = h('a', { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+  function savePanelPng(P) {
+    if (!P.group || !P.canvas.clientWidth || !P.canvas.clientHeight) return;
+    var keep = S.printing, host = h('div', { style: 'position:fixed;left:-99999px;top:0;width:' + P.canvas.clientWidth + 'px;height:' + P.canvas.clientHeight + 'px' });
+    var cv = h('canvas', { style: 'width:100%;height:100%' });
+    host.appendChild(cv); document.body.appendChild(host);
+    S.printing = true;
+    try {
+      drawPanel({ key: P.key, canvas: cv, group: P.group, zoom: P.zoom, hover: null, drag: null, lay: null, dpr: 2 },
+        { bg: '#FFFFFF', fg: '#222222', muted: '#56636E', grid: '#E3E8EC', accent: '#0F6B8C' }, traceColourMap());
+    } finally { S.printing = keep; }
+    var it = P.group.items[0], name = V.safeName(P.group.name + (P.group.items.length === 1 && it.sample.name ? ' ' + it.sample.name : '')) + '.png';
+    cv.toBlob(function (blob) { document.body.removeChild(host); if (blob) saveBlob(name, blob); }, 'image/png');
+  }
+  function downloadEverything() {
+    var files = V.bundleFiles(S.data, S.specs), when = new Date(S.data.generated);
+    var bytes = V.zip(files, when);
+    var title = V.safeName((S.data.details && S.data.details.title) || 'experiment');
+    saveBlob(title + '.zip', new Blob([bytes], { type: 'application/zip' }));
+    $('notes').textContent = 'Saved ' + files.length + ' files in ' + title + '.zip.';
+  }
+  /* depth levels: step, play, and the arrow keys */
+  var playJob = 0;
+  function stepLevel(d, wrap) {
+    var n = S.levels.length;
+    if (n < 2) return;
+    if (!S.levelOn) { S.levelOn = true; $('levelOn').checked = true; }
+    S.levelIdx = wrap ? (S.levelIdx + d + n) % n : Math.max(0, Math.min(n - 1, S.levelIdx + d));
+    requestRender();
+  }
+  function togglePlay(force) {
+    var on = force === undefined ? !playJob : force;
+    if (playJob) { G.clearInterval(playJob); playJob = 0; }
+    if (on && S.levels.length > 1) playJob = G.setInterval(function () { stepLevel(1, true); }, 450);
+    $('levPlay').setAttribute('aria-pressed', playJob ? 'true' : 'false');
+    $('levPlay').textContent = playJob ? 'Pause' : 'Play';
+  }
   function px(p, e) { return e.clientX - p.canvas.getBoundingClientRect().left; }
   function py(p, e) { return e.clientY - p.canvas.getBoundingClientRect().top; }
   function redraw(p) {
@@ -982,7 +1127,7 @@
     if (!g) return;
     var W = cv.clientWidth, H = cv.clientHeight;
     if (!W || !H) return;
-    var dpr = G.devicePixelRatio || 1;
+    var dpr = P.dpr || G.devicePixelRatio || 1;
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
       cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     }
@@ -1695,6 +1840,11 @@
 
   function renderNotes() {
     var box = clear($('tab-notes')), d = S.data, any = false;
+    if ((d.build_notes || []).length) {
+      any = true;
+      box.appendChild(h('h2', { text: 'Left out or thinned to keep the file small' }));
+      d.build_notes.forEach(function (t) { box.appendChild(h('p', { class: 'note', text: t })); });
+    }
     if (d.details.summary.trim()) {
       any = true;
       box.appendChild(h('h2', { text: 'Summary' }));
@@ -2210,6 +2360,17 @@
     $('autolabel').addEventListener('change', function (e) { S.ident.auto = e.target.checked; requestRender(); });
     V.FIT_LAYERS.forEach(function (k) {
       $('fit-' + k).addEventListener('change', function (e) { S.fit[k] = e.target.checked; requestRender(); });
+    });
+    $('zipall').addEventListener('click', downloadEverything);
+    $('levPrev').addEventListener('click', function () { stepLevel(-1, false); });
+    $('levNext').addEventListener('click', function () { stepLevel(1, false); });
+    $('levPlay').addEventListener('click', function () { togglePlay(); });
+    G.addEventListener('keydown', function (e) {
+      if (S.tab !== 'plot' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      var t = e.target && e.target.tagName;
+      if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA' || S.levels.length < 2) return;
+      if (e.key === 'ArrowLeft') { stepLevel(-1, false); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { stepLevel(1, false); e.preventDefault(); }
     });
     $('levelOn').addEventListener('change', function (e) { S.levelOn = e.target.checked; requestRender(); });
     $('level').addEventListener('input', function (e) { S.levelIdx = +e.target.value; requestRender(); });

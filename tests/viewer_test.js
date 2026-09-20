@@ -240,6 +240,19 @@ function near(a, b, msg, tol) {
     eq(V.lineLabel(['C', '1s', 285, null, 1]), 'C 1s', 'line label');
   }
 
+  // ---- the ZIP the page hands over: read back by Python's zipfile ----
+  check(V.crc32(V.utf8('123456789')) === 0xCBF43926, 'crc32 of the standard check string');
+  eq(V.safeName('a/b:c'), 'a_b_c', 'safeName replaces separators');
+  eq(V.safeName('..'), 'unnamed', 'safeName never gives a dot name');
+  eq(V.safeName('Pt #001a (1)'), 'Pt _001a (1)', 'safeName keeps letters, digits, spaces and brackets');
+  const bundle = V.bundleFiles(data, specs);
+  eq(bundle.map((f) => f.name), ['README.txt', 'csv/A/C 1s.csv', 'csv/A/O 1s.csv', 'csv/B/C 1s.csv'], 'bundle contents');
+  check(bundle[0].data.indexOf('3 spectra from 2 samples') >= 0, 'README counts the spectra');
+  check(bundle[1].data.charAt(0) === '﻿', 'CSV files start with a byte-order mark for Excel');
+  if (fx.zip_out) {
+    fs.writeFileSync(fx.zip_out, Buffer.from(V.zip(bundle.concat([{ name: 'ünï/tëst.txt', data: 'héllo' }]), new Date(2026, 0, 2, 3, 4, 6))));
+  }
+
   // ---- metadata summary ----
   const sm = V.summariseMeta([{ A: '1', B: 'x', C: '' }, { A: '1', B: 'y', C: '' }, { A: '1', B: 'x', D: '5' }], []);
   eq(sm.common, [['A', '1']], 'common metadata');

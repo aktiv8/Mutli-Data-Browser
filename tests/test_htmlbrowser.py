@@ -154,6 +154,33 @@ class TestElementIdentification(unittest.TestCase):
         self.assertAlmostEqual(labels["C 1s"], 286.0, delta=1.0)
 
 
+class TestPaths(unittest.TestCase):
+    """A page that goes to a customer must not say where the data lived."""
+
+    def test_scrub_paths(self):
+        s = hb.scrub_paths
+        self.assertEqual(s(r"e:\some\path.vms"), "path.vms")
+        self.assertEqual(s(r"saved to Z:\HAXPES-data\JB_MXene\ ok"),
+                         "saved to JB_MXene ok")
+        self.assertEqual(s("see C:/Users/dm/data/a.vms now"), "see a.vms now")
+        self.assertEqual(s("\\\\srv\\share\\d\\x.avg"), "x.avg")
+        self.assertEqual(s("/home/u/x/y.spe done"), "y.spe done")
+
+    def test_ordinary_text_is_left_alone(self):
+        for t in ("http://example.org/a/b", "3/4 and a:b", "Al Kα 1486.6 eV",
+                  "https://host/Users/x", "x/home/y", "file.vms"):
+            self.assertEqual(hb.scrub_paths(t), t, t)
+
+    def test_metadata_in_the_payload_has_no_paths(self):
+        r = region("C 1s")
+        d = doc("a.vms", [r], instrument={"Data file": r"C:\lab\a\b.vms",
+                                          "Note": "/home/u/run/x.vms"})
+        blob = json.dumps(hb.build_payload([d]))
+        self.assertNotIn("C:\\\\lab", blob)         # as JSON escapes it
+        self.assertNotIn("/home/u", blob)
+        self.assertEqual(hb.build_payload([d])["files"][0]["name"], "a.vms")
+
+
 class TestPayload(unittest.TestCase):
     def test_structure(self):
         d = doc("dir/a.vms", [region("C 1s", "A"), region("O 1s", "A", lo=525,
@@ -762,14 +789,36 @@ class TestJavaScript(unittest.TestCase):
             fx["elements"] = self.element_fixture()
             if HAVE_FIT:
                 fx["fit"] = self.fit_fixture(tmp)
+            zip_out = os.path.join(tmp, "bundle.zip")
+            fx["zip_out"] = zip_out
             fx_path = os.path.join(tmp, "fx.json")
             with open(fx_path, "w", encoding="utf-8") as fh:
                 json.dump(fx, fh)
             res = subprocess.run(
                 [_node(), os.path.join(ROOT, "tests", "viewer_test.js"),
                  fx_path], capture_output=True, text=True, timeout=60)
-        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-        self.assertIn("ok ", res.stdout)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            self.assertIn("ok ", res.stdout)
+            self.check_zip(zip_out, regs, tmp)
+
+    def check_zip(self, path, regs, tmp):
+        import zipfile
+        with zipfile.ZipFile(path) as z:
+            self.assertIsNone(z.testzip())                 # every CRC matches
+            self.assertEqual(z.namelist(),
+                             ["README.txt", "csv/A/C 1s.csv", "csv/A/O 1s.csv",
+                              "csv/B/C 1s.csv", "ünï/tëst.txt"])
+            self.assertEqual(z.read("ünï/tëst.txt").decode("utf-8"), "héllo")
+            self.assertEqual(z.getinfo("README.txt").date_time,
+                             (2026, 1, 2, 3, 4, 6))
+            self.assertIn("a.vms", z.read("README.txt").decode("utf-8"))
+            got = z.read("csv/A/C 1s.csv").decode("utf-8-sig")
+        want_path = os.path.join(tmp, "one.csv")
+        exporters.export_csv([regs[0]], want_path)
+        with open(want_path, newline="") as fh:
+            want = fh.read()
+        self.assertEqual(got.splitlines()[0], want.splitlines()[0])
+        self.assertEqual(len(got.splitlines()), len(want.splitlines()))
 
 
 if __name__ == "__main__":

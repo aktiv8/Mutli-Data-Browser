@@ -379,9 +379,25 @@ def auto_labels(d, lines):
 
 
 # -- the payload --------------------------------------------------------------------
+_PATH = re.compile(r"(?<![\w:/.])(?:[A-Za-z]:[\\/]|\\\\[^\s\\/]+[\\/]"
+                   r"|/(?:Users|home|mnt|media|Volumes|tmp|var)/)"
+                   r"[^\s\"'<>|*?]*")
+
+
+def scrub_paths(text):
+    """``text`` with every absolute file path (``C:\\lab\\run\\a.vms``, a network
+    share, ``/home/x/a.vms``) cut down to its file or folder name: a page that
+    is sent to a customer must not tell them where the data lived."""
+    def base(m):
+        parts = re.split(r"[\\/]+", m.group(0).rstrip("\\/"))
+        return parts[-1] if parts and parts[-1] else ""
+    return _PATH.sub(base, text)
+
+
 def _meta(md):
-    """Non-empty metadata values as strings, order kept."""
-    return {k: str(v) for k, v in md.items() if str(v or "").strip()}
+    """Non-empty metadata values as strings, order kept; paths cut to names."""
+    return {k: scrub_paths(str(v)) for k, v in md.items()
+            if str(v or "").strip()}
 
 
 def build_payload(docs, display=None, details=None, methods_text="",
