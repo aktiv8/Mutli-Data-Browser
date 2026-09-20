@@ -284,6 +284,7 @@ class Curves:
     residual_rms: float | None = None   # rms(data - envelope) / data range
     background_known: bool = True   # False: this background type is not
                                     # reproduced (components only)
+    fit_region: object = None       # the FitRegion these curves belong to
 
 
 def distinct_regions(regions):
@@ -355,7 +356,8 @@ def curves(fit, energies, counts, hv, dwell=None, scans=1):
             components=[(c, full(v)) for c, v in comps],
             envelope=full(total) if comps and bg is not None else None,
             approximate=approx, scale_known=scale is not None,
-            residual_rms=rms, background_known=bg is not None))
+            residual_rms=rms, background_known=bg is not None,
+            fit_region=reg))
     return out
 
 
