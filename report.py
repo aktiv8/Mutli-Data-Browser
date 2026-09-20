@@ -3,7 +3,8 @@
 What goes in, and in what order, is a ``reportspec`` spec (the Report
 Generator's choice; the old ``sections=`` argument is turned into one):
 a **cover** (letterhead logo, title, customer / reference / operator / date),
-the **contents** (sections and their pages), the **summary**, **methods** and
+the **contents** (sections and their pages), the **summary**, the
+**quantification** (``resultspages``), **methods** and
 **calibration** texts, the list of **data files**, the **metadata** of every
 file (tidied, as in the metadata PDF), the **images** (camera pictures and
 SnapMaps, see ``imagepages``) and the saved **figures** with their captions.
@@ -33,7 +34,8 @@ import reportspec
 
 SECTIONS = ("cover", "metadata", "images", "figures")   # the old names
 
-_FLOW = ("cover", "summary", "methods", "calibration", "files", "metadata")
+_FLOW = ("cover", "summary", "results", "methods", "calibration", "files",
+         "metadata")
 FOOTER_SIZE = 7.5
 FOOTER_MARGIN = 36                       # points from the page edge
 
@@ -218,6 +220,84 @@ def files_table(file_rows, sha="short", look=None):
                                      "files"), t]
 
 
+def _grid(header, rows, widths, look, right_from=1, kinds=None):
+    """A styled table: ink header, banded rows, numbers right-aligned from
+    column ``right_from``; rows whose kind (``kinds``) is "state" are set
+    smaller and grey."""
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Table, TableStyle
+
+    t = Table([list(header)] + [list(r) for r in rows], repeatRows=1,
+              colWidths=[w * mm for w in widths])
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(look.ink)),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, -1), look.font),
+        ("FONTNAME", (0, 0), (-1, 0), look.bold),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [colors.white, colors.HexColor(look.tint(0.94))]),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.4, colors.HexColor(pdfstyle.RULE)),
+        ("ALIGN", (right_from, 0), (-1, -1), "RIGHT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+    ]
+    for i, kind in enumerate(kinds or (), 1):
+        if kind == "state":
+            style += [("TEXTCOLOR", (0, i), (-1, i),
+                       colors.HexColor("#555555")),
+                      ("FONTSIZE", (0, i), (-1, i), 7.5)]
+    t.setStyle(TableStyle(style))
+    return t
+
+
+def results_story(results, skip=(), look=None, sid="results"):
+    """The Quantification section: how the numbers are made, then for each
+    sample its composition (one level) or its depth profile (chart and table),
+    and the notes."""
+    from reportlab.lib.units import mm
+    from reportlab.platypus import (CondPageBreak, Image, KeepTogether,
+                                    Paragraph, Spacer)
+    import resultspages
+
+    samples = results.chosen(skip) if results else []
+    if not samples:
+        return []
+    look = look or pdfstyle.look()
+    st = pdfstyle.styles(look)
+    story = [_mark(Paragraph("Quantification", st["h1"]), sid),
+             Paragraph(xml_escape(results.method), st["small"]),
+             Spacer(1, 3 * mm)]
+    for s in samples:
+        story.append(CondPageBreak(70 * mm))
+        head = _mark(Paragraph(xml_escape(s.label), st["h2"]), sid, s.label)
+        if not s.is_profile:
+            rows = resultspages.composition_cells(s.levels[0])
+            story += [head, _grid(resultspages.COMPOSITION_HEADER,
+                                  [c for _k, c in rows],
+                                  [40, 30, 20, 36, 30, 24], look,
+                                  right_from=2, kinds=[k for k, _c in rows])]
+            continue
+        png = resultspages.profile_png(s, size=(7.0, 3.0), dpi=200)
+        block = [head]
+        if png:
+            block.append(Image(io.BytesIO(png), width=170 * mm,
+                               height=170 * mm * 3.0 / 7.0, hAlign="LEFT"))
+        story += block
+        header, rows = resultspages.profile_cells(s)
+        first = 30 if len(header) > 6 else 40
+        rest = (180 - first) / max(1, len(header) - 1)
+        story += [Spacer(1, 2 * mm),
+                  _grid(header, rows, [first] + [rest] * (len(header) - 1),
+                        look)]
+    notes = results.notes_for(samples)
+    if notes:
+        story.append(Spacer(1, 3 * mm))
+        for note in notes:
+            story.append(Paragraph("• " + xml_escape(note), st["small"]))
+    return story
+
+
 def contents_story(entries, look=None):
     """The contents page: ``entries`` is ``[(level, title, page)]``."""
     from reportlab.lib import colors
@@ -257,7 +337,7 @@ def contents_story(entries, look=None):
 
 
 def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
-                look=None):
+                look=None, results=None):
     """Flowables of consecutive reportlab sections. ``items`` is
     ``[(section id, skipped child ids)]``; ``art`` the cover picture."""
     from reportlab.platypus import PageBreak
@@ -272,6 +352,8 @@ def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
             story += title_block(details, logo, art, look)
         elif sid == "summary":
             story += text_block("Summary", details.get("summary"), look, sid)
+        elif sid == "results":
+            story += results_story(results, skip, look, sid)
         elif sid == "methods":
             story += text_block("Methods", methods, look, sid)
         elif sid == "calibration":
@@ -419,7 +501,7 @@ def _footer(out, mu, title, sections, look, skip_first):
 
 def build_report(path, details, logo, file_rows, docs, figures,
                  render_figure, sections=SECTIONS, render_images=None,
-                 spec=None, cover_data=None, notes=None):
+                 spec=None, cover_data=None, notes=None, results=None):
     """Write the report to ``path``; returns the number of pages.
 
     ``spec`` (see ``reportspec``) says which sections go in, in which order,
@@ -430,7 +512,8 @@ def build_report(path, details, logo, file_rows, docs, figures,
     ``render_figure(pdf, number, figure)`` draws that figure's pages onto a
     matplotlib ``PdfPages`` and returns how many it wrote.
     ``render_images(pdf)`` does the same for the camera-picture and SnapMap
-    pages (None: there are none)."""
+    pages (None: there are none). ``results`` is the ``resultspages.Results``
+    the Quantification section is made from (None: there is none)."""
     if spec is None:
         spec = reportspec.spec_from_sections(sections, "pdf")
     sha = reportspec.option(spec, "sha")
@@ -465,7 +548,7 @@ def build_report(path, details, logo, file_rows, docs, figures,
                               "marks": [("contents", None, 1)]})
             elif kind == "flow":
                 story = _flow_story(run, details, logo, file_rows, docs, sha,
-                                    art, look)
+                                    art, look, results)
                 if story:
                     marks = _build_pdf(part, story, details, look)
                     add(k, kind, run[0][0], _page_count(mu, part), marks)

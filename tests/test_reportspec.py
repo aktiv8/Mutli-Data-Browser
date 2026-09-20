@@ -41,8 +41,8 @@ class TestSpec(unittest.TestCase):
     def test_the_default_is_everything_in_the_results_first_order(self):
         s = rs.default_spec()
         self.assertEqual(rs.order(s), list(rs.SECTION_IDS))
-        self.assertEqual(rs.order(s)[:4],
-                         ["cover", "contents", "summary", "figures"])
+        self.assertEqual(rs.order(s)[:5], ["cover", "contents", "summary",
+                                           "results", "figures"])
         self.assertEqual(rs.order(s)[-2:], ["metadata", "files"])   # appendix
         self.assertTrue(all(rs.is_on(s, i) for i in rs.SECTION_IDS))
 
@@ -68,7 +68,7 @@ class TestSpec(unittest.TestCase):
         b = rs.with_on(a, "summary", False)
         self.assertTrue(rs.is_on(a, "summary"))
         self.assertFalse(rs.is_on(b, "summary"))
-        self.assertEqual(rs.order(rs.moved(a, "figures", -3))[:3],
+        self.assertEqual(rs.order(rs.moved(a, "figures", -4))[:3],
                          ["figures", "cover", "contents"])
         self.assertEqual(rs.order(rs.moved(a, "cover", -5)), rs.order(a))
         self.assertEqual(rs.order(rs.moved(a, "files", 9)), rs.order(a))
@@ -90,7 +90,7 @@ class TestSpec(unittest.TestCase):
                          len(rs.SECTION_IDS))
 
     def test_active_lists_sections_in_order_with_their_skips(self):
-        s = rs.with_child(rs.moved(rs.default_spec(), "files", -8), "metadata",
+        s = rs.with_child(rs.moved(rs.default_spec(), "files", -9), "metadata",
                           "f1", False)
         got = rs.active(s)
         self.assertEqual([i for i, _k in got][0], "files")
@@ -146,7 +146,7 @@ class TestInventory(unittest.TestCase):
                     calibration="c", file_rows=[{"name": "a"}],
                     docs=self.docs(),
                     figures=[{"id": "g1", "name": "One"}, {"name": "Two"}],
-                    has_images=True)
+                    has_images=True, results=[("f1/S", "S")])
         args.update(kw)
         return rs.inventory(**args)
 
@@ -162,7 +162,8 @@ class TestInventory(unittest.TestCase):
 
     def test_what_is_missing_says_why(self):
         inv = self.inv(details={}, methods_text="", calibration=" ",
-                       file_rows=[], docs=[], figures=[], has_images=False)
+                       file_rows=[], docs=[], figures=[], has_images=False,
+                       results=())
         self.assertEqual(inv.present_ids(), {"cover", "contents"})
         self.assertIn("summary", inv.summary("summary"))
         self.assertIn("Figures", inv.summary("figures"))
@@ -233,7 +234,7 @@ class TestPdfFollowsTheSpec(Tmp):
                         self.first_page_with(pages, "figure 1"))
         self.assertLess(self.first_page_with(pages, "figure 3"),
                         self.first_page_with(pages, "Acquisition metadata - a.vgd"))
-        first = self.build(rs.moved(rs.default_spec(), "figures", -3))
+        first = self.build(rs.moved(rs.default_spec(), "figures", -4))
         self.assertIn("figure 1", first[0])              # figures lead now
         self.assertLess(self.first_page_with(first, "figure 1"),
                         self.first_page_with(first, "ACME"))
@@ -329,7 +330,7 @@ class TestDeckFollowsTheSpec(Tmp):
 
     def test_the_order_is_the_specs_order(self):
         titles = self.titles(self.build(rs.moved(rs.default_spec(), "figures",
-                                                 -3)))
+                                                 -4)))
         self.assertTrue(titles[0].startswith("Figure 1"))
         self.assertTrue(titles[1].startswith("Figure 2"))
         self.assertEqual(titles[-1], "Data files")
@@ -496,7 +497,7 @@ class TestInTheApp(unittest.TestCase):
         dlg = self.dialog()
         self.assertTrue(dlg.toggle_section("summary"))
         self.assertFalse(rs.is_on(self.ws.report_spec, "summary"))
-        dlg.move("files", -8)
+        dlg.move("files", -9)
         self.assertEqual(rs.order(self.ws.report_spec)[0], "files")
         dlg.select_all(False)
         self.assertEqual(rs.active(self.ws.report_spec), [])
@@ -571,6 +572,35 @@ class TestInTheApp(unittest.TestCase):
         with mupdf.open(tmp) as d:
             text = "\n".join(p.get_text() for p in d)
         self.assertNotIn("It worked.", text)
+
+    def test_the_quantification_is_read_once_and_again_after_a_change(self):
+        ws = self.ws
+        first = ws._results()
+        self.assertFalse(first)                       # no fits in this file
+        self.assertIs(ws._results(), first)           # remembered
+        self.assertNotIn("results", ws.report_inventory().present_ids())
+        ws._ann_changed(relabel=False)
+        self.assertIsNot(ws._results(), first)        # an edit reads it again
+
+    def test_fits_in_the_files_reach_the_report_and_the_generator(self):
+        import resultspages
+        from test_results import sample, three_element_level
+        ws = self.ws
+        made = resultspages.Results(samples=[
+            sample("Film", [three_element_level(None)])])
+        real, resultspages.collect = resultspages.collect, \
+            lambda *a, **k: made
+        self.addCleanup(setattr, resultspages, "collect", real)
+        ws._ann_changed(relabel=False)
+        self.assertIn("results", ws.report_inventory().present_ids())
+        tmp = os.path.join(self.dir, "q.pdf")
+        ws.set_report_spec(rs.default_spec())
+        ws._build_report(tmp)
+        with mupdf.open(tmp) as d:
+            text = "\n".join(p.get_text() for p in d)
+        self.assertIn("Quantification", text)
+        self.assertIn("Ti 2p", text)
+        ws._ann_changed(relabel=False)
 
 
 if __name__ == "__main__":

@@ -104,6 +104,7 @@ import snapshot
 import xpslines
 import report
 import reportspec
+import resultspages
 import reportgen_ui
 import pptx_export
 import importplan
@@ -554,6 +555,8 @@ class Workspace:
         self._sha_cache = {}
         self.ann = annotations.Annotations()    # renames, notes, BE shifts...
         self._disp_cache = {}       # id(region) -> region as drawn/exported
+        self._ann_serial = 0        # counts changes to the annotations
+        self._results_memo = None   # (key, resultspages.Results)
         self._pick_cb = None        # set while waiting for a click on the plot
         self._axinfo = {}           # axes -> (photon energy, kind, n traces)
         self._click_cb = None       # persistent plot-click hook (Identify)
@@ -1733,6 +1736,7 @@ class Workspace:
         ``relabel=False`` skips rebuilding the tree (markers do not show
         there)."""
         self._disp_cache.clear()
+        self._ann_serial += 1
         for p in self.docs:
             p.annotations = self.ann
             p.file_id = self.file_ids.get(id(p), "")
@@ -3444,7 +3448,7 @@ class Workspace:
         return reportspec.inventory(
             d, d.get("methods", ""), d.get("calibration", ""),
             self._report_file_rows(), self.docs, self._report_figures(),
-            self._has_image_pages(), HAVE_MPL)
+            self._has_image_pages(), HAVE_MPL, self._results().children())
 
     def set_report_spec(self, spec):
         """Remember what the reports contain (config, workbook, the preview's
@@ -3491,6 +3495,17 @@ class Workspace:
                      if abs(r.energy[0] - r.energy[-1]) > 250), pool[0])
         return list(pick.energy), list(pick.counts)
 
+    def _results(self):
+        """The quantification the reports lay out (``resultspages``), read
+        from the fits of the loaded files as they are drawn; remembered until
+        the files or the annotations change."""
+        key = (tuple(id(p) for p in self.docs), self._ann_serial)
+        if self._results_memo is None or self._results_memo[0] != key:
+            self._results_memo = (key, resultspages.collect(
+                self.docs, self._display,
+                lambda p: reportspec.doc_key(p)))
+        return self._results_memo[1]
+
     def _build_report(self, path, spec=None, notes=None):
         return report.build_report(
             path, self._report_details(),
@@ -3499,7 +3514,8 @@ class Workspace:
             spec=self._spec_for_output(spec),
             render_images=(self._report_image_pages
                            if self._has_image_pages() else None),
-            cover_data=self.cover_data(), notes=notes)
+            cover_data=self.cover_data(), notes=notes,
+            results=self._results())
 
     def _report_ready(self):
         if not self.docs:
@@ -3728,7 +3744,8 @@ class Workspace:
             image_pages=(self._deck_image_pages
                          if self._has_image_pages() else None),
             spec=self._spec_for_output(spec),
-            cover_data=self.cover_data(), notes=notes)
+            cover_data=self.cover_data(), notes=notes,
+            results=self._results())
 
     def export_powerpoint(self):
         self.generate_report("pptx")

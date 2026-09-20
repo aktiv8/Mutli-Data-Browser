@@ -37,6 +37,7 @@ SECTION_DEFS = (
     ("cover", "Cover page", "Title, customer, date, logo"),
     ("contents", "Contents", "Sections and their pages"),
     ("summary", "Summary", "Your summary text"),
+    ("results", "Quantification", "Atomic percent from the fits"),
     ("figures", "Figures", "The saved figures"),
     ("images", "Camera pictures and SnapMaps", "Photos and map sites"),
     ("methods", "Methods", "How the data were acquired"),
@@ -45,16 +46,17 @@ SECTION_DEFS = (
     ("files", "Data files", "Names, sizes and checksums"),
 )
 SECTION_IDS = tuple(s[0] for s in SECTION_DEFS)
-SHORT = {"cover": "Cover", "contents": "Contents", "summary": "Summary", "figures": "Figures",
+SHORT = {"cover": "Cover", "contents": "Contents", "summary": "Summary",
+         "results": "Results", "figures": "Figures",
          "images": "Pictures", "methods": "Methods",
          "calibration": "Calibration", "metadata": "Metadata",
          "files": "Files"}
 LABELS = {s[0]: s[1] for s in SECTION_DEFS}
 HINTS = {s[0]: s[2] for s in SECTION_DEFS}
-CHILD_KINDS = {"figures": "figure", "metadata": "file"}
+CHILD_KINDS = {"figures": "figure", "metadata": "file", "results": "sample"}
 
 # The order the reports had before there was a choice; used for ``sections=``.
-LEGACY_ORDER = ("cover", "contents", "summary", "methods", "calibration", "files",
+LEGACY_ORDER = ("cover", "contents", "summary", "results", "methods", "calibration", "files",
                 "metadata", "images", "figures")
 # What each old section name switched on, per output.
 LEGACY_PDF = {"cover": ("cover", "summary", "methods", "calibration", "files"),
@@ -255,10 +257,10 @@ def _preset(order, on):
 BUILTIN_PRESETS = {
     "Everything": default_spec(),
     "Customer report": _preset(
-        ("cover", "contents", "summary", "figures", "images", "methods",
-         "calibration"),
-        {"cover", "contents", "summary", "figures", "images", "methods",
-         "calibration"}),
+        ("cover", "contents", "summary", "results", "figures", "images",
+         "methods", "calibration"),
+        {"cover", "contents", "summary", "results", "figures", "images",
+         "methods", "calibration"}),
     "Quick look": _preset(("cover", "figures"), {"cover", "figures"}),
     "Audit trail": _preset(
         ("cover", "contents", "methods", "calibration", "metadata", "files"),
@@ -321,13 +323,17 @@ class Inventory:
             return f"{n} file{'s' if n != 1 else ''}"
         if sid == "files":
             return f"{n} file{'s' if n != 1 else ''}"
+        if sid == "results":
+            return f"{n} sample{'s' if n != 1 else ''}"
         return ""
 
 
 def inventory(details, methods_text, calibration, file_rows, docs, figures,
-              has_images, have_mpl=True):
+              has_images, have_mpl=True, results=()):
     """Build the ``Inventory`` from what the workspace holds. ``figures`` are
-    the saved figures (or the single 'current view' the reports fall back to)."""
+    the saved figures (or the single 'current view' the reports fall back to);
+    ``results`` is ``[(sample key, label)]`` of the samples with a quantification
+    (see ``resultspages``)."""
     inv = Inventory()
 
     def put(sid, ok, why="", n=None):
@@ -346,6 +352,8 @@ def inventory(details, methods_text, calibration, file_rows, docs, figures,
         "no energy calibration recorded")
     put("files", file_rows, "no files loaded", len(file_rows or ()))
     put("metadata", docs, "no files loaded", len(docs or ()))
+    put("results", results, "no CasaXPS fits with sensitivity factors in "
+        "these files", len(results or ()))
     put("images", has_images, "no pictures or maps in these files")
     put("figures", figures and have_mpl,
         "matplotlib is not installed" if figures and not have_mpl
@@ -353,6 +361,7 @@ def inventory(details, methods_text, calibration, file_rows, docs, figures,
     inv.children["figures"] = [
         (figure_id(f, i), f.get("name") or f"Figure {i}")
         for i, f in enumerate(figures or (), 1)]
+    inv.children["results"] = list(results or ())
     inv.children["metadata"] = [
         (doc_key(d), os.path.basename((d.path or "").rstrip("\\/")) or "file")
         for d in docs or ()]

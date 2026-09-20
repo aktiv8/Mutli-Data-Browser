@@ -1,7 +1,8 @@
 """PowerPoint export of an experiment: a 16:9 deck built from the same data as
 the PDF report.
 
-Slides: title (logo, details), contents, summary, data files, metadata (the
+Slides: title (logo, details), contents, summary, quantification (composition
+tables, depth-profile charts; see ``resultspages``), data files, metadata (the
 compact layout of ``metasummary.layout_file`` as native tables), the camera
 pictures and SnapMaps (one picture per slide, see ``imagepages``), then one
 slide per figure page (a picture, an editable caption, speaker notes describing
@@ -27,6 +28,7 @@ import covers
 import metasummary
 import panelview
 import reportspec
+import resultspages
 
 SECTIONS = ("title", "files", "metadata", "images", "figures")
 
@@ -40,6 +42,7 @@ FONT = "Calibri"
 
 DIVIDER_MIN = 5                         # slides in a section that earn a divider
 CONTENTS_ROWS = 16                      # lines on a contents slide
+RESULT_ROWS = 15                        # table rows on a quantification slide
 ROW_H = 0.29                            # table row height (10 pt text)
 TABLE_TOP = 1.25
 BOTTOM = SLIDE_H - 0.55                 # keep clear of the footer
@@ -507,15 +510,7 @@ def _figure_slides(deck, figures, render_images):
             if pi:
                 title += " (continued)"
             slide = deck.content_slide(title, None if pi else title)
-            width, height = FIGURE_SIZE
-            pic = slide.shapes.add_picture(
-                io.BytesIO(png), deck.Inches((SLIDE_W - width) / 2),
-                deck.Inches(1.15), width=deck.Inches(width))
-            if pic.height > deck.Inches(height):
-                ratio = deck.Inches(height) / pic.height
-                pic.height = deck.Inches(height)
-                pic.width = int(pic.width * ratio)
-                pic.left = int((deck.Inches(SLIDE_W) - pic.width) / 2)
+            _fit_picture(deck, slide, png)
             if caption and pi == 0:
                 deck.text(slide, MARGIN, 6.15, BODY_W, 0.9,
                           paragraphs(caption)[:3], size=13, space_after=3)
@@ -529,16 +524,87 @@ def _image_slides(deck, pages):
     ``[{"title", "png", "notes"}]`` (pictures sized ``FIGURE_SIZE``)."""
     for pg in pages:
         slide = deck.content_slide(pg["title"])
-        width, height = FIGURE_SIZE
-        pic = slide.shapes.add_picture(
-            io.BytesIO(pg["png"]), deck.Inches((SLIDE_W - width) / 2),
-            deck.Inches(1.15), width=deck.Inches(width))
-        if pic.height > deck.Inches(height):
-            ratio = deck.Inches(height) / pic.height
-            pic.height = deck.Inches(height)
-            pic.width = int(pic.width * ratio)
-            pic.left = int((deck.Inches(SLIDE_W) - pic.width) / 2)
+        _fit_picture(deck, slide, pg["png"])
         slide.notes_slide.notes_text_frame.text = pg.get("notes", "")
+
+
+def _fit_picture(deck, slide, png):
+    """Place a picture sized ``FIGURE_SIZE`` under the title, centred, and
+    shrink it if it came out taller."""
+    width, height = FIGURE_SIZE
+    pic = slide.shapes.add_picture(
+        io.BytesIO(png), deck.Inches((SLIDE_W - width) / 2),
+        deck.Inches(1.15), width=deck.Inches(width))
+    if pic.height > deck.Inches(height):
+        ratio = deck.Inches(height) / pic.height
+        pic.height = deck.Inches(height)
+        pic.width = int(pic.width * ratio)
+        pic.left = int((deck.Inches(SLIDE_W) - pic.width) / 2)
+    return pic
+
+
+def _results_slides(deck, results, skip=()):
+    """The Quantification slides: for each sample its composition table (one
+    depth level) or its depth profile (a chart, then at % by level), a footnote
+    on how the numbers are made, and the method and notes as speaker notes."""
+    samples = results.chosen(skip) if results else []
+    if not samples:
+        return
+    foot = "Atomic % = area / RSF (CasaXPS), per sample and depth level; " \
+        "no transmission correction."
+    notes = results.notes_for(samples)
+    said = results.method + ("\n\n" + "\n".join(notes) if notes else "")
+
+    def finish(slide):
+        deck.text(slide, MARGIN, 6.55, BODY_W, 0.35, [foot], size=10,
+                  color=GREY, space_after=0)
+        slide.notes_slide.notes_text_frame.text = said
+
+    def right(shape, first):
+        for row in shape.table.rows:
+            for ci in range(first, len(shape.table.columns)):
+                for p in row.cells[ci].text_frame.paragraphs:
+                    p.alignment = deck.ALIGN.RIGHT
+
+    for s in samples:
+        if not s.is_profile:
+            rows = resultspages.composition_cells(s.levels[0])
+            for i in range(0, len(rows), RESULT_ROWS):
+                chunk = rows[i:i + RESULT_ROWS]
+                slide = deck.content_slide(
+                    f"Quantification \u2013 {s.label}"
+                    + (" (continued)" if i else ""), None if i else s.label)
+                shape = deck.table(
+                    slide, MARGIN, TABLE_TOP, BODY_W,
+                    [4.0, 3.0, 1.6, 3.4, 2.6, 1.8],
+                    resultspages.COMPOSITION_HEADER, [c for _k, c in chunk],
+                    size=11, row_h=0.32)
+                right(shape, 2)
+                for ri, (kind, _c) in enumerate(chunk, 1):
+                    if kind == "state":
+                        for cell in shape.table.rows[ri].cells:
+                            for p in cell.text_frame.paragraphs:
+                                for r in p.runs:
+                                    r.font.size = deck.Pt(10)
+                                    r.font.color.rgb = deck.rgb(GREY)
+                finish(slide)
+            continue
+        slide = deck.content_slide(
+            f"Quantification \u2013 {s.label}: depth profile", s.label)
+        png = resultspages.profile_png(s, size=FIGURE_SIZE, dpi=150)
+        if png:
+            _fit_picture(deck, slide, png)
+        finish(slide)
+        header, rows = resultspages.profile_cells(s)
+        for i in range(0, len(rows), RESULT_ROWS):
+            slide = deck.content_slide(
+                f"Quantification \u2013 {s.label}: at % by level"
+                + (" (continued)" if i else ""))
+            shape = deck.table(slide, MARGIN, TABLE_TOP, BODY_W,
+                               [1.0] * len(header), header,
+                               rows[i:i + RESULT_ROWS], size=11, row_h=0.32)
+            right(shape, 1)
+            finish(slide)
 
 
 # -- the last pass: dividers, contents, order, footers -----------------------------
@@ -679,7 +745,7 @@ def _assemble(deck, dividers="auto"):
 
 def build_deck(path, details, logo, file_rows, docs, figures, render_images,
                sections=SECTIONS, image_pages=None, spec=None,
-               cover_data=None, notes=None):
+               cover_data=None, notes=None, results=None):
     """Write the .pptx to ``path``; returns the number of slides.
 
     ``spec`` (see ``reportspec``) says which sections go in, in which order,
@@ -690,7 +756,8 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
     ``figures``: ``[{"name", "caption", "state"}]``;
     ``render_images(number, figure)`` returns one PNG (bytes) per page of that
     figure, sized ``FIGURE_SIZE`` inches. ``image_pages()`` returns the camera
-    and SnapMap slides as ``[{"title", "png", "notes"}]`` (None: none)."""
+    and SnapMap slides as ``[{"title", "png", "notes"}]`` (None: none).
+    ``results`` is the ``resultspages.Results`` of the Quantification slides."""
     if spec is None:
         spec = reportspec.spec_from_sections(sections, "deck")
     items = reportspec.active(spec)
@@ -718,6 +785,8 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
             if cal_text and "calibration" in ids:
                 paras.append("Energy calibration: " + cal_text)
             _text_slides(deck, "Summary", paras, size=16)
+        elif sid == "results":
+            _results_slides(deck, results, skip)
         elif sid == "methods":
             _text_slides(deck, "Methods", paragraphs(methods), size=14)
         elif sid == "calibration":
