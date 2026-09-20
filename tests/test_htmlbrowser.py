@@ -635,12 +635,21 @@ class TestJavaScript(unittest.TestCase):
         with open(path, newline="") as fh:
             text = fh.read()
         import quant
-        from test_quant import sample_groups
+        from test_quant import profile_groups, sample_groups
         groups = sample_groups()
+        pgroups = profile_groups()
+        pkeyed = [dict(g, entries=[dict(e, key=f"p{gi}e{ei}")
+                                   for ei, e in enumerate(g["entries"])])
+                  for gi, g in enumerate(pgroups)]
+        prof = {"groups": pkeyed, "exclude": {"p0e2": False}}
+        for mode in ("element", "state", "share"):
+            prof[mode] = quant.profile(pgroups, mode)
+        prof["element_excl"] = quant.profile(
+            pgroups, include=[[True, True, False], [True, True], [True]])
         keyed = [dict(g, entries=[dict(e, key=f"g{gi}e{ei}")
                                   for ei, e in enumerate(g["entries"])])
                  for gi, g in enumerate(groups)]
-        qx = {"groups": keyed,
+        qx = {"profile": prof, "groups": keyed,
               "plain": quant.csv_rows(groups),
               "excluded": quant.csv_rows(groups, include=[[True, False, True],
                                                           [True]]),

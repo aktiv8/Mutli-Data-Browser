@@ -238,6 +238,77 @@ def sample_groups():
                 {"spectrum": "C 1s", "row": dict(a, area=200.0, area_t=None)}]}]
 
 
+def profile_groups():
+    """Three depth levels of one sample: carbon falls, oxygen rises, oxygen is
+    missing at the last level and the surface carbon region appears twice."""
+    def comp(name, area, idx=-1, group=""):
+        c = {"name": name, "group": group, "index": idx, "area": area}
+        c["gk"], c["state"] = quant.state_of(c, "C 1s")
+        return c
+
+    def row(region, rsf, area, comps=()):
+        return {"region": region, "background": "Shirley", "rsf": rsf,
+                "area": area, "area_t": None, "basis": "data",
+                "components": list(comps)}
+    def carbon(a, share=0.7):
+        return row("C 1s", 0.278, a, [comp("C-C", a * share),
+                                      comp("C-O", a * (1 - share), 2, "Ether")])
+    return [
+        {"level": 0, "entries": [{"spectrum": "C 1s", "row": carbon(300.0)},
+                                 {"spectrum": "survey", "row": carbon(10.0)},
+                                 {"spectrum": "O 1s",
+                                  "row": row("O 1s", 0.78, 200.0)}]},
+        {"level": 1, "entries": [{"spectrum": "C 1s", "row": carbon(150.0, 0.5)},
+                                 {"spectrum": "O 1s",
+                                  "row": row("O 1s", 0.78, 400.0)}]},
+        {"level": 2, "entries": [{"spectrum": "C 1s", "row": carbon(50.0)}]}]
+
+
+class TestProfile(unittest.TestCase):
+    def test_element_profile(self):
+        p = quant.profile(profile_groups())
+        self.assertEqual(p["levels"], [0, 1, 2])
+        self.assertEqual([s["name"] for s in p["series"]], ["C 1s", "O 1s"])
+        c, o = (s["values"] for s in p["series"])
+        # level 0: the second C 1s (10) is shown once but, like the Quantification
+        # tab, still counts in the total until it is unticked
+        tot = 300 / .278 + 10 / .278 + 200 / .78
+        self.assertAlmostEqual(c[0], 100 * (300 / .278) / tot)
+        self.assertAlmostEqual(c[0] + o[0], 100 * (1 - (10 / .278) / tot))
+        self.assertAlmostEqual(c[1] + o[1], 100.0)
+        self.assertAlmostEqual(c[2], 100.0)
+        self.assertIsNone(o[2])
+
+    def test_states_and_share(self):
+        st = quant.profile(profile_groups(), "state")
+        names = [s["name"] for s in st["series"]]
+        self.assertEqual(names, ["C 1s: C-C", "C 1s: Ether"])
+        by = {s["name"]: s["values"] for s in st["series"]}
+        # the states of a region add up to the region's atomic percent
+        el = quant.profile(profile_groups())["series"][0]["values"]
+        for i in range(3):
+            self.assertAlmostEqual(sum(v[i] for v in by.values()), el[i])
+        sh = {s["name"]: s["values"]
+              for s in quant.profile(profile_groups(), "share")["series"]}
+        self.assertAlmostEqual(sh["C 1s: C-C"][0], 70.0)
+        self.assertAlmostEqual(sh["C 1s: C-C"][1], 50.0)
+        self.assertAlmostEqual(sh["C 1s: C-C"][0] + sh["C 1s: Ether"][0], 100.0)
+
+    def test_include_leaves_a_region_out(self):
+        p = quant.profile(profile_groups(),
+                          include=[[True, True, False], [True, True], [True]])
+        c, o = (s["values"] for s in p["series"])
+        self.assertEqual(o[0], None)
+        self.assertAlmostEqual(c[0], 100 * 300 / 310)
+
+    def test_nothing_to_show(self):
+        self.assertEqual(quant.profile([]), {"levels": [], "series": []})
+        p = quant.profile([{"level": 3, "entries": [
+            {"spectrum": "x", "row": {"region": "x", "rsf": 0, "area": 1,
+                                      "components": []}}]}])
+        self.assertEqual(p, {"levels": [3], "series": []})
+
+
 class TestCsvRows(unittest.TestCase):
     def test_header_regions_and_states(self):
         rows = quant.csv_rows(sample_groups())

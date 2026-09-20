@@ -292,6 +292,79 @@
     }).join('\r\n') + '\r\n';
   };
 
+  /* ---------------------------------------------------------- depth profiles */
+  /* mirrors quant.profile: one group per depth level of a sample (from quantGroups,
+     in depth order); each level is normalised on its own. mode: 'element' (at % of
+     each region), 'state' (at % of each chemical state) or 'share' (a state's % of its
+     own region). Values are null where a region is missing, unticked or has no RSF. */
+  V.profile = function (groups, mode, inc, transmission) {
+    var series = {}, order = [];
+    groups.forEach(function (g, gi) {
+      var res = V.quantNormalise(g.entries.map(function (e) { return e.row; }),
+        g.entries.map(function (e) { return !(inc && inc[e.key] === false); }), transmission), seen = {};
+      g.entries.forEach(function (e, i) {
+        var x = res[i];
+        if (x.at === null) return;
+        var items = mode === 'element' ? [[e.row.region, x.at]] :
+          V.quantStates(e.row, x.at).map(function (st) { return [e.row.region + ': ' + st.name, mode === 'state' ? st.at : 100 * st.frac]; });
+        items.forEach(function (it) {
+          if (seen[it[0]]) return;
+          seen[it[0]] = true;
+          if (!series[it[0]]) { series[it[0]] = groups.map(function () { return null; }); order.push(it[0]); }
+          series[it[0]][gi] = it[1];
+        });
+      });
+    });
+    return { levels: groups.map(function (g) { return g.level; }),
+             series: order.map(function (n) { return { name: n, values: series[n] }; }) };
+  };
+  /* where a depth level sits: its number, etch time and, when the sputter settings are
+     known, depth and ion fluence (the desktop app writes those into the metadata) */
+  V.levelInfo = function (reg) {
+    var num = function (k) {
+      var v = reg.meta && reg.meta[k] !== undefined ? parseFloat(reg.meta[k]) : NaN;
+      return isFinite(v) ? v : null;
+    };
+    return { level: reg.level, etch: reg.etch === undefined ? null : reg.etch,
+             depth: num('Depth (nm)'), fluence: num('Fluence (ions/cm²)') };
+  };
+  /* the horizontal axes a set of levels can support, best first */
+  V.profileAxes = function (infos) {
+    var out = [], distinct = function (a) {
+      return a.every(function (v) { return v !== null && v !== undefined; }) && a.some(function (v) { return v !== a[0]; });
+    };
+    [['depth', 'Depth (nm)'], ['etch', 'Etch time (s)'], ['fluence', 'Ion fluence (ions/cm²)'], ['level', 'Level']].forEach(function (a) {
+      var vals = infos.map(function (i) { return i[a[0]]; });
+      if (distinct(vals)) out.push({ id: a[0], label: a[1], values: vals });
+    });
+    return out;
+  };
+  /* the peak maximum of each spectrum at each level (needs no fit); `specs` are one
+     sample's spectra with levels */
+  V.peakMaxSeries = function (specs) {
+    var levels = [], series = {}, order = [];
+    specs.forEach(function (s) { if (levels.indexOf(s.reg.level) < 0) levels.push(s.reg.level); });
+    levels.sort(function (a, b) { return a - b; });
+    specs.forEach(function (s) {
+      var k = s.name;
+      if (!series[k]) { series[k] = levels.map(function () { return null; }); order.push(k); }
+      var i = levels.indexOf(s.reg.level);
+      if (series[k][i] === null) series[k][i] = Math.max.apply(null, s.y);
+    });
+    return { levels: levels, series: order.map(function (n) { return { name: n, values: series[n] }; }) };
+  };
+  /* the profile as rows of cells: level, whichever of etch time / depth / fluence the
+     levels have, then a column per series */
+  V.profileTable = function (prof, infos) {
+    var cols = [['Level', 'level'], ['Etch time (s)', 'etch'], ['Depth (nm)', 'depth'], ['Ion fluence (ions/cm²)', 'fluence']]
+      .filter(function (c) { return infos.some(function (i) { return i[c[1]] !== null && i[c[1]] !== undefined; }); });
+    var rows = [cols.map(function (c) { return c[0]; }).concat(prof.series.map(function (s) { return s.name; }))];
+    prof.levels.forEach(function (lv, i) {
+      rows.push(cols.map(function (c) { return sig6(infos[i][c[1]]); }).concat(prof.series.map(function (s) { return sig6(s.values[i]); })));
+    });
+    return rows;
+  };
+
   /* CSV columns of a spectrum's fit, named as the app's export names them */
   V.fitCsvColumns = function (s, pre) {
     var rows = V.fitRows(s.reg).filter(function (r) { return r.curve; }), cols = [], n = s.y.length;
@@ -497,6 +570,7 @@
             holderHot: null, tab: 'plot', filter: '', camIdx: 0, mapById: {}, camById: {},
             fit: { components: true, envelope: true, background: true, residual: false, hidden: {} },
             q: { include: {}, transmission: false, level: {} },
+            d: { sample: null, mode: 'element', axis: null, last: null },
             M: { id: null, data: null, energy: null, total: null, win: null, mask: null, count: 0,
                  scale: 'Viridis', bg: false, overlay: false, alpha: 0.65, loading: false, drag: null } };
   var $ = function (id) { return document.getElementById(id); };
@@ -1184,7 +1258,7 @@
   }
 
   /* ---------------------------------------------------------------- tabs */
-  var TABS = [['plot', 'Spectra'], ['quant', 'Quantification'], ['figures', 'Figures'], ['meta', 'Metadata'],
+  var TABS = [['plot', 'Spectra'], ['quant', 'Quantification'], ['depth', 'Depth profile'], ['figures', 'Figures'], ['meta', 'Metadata'],
               ['notes', 'Notes'], ['methods', 'Methods'], ['holder', 'Holder'],
               ['cameras', 'Camera images'], ['maps', 'SnapMaps']];
   function availableTabs() {
@@ -1192,6 +1266,7 @@
     return TABS.filter(function (t) {
       if (t[0] === 'figures') return d.figures.length > 0;
       if (t[0] === 'quant') return V.quantGroups(S.specs).length > 0;
+      if (t[0] === 'depth') return profileSamples().length > 0;
       if (t[0] === 'holder') return d.holders.length > 0;
       if (t[0] === 'cameras') return (d.cameras || []).length > 0;
       if (t[0] === 'maps') return (d.maps || []).length > 0;
@@ -1217,9 +1292,12 @@
     if (name === 'plot') requestRender();
     redrawTab();
     if (name === 'meta') renderMeta();
+    if (name === 'depth') renderDepth();
+    if (name === 'quant') renderQuant();
   }
   function redrawTab() {
-    if (S.tab === 'holder') drawHolder();
+    if (S.tab === 'depth') drawDepth();
+    else if (S.tab === 'holder') drawHolder();
     else if (S.tab === 'cameras') drawCamera();
     else if (S.tab === 'maps') { if (S.M.id) drawMapView(); else if ((S.data.maps || []).length) openMap(S.data.maps[0].id); }
   }
@@ -1286,6 +1364,187 @@
       var reg = g.entries.length > 1 && g.entries.some(function (e) { return e.row.region === g.entries[0].row.region && e !== g.entries[0]; });
       if (reg) box.appendChild(h('p', { class: 'muted small', text: 'The same region appears more than once (for example from a survey and from its own scan): untick one to avoid counting it twice.' }));
     });
+  }
+
+  /* ---------------------------------------------------- depth profile tab */
+  var DEPTH_MODES = [['element', 'Composition (at %)'], ['state', 'Chemical states (at %)'],
+                     ['share', 'State share of its element (%)'], ['peak', 'Peak maximum']];
+  /* the samples that have a depth profile: at least two distinct levels */
+  function profileSamples() {
+    var out = [];
+    S.data.samples.forEach(function (sm) {
+      var lv = [];
+      sm.regions.forEach(function (r) { if (r.level !== null && r.level !== undefined && lv.indexOf(r.level) < 0) lv.push(r.level); });
+      if (lv.length > 1) out.push(sm);
+    });
+    return out;
+  }
+  function profileOf(sm, mode) {
+    var specs = S.specs.filter(function (s) { return s.sample === sm && s.reg.level !== null && s.reg.level !== undefined; });
+    var infoAt = {};
+    specs.forEach(function (s) { if (!infoAt[s.reg.level]) infoAt[s.reg.level] = V.levelInfo(s.reg); });
+    var prof;
+    if (mode === 'peak') prof = V.peakMaxSeries(specs);
+    else {
+      var gs = V.quantGroups(specs).filter(function (g) { return g.level !== null; }).sort(function (a, b) { return a.level - b.level; });
+      prof = V.profile(gs, mode, S.q.include, S.q.transmission);
+    }
+    return { prof: prof, infos: prof.levels.map(function (l) { return infoAt[l]; }), specs: specs };
+  }
+  function renderDepth() {
+    var box = clear($('tab-depth')), sms = profileSamples();
+    if (!sms.length) return;
+    var d = S.d;
+    if (sms.indexOf(d.sample) < 0) d.sample = sms[0];
+    var hasFit = V.quantGroups(S.specs.filter(function (s) { return s.sample === d.sample; })).length > 0;
+    if (!hasFit && d.mode !== 'peak') d.mode = 'peak';
+    var res = profileOf(d.sample, d.mode), axes = V.profileAxes(res.infos);
+    if (!axes.length) axes = [{ id: 'level', label: 'Level', values: res.prof.levels }];
+    if (!axes.some(function (a) { return a.id === d.axis; })) d.axis = axes[0].id;
+    var axis = axes.filter(function (a) { return a.id === d.axis; })[0];
+
+    var ctl = h('div', { class: 'controls' });
+    if (sms.length > 1) {
+      var ssel = h('select', { 'aria-label': 'Sample' });
+      sms.forEach(function (sm) { var o = h('option', { value: sm.id, text: sm.name || '(unnamed)' }); if (sm === d.sample) o.selected = true; ssel.appendChild(o); });
+      ssel.addEventListener('change', function () { d.sample = sms.filter(function (s) { return s.id === ssel.value; })[0]; renderDepth(); });
+      ctl.appendChild(h('label', { class: 'field' }, 'Sample ', ssel));
+    }
+    var msel = h('select', { 'aria-label': 'Show' });
+    DEPTH_MODES.forEach(function (m) {
+      var o = h('option', { value: m[0], text: m[1] }); if (m[0] === d.mode) o.selected = true;
+      if (m[0] !== 'peak' && !hasFit) o.disabled = true;
+      msel.appendChild(o);
+    });
+    msel.addEventListener('change', function () { d.mode = msel.value; renderDepth(); });
+    ctl.appendChild(h('label', { class: 'field' }, 'Show ', msel));
+    var xsel = h('select', { 'aria-label': 'Horizontal axis' });
+    axes.forEach(function (a) { var o = h('option', { value: a.id, text: a.label }); if (a === axis) o.selected = true; xsel.appendChild(o); });
+    xsel.addEventListener('change', function () { d.axis = xsel.value; renderDepth(); });
+    ctl.appendChild(h('label', { class: 'field' }, 'Against ', xsel));
+    var dl = h('button', { type: 'button', text: 'Download depth_profile.csv' });
+    dl.addEventListener('click', function () {
+      saveText('depth_profile.csv', V.profileTable(res.prof, res.infos).map(function (r) { return r.map(V.csvField).join(','); }).join('\r\n') + '\r\n');
+    });
+    ctl.appendChild(dl);
+    box.appendChild(ctl);
+    var why = [];
+    if (d.mode !== 'peak') why.push('Uses the regions ticked in the Quantification tab' + (S.q.transmission ? ', with the transmission function divided out' : '') + '.');
+    if (axes.length && axes[0].id === 'level' && res.infos.some(function (i) { return i.etch !== null && i.etch !== undefined; })) {
+      why.push('Etch times are all the same or not recorded, so the levels are shown by number.');
+    } else if (!axes.some(function (a) { return a.id === 'depth'; })) {
+      why.push('Enter the etch rate in the app (Sputter settings) to plot against depth.');
+    }
+    box.appendChild(h('p', { class: 'muted small', text: why.join(' ') }));
+    if (!res.prof.series.length) {
+      box.appendChild(h('p', { class: 'empty', text: 'Nothing to plot here: none of the ticked regions has an RSF and an area.' }));
+      d.last = null;
+      return;
+    }
+    var cv = h('canvas', { 'aria-label': 'Depth profile', role: 'img', id: 'depthCanvas' });
+    var read = h('div', { class: 'readout', id: 'depthRead' });
+    box.appendChild(h('div', { class: 'panel depth-panel' }, cv, read));
+    d.last = { canvas: cv, read: read, res: res, axis: axis, hover: null };
+    cv.addEventListener('mousemove', function (e) { d.last.hover = nearestLevel(d.last, e); depthReadout(d.last); drawDepth(); });
+    cv.addEventListener('mouseleave', function () { d.last.hover = null; read.textContent = ''; drawDepth(); });
+    cv.addEventListener('click', function (e) {
+      var i = nearestLevel(d.last, e);
+      if (i !== null) gotoLevel(d.sample, res.prof.levels[i]);
+    });
+    var rows = V.profileTable(res.prof, res.infos), tb = h('table', { class: 'grid quant' });
+    rows.forEach(function (r, i) {
+      var tr = h('tr');
+      r.forEach(function (c) { tr.appendChild(h(i ? 'td' : 'th', { class: 'num', text: c })); });
+      tb.appendChild(tr);
+    });
+    box.appendChild(h('div', { class: 'scroll' }, tb));
+    drawDepth();
+  }
+  function nearestLevel(L, e) {
+    if (!L || !L.pts) return null;
+    var x = e.clientX - L.canvas.getBoundingClientRect().left, best = null, bd = Infinity;
+    L.pts.forEach(function (px_, i) { var dd = Math.abs(px_ - x); if (dd < bd) { bd = dd; best = i; } });
+    return bd < 40 ? best : null;
+  }
+  function depthReadout(L) {
+    if (L.hover === null) { L.read.textContent = ''; return; }
+    var i = L.hover, info = L.res.infos[i], ax = L.axis;
+    var parts = ['Level ' + info.level + (ax.id !== 'level' ? ' · ' + ax.label + ' ' + sig6(ax.values[i]) : '')];
+    L.res.prof.series.forEach(function (s) { if (s.values[i] !== null) parts.push(s.name + ' ' + V.fmtY(s.values[i])); });
+    L.read.textContent = parts.join('   ·   ') + '   (click to open this level)';
+  }
+  function gotoLevel(sm, level) {
+    var ids = sm.regions.map(function (r) { return r.id; });
+    var lv = [];
+    sm.regions.forEach(function (r) { if (r.level !== null && r.level !== undefined && lv.indexOf(r.level) < 0) lv.push(r.level); });
+    lv.sort(function (a, b) { return a - b; });
+    S.levelOn = true; S.levelIdx = Math.max(0, lv.indexOf(level));
+    $('levelOn').checked = true;
+    tickOnly(ids);
+    showTab('plot');
+  }
+  function drawDepth() {
+    var L = S.d.last;
+    if (!L || S.tab !== 'depth') return;
+    var cv = L.canvas, W = cv.clientWidth, H = cv.clientHeight, C = colours();
+    if (!W || !H) return;
+    var dpr = G.devicePixelRatio || 1;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    var ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    var font = function (n, w) { return (w || '') + ' ' + n + 'px system-ui, "Segoe UI", Helvetica, Arial, sans-serif'; };
+    var xs = L.axis.values.map(Number), cyc = cycle(), series = L.res.prof.series;
+    var xlo = Math.min.apply(null, xs), xhi = Math.max.apply(null, xs);
+    if (!(xhi > xlo)) { xlo -= 1; xhi += 1; }
+    var xp = (xhi - xlo) * 0.04; xlo -= xp; xhi += xp;
+    var yhi = 0;
+    series.forEach(function (s) { s.values.forEach(function (v) { if (v !== null && v > yhi) yhi = v; }); });
+    yhi = yhi > 0 ? yhi * 1.08 : 1;
+    var gutter = 190, lay = { l: 64, t: 16, w: Math.max(60, W - 64 - gutter), h: Math.max(60, H - 16 - 46) };
+    var X = function (v) { return lay.l + (v - xlo) / (xhi - xlo) * lay.w; }, Y = function (v) { return lay.t + (1 - v / yhi) * lay.h; };
+    L.pts = xs.map(X);
+    ctx.strokeStyle = C.muted; ctx.fillStyle = C.muted; ctx.lineWidth = 1; ctx.font = font(11);
+    ctx.beginPath(); ctx.moveTo(lay.l + 0.5, lay.t); ctx.lineTo(lay.l + 0.5, lay.t + lay.h); ctx.lineTo(lay.l + lay.w, lay.t + lay.h + 0.5); ctx.stroke();
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    V.niceTicks(0, yhi, Math.max(3, Math.round(lay.h / 50))).forEach(function (t) {
+      var y = Math.round(Y(t)) + 0.5;
+      ctx.strokeStyle = C.grid; ctx.beginPath(); ctx.moveTo(lay.l, y); ctx.lineTo(lay.l + lay.w, y); ctx.stroke();
+      ctx.fillStyle = C.muted; ctx.fillText(V.fmtY(t), lay.l - 6, y);
+    });
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    var ticks = V.niceTicks(xlo, xhi, Math.max(3, Math.round(lay.w / 90)));
+    ticks.forEach(function (t) { ctx.fillStyle = C.muted; ctx.fillText(V.fmtY(t), X(t), lay.t + lay.h + 16); });
+    ctx.fillStyle = C.fg; ctx.font = font(12);
+    ctx.fillText(L.axis.label, lay.l + lay.w / 2, lay.t + lay.h + 36);
+    var mode = S.d.mode, r0 = L.res.specs[0] ? L.res.specs[0].reg : {};
+    var ylab = mode === 'peak' ? 'Peak maximum' + (r0.yunits ? ' (' + r0.yunits + ')' : '') : mode === 'share' ? 'Percent of the element' : 'Atomic %';
+    ctx.save(); ctx.translate(14, lay.t + lay.h / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(ylab, 0, 0); ctx.restore();
+    series.forEach(function (s, k) {
+      var col = cyc[k % cyc.length], pen = false;
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      s.values.forEach(function (v, i) {
+        if (v === null) { pen = false; return; }
+        if (pen) ctx.lineTo(X(xs[i]), Y(v)); else { ctx.moveTo(X(xs[i]), Y(v)); pen = true; }
+      });
+      ctx.stroke();
+      s.values.forEach(function (v, i) {
+        if (v === null) return;
+        ctx.beginPath(); ctx.arc(X(xs[i]), Y(v), L.hover === i ? 4.5 : (xs.length > 30 ? 1.8 : 3), 0, 6.2832); ctx.fill();
+      });
+    });
+    if (L.hover !== null) {
+      ctx.strokeStyle = C.accent; ctx.setLineDash([4, 3]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(X(xs[L.hover]) + 0.5, lay.t); ctx.lineTo(X(xs[L.hover]) + 0.5, lay.t + lay.h); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.font = font(11); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    series.slice(0, 16).forEach(function (s, k) {
+      var y = lay.t + 8 + k * 16, x = lay.l + lay.w + 14;
+      ctx.fillStyle = cyc[k % cyc.length]; ctx.fillRect(x, y - 1.5, 14, 3);
+      ctx.fillStyle = C.fg; ctx.fillText(s.name.length > 24 ? s.name.slice(0, 23) + '…' : s.name, x + 20, y);
+    });
+    ctx.textBaseline = 'alphabetic';
   }
 
   function renderFigures() {

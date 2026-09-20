@@ -221,3 +221,43 @@ def csv_rows(groups, include=None, transmission=False):
                                 "", "", "", "", "", st["name"],
                                 _g(st["at_pct"]), ""])
     return out
+
+
+def profile(groups, mode="element", include=None, transmission=False):
+    """A depth profile from the fit rows of one sample: ``groups`` is one
+    ``{"level", "entries": [{"spectrum", "row"}]}`` per depth level (in depth
+    order); each level is normalised on its own, as in ``csv_rows``.
+
+    ``mode``: "element" (atomic % of each region), "state" (atomic % of each
+    chemical state) or "share" (a state's percent of its own region). Returns
+    ``{"levels": [...], "series": [{"name", "values"}]}`` with one value per
+    level (None where the region is missing, left out or has no RSF). A region
+    that appears twice at one level counts once (the first)."""
+    levels = [g.get("level") for g in groups]
+    series, order = {}, []
+    for gi, g in enumerate(groups):
+        rows = [e["row"] for e in g["entries"]]
+        res = normalise(rows, None if include is None else include[gi],
+                        transmission)
+        seen = set()
+        for e, x in zip(g["entries"], res):
+            if x["at_pct"] is None:
+                continue
+            region = e["row"]["region"]
+            if mode == "element":
+                items = [(region, x["at_pct"])]
+            else:
+                items = [(f"{region}: {st['name']}",
+                          st["at_pct"] if mode == "state"
+                          else 100.0 * st["frac"])
+                         for st in states(e["row"], x["at_pct"])]
+            for name, v in items:
+                if name in seen:
+                    continue
+                seen.add(name)
+                if name not in series:
+                    series[name] = [None] * len(groups)
+                    order.append(name)
+                series[name][gi] = v
+    return {"levels": levels,
+            "series": [{"name": n, "values": series[n]} for n in order]}

@@ -188,6 +188,42 @@ function near(a, b, msg, tol) {
       .map((s) => s.name + ':' + s.at), ['A:40', 'B:0'], 'states share the row, negative areas count as zero');
   }
 
+  // ---- depth profiles: the same series as quant.profile ----
+  if (fx.fit && fx.fit.quant && fx.fit.quant.profile) {
+    const px = fx.fit.quant.profile;
+    const same = (got, want, label) => {
+      eq(got.levels, want.levels, label + ' levels');
+      eq(got.series.map((s) => s.name), want.series.map((s) => s.name), label + ' series names');
+      got.series.forEach((s, k) => s.values.forEach((v, i) => {
+        const w = want.series[k].values[i];
+        if (v === null || w === null) eq(v, w, label + ' gap ' + s.name + ' ' + i);
+        else near(v, w, label + ' ' + s.name + ' ' + i, Math.abs(w) * 1e-9 + 1e-9);
+      }));
+    };
+    ['element', 'state', 'share'].forEach((m) => same(V.profile(px.groups, m, null, false), px[m], 'profile ' + m));
+    same(V.profile(px.groups, 'element', px.exclude, false), px.element_excl, 'profile with a region left out');
+  }
+  {
+    // where the levels sit, and which axes they support
+    const info = V.levelInfo({ level: 2, etch: 60, meta: { 'Depth (nm)': '3.5', 'Fluence (ions/cm²)': '1.2e+16' } });
+    eq([info.level, info.etch, info.depth, info.fluence], [2, 60, 3.5, 1.2e16], 'levelInfo reads the metadata');
+    eq(V.levelInfo({ level: 1, meta: {} }).depth, null, 'no depth without sputter settings');
+    const lv = (etch, depth) => ({ level: 0, etch: etch, depth: depth, fluence: null });
+    eq(V.profileAxes([lv(0, 0), lv(30, 1.5), lv(60, 3)].map((x, i) => Object.assign(x, { level: i }))).map((a) => a.id),
+       ['depth', 'etch', 'level'], 'axes with depth, etch time and level');
+    eq(V.profileAxes([lv(0, null), lv(0, null), lv(0, null)].map((x, i) => Object.assign(x, { level: i }))).map((a) => a.id),
+       ['level'], 'all-zero etch times are not an axis');
+    const specs = [
+      { name: 'C 1s', reg: { level: 1 }, y: [1, 9, 4] }, { name: 'C 1s', reg: { level: 0 }, y: [2, 3] },
+      { name: 'O 1s', reg: { level: 0 }, y: [7] } ];
+    const pm = V.peakMaxSeries(specs);
+    eq(pm.levels, [0, 1], 'peak maximum levels sorted');
+    eq(pm.series, [{ name: 'C 1s', values: [3, 9] }, { name: 'O 1s', values: [7, null] }], 'peak maxima per level');
+    const tb = V.profileTable({ levels: [0, 1], series: [{ name: 'A', values: [12.3456789, null] }] },
+      [{ level: 0, etch: 0, depth: null, fluence: null }, { level: 1, etch: 30, depth: null, fluence: null }]);
+    eq(tb, [['Level', 'Etch time (s)', 'A'], ['0', '0', '12.3457'], ['1', '30', '']], 'profile table');
+  }
+
   // ---- metadata summary ----
   const sm = V.summariseMeta([{ A: '1', B: 'x', C: '' }, { A: '1', B: 'y', C: '' }, { A: '1', B: 'x', D: '5' }], []);
   eq(sm.common, [['A', '1']], 'common metadata');
