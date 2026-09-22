@@ -159,6 +159,22 @@ class TestMatching(unittest.TestCase):
         self.assertAlmostEqual(rx, 9.0, delta=0.6)
         self.assertAlmostEqual(ry, -7.0, delta=0.6)
 
+    def test_a_retaken_picture_does_not_reuse_the_old_mosaic(self):
+        # same name, same stage position as a real retake would have, but a
+        # different crop (so different pixels) and its own "blob" identity
+        a = Tile("a", self.img, 100, 100)
+        b = Tile("b", self.img, 300, 140)
+        a.blob, b.blob = object(), object()
+        m1 = mosaic.build([a, b])
+        a2 = Tile("a", self.img, 140, 160)
+        a2.calib = dict(a.calib)          # identical calibration to "a"
+        a2.blob = object()                # a distinct picture, though
+        m2 = mosaic.build([a2, b])
+        self.assertFalse(np.array_equal(m1.array, m2.array))
+        # calling again with the very same objects still hits the cache
+        m3 = mosaic.build([a2, b])
+        self.assertIs(m2, m3)
+
     def test_errors_along_a_chain_do_not_drift(self):
         tiles = [Tile("a", self.img, 60, 100), Tile("b", self.img, 250, 110,
                                                      err=(6, 5)),

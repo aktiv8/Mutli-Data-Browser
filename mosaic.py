@@ -264,7 +264,13 @@ def build(pictures, refine=True):
     import numpy as np
     from PIL import Image
 
-    key = (refine, tuple((p.name, round(p.calib["x_mm"], 4),
+    # keyed on the picture's own identity (its ``blob`` when there is one,
+    # e.g. imagepages.Picture -- a name and a rounded position are not
+    # enough: a picture retaken at the same spot on the same sample keeps
+    # both, and would otherwise silently get the earlier one's mosaic) plus
+    # its position, so a picture nudged in the calibration still rebuilds
+    key = (refine, tuple((id(getattr(p, "blob", p)),
+                          round(p.calib["x_mm"], 4),
                           round(p.calib["y_mm"], 4)) for p in pictures))
     if key in _memo:
         return _memo[key]
