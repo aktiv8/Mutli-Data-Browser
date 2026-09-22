@@ -461,6 +461,11 @@ class Tooltip:
             self._tip = None
 
 
+class ReportCancelled(Exception):
+    """Raised to unwind report/deck generation when the user clicks Cancel
+    on its progress dialog (see ``Workspace._report_tick``)."""
+
+
 class Workspace:
     """The single main window: file tree with tick boxes (left), stacked-plot
     area (top right) and a Metadata / Images / Stage-map notebook (bottom
@@ -560,6 +565,7 @@ class Workspace:
         self._pick_cb = None        # set while waiting for a click on the plot
         self._axinfo = {}           # axes -> (photon energy, kind, n traces)
         self._zoom_sig = {}         # axes -> what a panel's zoom depends on
+        self._gen_prog = None       # progress dialog while a report/deck builds
         self._click_cb = None       # persistent plot-click hook (Identify)
         self._xps_lines = None      # element line table, loaded on demand
 
@@ -3350,6 +3356,31 @@ class Workspace:
                          "size": p._file_size(), "sha256": self._doc_sha(p)})
         return rows
 
+    def _report_tick(self, label):
+        """Advance the report/deck progress dialog and pump the UI so it
+        (and its Cancel button) stay responsive while a report generates; a
+        no-op wherever there is no such dialog (a live preview, the HTML
+        browser export). Raises ``ReportCancelled`` if the user cancelled."""
+        prog = self._gen_prog
+        if prog is None:
+            return
+        prog.step(label)
+        if prog.cancelled:
+            raise ReportCancelled()
+
+    def _report_progress_total(self, spec, kind):
+        """A best-effort step count for the report/deck progress dialog: one
+        tick per saved figure (a figure spanning several pages just ticks
+        past its share, harmlessly) plus one per camera/SnapMap page;
+        doubled when both a PDF and a deck are being built."""
+        n = len(self._report_figures()) if reportspec.is_on(
+            spec, "figures") else 0
+        if reportspec.is_on(spec, "images") and self._has_image_pages():
+            left_out = reportspec.skipped(spec, "images")
+            mosaics = reportspec.option(spec, "mosaic") == "on"
+            n += len(self._image_page_plan(skip=left_out, mosaics=mosaics))
+        return max(1, n * (2 if kind == "both" else 1))
+
     def _render_figure_pages(self, fig, consume, size=(11.7, 8.3),
                              rect=(0.0, 0.17, 1.0, 0.94), decorate=True,
                              number=1, dpi=150):
@@ -3383,6 +3414,9 @@ class Workspace:
                             page.text(0.03, 0.145, caption, fontsize=9,
                                       va="top", linespacing=1.4)
                     out.append(consume(page))
+        # tick after the live view is restored: _temp_state has just swapped
+        # it back, and the dialog's UI pump must not run while it is not
+        self._report_tick(fig.get("name") or "Figure")
         return out
 
     def _report_figure_pages(self, pdf, number, fig):
@@ -3431,6 +3465,7 @@ class Workspace:
                     page.text(0.03, 0.975, pg.title, fontsize=12,
                               fontweight="bold", va="top")
                 out.append(consume(pg, page))
+                self._report_tick(pg.title)
         return out
 
     def _report_image_pages(self, pdf, skip=(), mosaics=False):
@@ -3837,6 +3872,9 @@ class Workspace:
         if not path:
             return
         saved, notes = [], []
+        total = self._report_progress_total(spec, kind)
+        self._gen_prog = workbook_ui.ProgressDialog(
+            self.root, self, "Building the report", total)
         self.root.config(cursor="watch")
         self.root.update_idletasks()
         try:
@@ -3848,6 +3886,14 @@ class Workspace:
                     + ".pptx"
                 n = self._build_deck(deck, spec, notes)
                 saved.append((deck, f"Presentation ({n} slides)"))
+        except ReportCancelled:
+            if saved:
+                text = "\n".join(f"{what} was already saved to\n{where}"
+                                 for where, what in saved)
+                messagebox.showinfo("Report cancelled", text)
+            else:
+                messagebox.showinfo("Report cancelled", "Nothing was saved.")
+            return
         except (report.ReportError, pptx_export.PptxError) as exc:
             messagebox.showerror("Report", str(exc))
             return
@@ -3856,6 +3902,8 @@ class Workspace:
             return
         finally:
             self.root.config(cursor="")
+            self._gen_prog.close()
+            self._gen_prog = None
         text = "\n".join(f"{what} saved to\n{where}" for where, what in saved)
         text += "\n\nIncluded: " + reportspec.describe(spec, inv)
         if notes:                     # e.g. a cover picture that was not found

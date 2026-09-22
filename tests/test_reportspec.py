@@ -557,6 +557,37 @@ class TestInTheApp(unittest.TestCase):
         self.assertTrue(os.path.isfile(deck))
         self.assertEqual(self.shown, [])                   # no errors
 
+    def test_progress_total_counts_figures_and_doubles_for_both(self):
+        ws = self.ws
+        ws.figures = [{"name": "F1", "caption": "", "state": ws.capture_state()}]
+        spec = rs.default_spec()
+        self.assertEqual(ws._report_progress_total(spec, "pdf"), 1)
+        self.assertEqual(ws._report_progress_total(spec, "both"), 2)
+        ws.figures = []
+
+    def test_cancelling_mid_generation_saves_nothing_and_says_so(self):
+        ws = self.ws
+        ws.checked = {id(r) for r in ws.docs[0].regions}
+        ws.figures = [{"name": "F1", "caption": "", "state": ws.capture_state()}]
+        out = os.path.join(self.dir, "cancel.pdf")
+        ee.filedialog.asksaveasfilename = lambda **k: out
+        orig_tick = ws._report_tick
+
+        def cancel_on_first_tick(label):
+            ws._gen_prog.cancelled = True
+            orig_tick(label)
+        ws._report_tick = cancel_on_first_tick
+        try:
+            ws.generate_report("pdf")
+        finally:
+            ws._report_tick = orig_tick
+            ws.figures = []
+            ws.checked = set()
+        self.assertFalse(os.path.isfile(out))
+        self.assertTrue(self.shown)
+        self.assertEqual(self.shown[-1][0], "Report cancelled")
+        self.assertIn("Nothing was saved", self.shown[-1][1])
+
     def test_nothing_selected_says_so_and_writes_nothing(self):
         ws = self.ws
         ws.set_report_spec(rs.with_all(rs.default_spec(), False))
