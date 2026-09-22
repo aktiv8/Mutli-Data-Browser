@@ -2594,7 +2594,9 @@ class Workspace:
             text="Click a panel to set the energy to match at."
             if n_spec and any(lk["norm"] == "At cursor"
                               and not panelview.is_series(lk["view"])
-                              for lk in looks.values()) else "")
+                              for lk in looks.values()) else
+            ("Right-click a panel to change its own view, normalisation "
+             "or fit layers." if n_spec else ""))
         self._set_scrollbar(HAVE_MPL and n_groups > npp)
         if HAVE_MPL:
             zoom = self._capture_zoom()

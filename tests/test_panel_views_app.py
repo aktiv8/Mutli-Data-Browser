@@ -124,6 +124,19 @@ class TestPanelViewsInApp(unittest.TestCase):
         self.assertEqual([id(r) for r in dict(self.ws._groups())[bulk]],
                          base[::-1])
 
+    def test_right_click_hint_shows_when_something_is_plotted(self):
+        self.ws._render()
+        self.assertIn("Right-click a panel", self.ws.hint.cget("text"))
+        self.ws.norm_var.set("At cursor")
+        self.ws._render()
+        self.assertIn("Click a panel to set the energy",
+                      self.ws.hint.cget("text"))
+        self.ws.norm_var.set("None")
+        self.ws.checked = set()
+        self.ws._render()
+        self.assertEqual(self.ws.hint.cget("text"), "")
+        self.ws.checked = {id(r) for d in self.ws.docs for r in d.regions}
+
     def test_fit_panel_shows_one_trace_and_moves_the_slider(self):
         depth, _bulk = self.keys
         self.ws.panel_views = {depth: {"view": "Fit"}}
