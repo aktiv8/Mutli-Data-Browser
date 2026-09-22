@@ -161,6 +161,8 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
         cx = (r0.photon_energy - cursor
               if a0.label == "Kinetic Energy" else cursor)
         ax.axvline(cx, color=accent, ls="--", lw=0.9)
+    if st["y_scale"] == "Log":
+        ax.set_yscale("log")
     ax.margins(x=0.02, y=0.06)
     ax.relim()
     ax.autoscale_view()

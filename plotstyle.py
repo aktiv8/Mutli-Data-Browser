@@ -92,6 +92,9 @@ FIELDS: tuple[Field, ...] = (
           choices=("Solid", "Dashed", "Dotted")),
     Field("grid_alpha", "Grid opacity", "float", 0.5, "Axes",
           lo=0.05, hi=1.0, step=0.05),
+    Field("y_scale", "Y axis scale", "choice", "Linear", "Axes",
+          "Log shows weak peaks alongside strong ones on a survey; values "
+          "at or below zero are not shown.", choices=("Linear", "Log")),
     # -- titles and labels ---------------------------------------------------
     Field("show_title", "Panel titles", "bool", True, "Labels"),
     Field("show_subtitle", "Sample / count subtitle", "bool", True, "Labels"),

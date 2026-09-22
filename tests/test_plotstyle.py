@@ -388,6 +388,12 @@ class TestDrawing(unittest.TestCase):
         _fig, ax = self.stack(2, ps.sanitise({"y_min": 0, "y_max": 5000}))
         self.assertEqual(ax.get_ylim(), (0.0, 5000.0))
 
+    def test_y_scale_log(self):
+        _fig, ax = self.stack(2)
+        self.assertEqual(ax.get_yscale(), "linear")
+        _fig, ax = self.stack(2, ps.sanitise({"y_scale": "Log"}))
+        self.assertEqual(ax.get_yscale(), "log")
+
     def test_axis_style_reaches_the_ticks_and_frame(self):
         style = ps.sanitise({"frame": "Box", "grid": "Both",
                              "tick_direction": "in", "minor_ticks": True,
