@@ -3502,8 +3502,7 @@ class Workspace:
             r for p in self.docs for r in p.regions if usable(r)]
         if not pool:
             return None
-        pick = next((r for r in pool
-                     if abs(r.energy[0] - r.energy[-1]) > 250), pool[0])
+        pick = next((r for r in pool if r.is_survey), pool[0])
         return list(pick.energy), list(pick.counts)
 
     def _results(self):

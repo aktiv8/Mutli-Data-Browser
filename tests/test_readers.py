@@ -17,7 +17,8 @@ sys.path.insert(0, ROOT)
 
 from readers import load_file, reader_for, UnsupportedFormat, Region  # noqa: E402
 from readers.base import (canon_region_name, guess_region_name,  # noqa: E402
-                          kv_from_lines, clean_text)
+                          kv_from_lines, clean_text, is_survey_span,
+                          is_survey_name, is_survey_region)
 from exporters import export_vamas  # noqa: E402
 
 
@@ -56,6 +57,35 @@ class TestNames(unittest.TestCase):
         wide = [0.0, 1300.0]
         self.assertEqual(guess_region_name("C 1s", wide), "Survey")
         self.assertEqual(guess_region_name("C 1s", [280.0, 295.0]), "C 1s")
+
+    def test_is_survey_span(self):
+        self.assertTrue(is_survey_span([0.0, 1300.0]))
+        self.assertFalse(is_survey_span([280.0, 295.0]))
+        self.assertFalse(is_survey_span([280.0]))
+        self.assertFalse(is_survey_span(None))
+        self.assertFalse(is_survey_span([]))
+
+    def test_is_survey_name(self):
+        for s in ("XPS Survey", "wide/1", "SUR", "Survey"):
+            self.assertTrue(is_survey_name(s))
+        self.assertFalse(is_survey_name("C 1s"))
+        self.assertFalse(is_survey_name(""))
+
+    def test_is_survey_region(self):
+        # span only
+        r = Region("C 1s", 0, 0, energy=[0.0, 1300.0])
+        self.assertTrue(is_survey_region(r))
+        # name only
+        r = Region("Survey", 0, 0, energy=[280.0, 295.0])
+        self.assertTrue(is_survey_region(r))
+        # both
+        r = Region("Survey", 0, 0, energy=[0.0, 1300.0])
+        self.assertTrue(is_survey_region(r))
+        # neither
+        r = Region("C 1s", 0, 0, energy=[280.0, 295.0])
+        self.assertFalse(is_survey_region(r))
+        self.assertFalse(r.is_survey)
+        self.assertTrue(Region("Survey", 0, 0, energy=[0.0, 1300.0]).is_survey)
 
     def test_kv_from_lines(self):
         kv = kv_from_lines(["Step(meV): 700.0    Dwell(ms): 76   Sweeps: 2",

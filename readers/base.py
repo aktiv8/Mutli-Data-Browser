@@ -42,19 +42,40 @@ _ELEM_RE = re.compile(r"^([A-Z][a-z]?)\s*(\d[spdf])(\d/\d)?$")
 _SURVEY_RE = re.compile(r"^(xps\s+)?(survey|wide|sur)(\s+scan)?(\s*/\s*\d+)?$", re.I)
 _JUNK = {"not specified", "none", "n/a", "unknown"}
 
+SURVEY_SPAN = 250.0  # eV: a region axis wider than this reads as a survey/wide scan
+
+
+def is_survey_span(energy) -> bool:
+    """True if an energy axis (BE or KE, eV) spans more than SURVEY_SPAN eV."""
+    return (bool(energy) and len(energy) > 1
+            and abs(max(energy) - min(energy)) > SURVEY_SPAN)
+
 
 def guess_region_name(name: str, energy) -> str:
     """A 'core level' name on a very wide axis is really a survey/wide scan
     (some instruments leave the default element in the region label)."""
-    if energy and len(energy) > 1 and _ELEM_RE.match(name or ""):
-        if abs(max(energy) - min(energy)) > 250:
-            return "Survey"
+    if _ELEM_RE.match(name or "") and is_survey_span(energy):
+        return "Survey"
     return name
 
 
 def clean_text(s) -> str:
     s = (s or "").strip()
     return "" if s.lower() in _JUNK else s
+
+
+def is_survey_name(name) -> bool:
+    """True if a region name reads as a survey/wide scan on its own (the
+    exact match ``canon_region_name`` uses to relabel it "Survey")."""
+    return bool(_SURVEY_RE.match(clean_text(name)))
+
+
+def is_survey_region(r) -> bool:
+    """True for a Region that is a survey/wide scan: named so, or its own
+    energy axis spans more than SURVEY_SPAN eV. The one classifier shared by
+    naming, methods text, quantification tagging and the cover-page choice
+    (see ``Region.is_survey``)."""
+    return is_survey_name(r.name) or is_survey_span(r.energy)
 
 
 CAE = "Constant analyser energy (CAE)"
@@ -74,7 +95,7 @@ def canon_region_name(s) -> str:
     """'C1s' / 'C 1s' -> 'C 1s'; 'Cu2p3/2' -> 'Cu 2p3/2'; others unchanged.
     Makes the same core level group together across file formats."""
     s = clean_text(s)
-    if _SURVEY_RE.match(s):
+    if is_survey_name(s):
         return "Survey"
     m = _ELEM_RE.match(s)
     if m:
@@ -143,6 +164,12 @@ class Region:
     @property
     def n_points(self) -> int:
         return len(self.counts) if self.counts else 0
+
+    @property
+    def is_survey(self) -> bool:
+        """True for a survey/wide scan: named so, or its own energy axis
+        spans more than ``SURVEY_SPAN`` eV (see ``is_survey_region``)."""
+        return is_survey_region(self)
 
     def dwell_and_scans(self):
         """(dwell per sweep, sweeps), so that their product is the time each

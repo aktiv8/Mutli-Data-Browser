@@ -14,9 +14,9 @@ from __future__ import annotations
 import re
 
 import metasummary
+from readers.base import SURVEY_SPAN
 
 DASH = "–"
-SURVEY_SPAN = 250.0          # eV: a wider scan is a survey (see readers.base)
 _YES = {"yes", "on", "used", "true", "enabled", "1"}
 _NO = {"no", "off", "not used", "false", "disabled", "none", "0", "n/a"}
 

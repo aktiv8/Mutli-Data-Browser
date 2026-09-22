@@ -36,6 +36,7 @@ import annotations as an
 import appinfo
 import holder
 import quant
+import readers.base as rbase
 import snapshot
 import themes
 import viewdata
@@ -51,7 +52,6 @@ CAMERA_QUALITY = 78                      # JPEG quality
 CAMERA_BUDGET = 40 * 1024 * 1024         # pictures beyond this are left out
 MAP_STEP = 0.125                         # counts per step of a stored map value
 MAP_BUDGET = 40 * 1024 * 1024            # compressed SnapMap bytes; see pack_maps
-SURVEY_SPAN = 250.0                      # eV: wider than this is a survey
 FIT_DIGITS = 6                          # significant figures of a fit curve
 FIT_BUDGET = 600_000                     # curve values in all; see _fit_block
 
@@ -368,11 +368,10 @@ def element_table(lines):
 
 def auto_labels(d, lines):
     """Automatic element labels for a survey (a binding-energy spectrum wider
-    than ``SURVEY_SPAN``), as ``xpslines.auto_label`` gives them on the
-    spectrum as shown; [] for anything else."""
+    than ``readers.base.SURVEY_SPAN``), as ``xpslines.auto_label`` gives them
+    on the spectrum as shown; [] for anything else."""
     if (not lines or not d.photon_energy or not viewdata.is_binding(d)
-            or not d.energy
-            or max(d.energy) - min(d.energy) <= SURVEY_SPAN):
+            or not rbase.is_survey_span(d.energy)):
         return []
     found = xpslines.auto_label(d.energy, d.counts, lines, hv=d.photon_energy)
     return [{"be": round(be, 2), "label": label} for be, label in found]
