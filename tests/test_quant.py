@@ -104,6 +104,12 @@ class TestFitRows(unittest.TestCase):
         self.assertAlmostEqual(row["area_t"], row["area"] / 2.0,
                                delta=row["area"] * 1e-6)
 
+    def test_source_is_survey_or_high_res(self):
+        r = linear_region()                          # "Ti 2p", a narrow scan
+        self.assertEqual(quant.fit_rows(r)[0]["source"], quant.SOURCE_HIGH_RES)
+        r.name = "Survey"                             # named regardless of span
+        self.assertEqual(quant.fit_rows(r)[0]["source"], quant.SOURCE_SURVEY)
+
     def test_no_fit_no_rows(self):
         r = linear_region()
         r.fit = None
@@ -344,6 +350,22 @@ class TestCsvRows(unittest.TestCase):
         c = [r for r in t if r[3] == "C 1s"][0]
         self.assertEqual(c[6], "300.25")                  # area / T is shown
         self.assertAlmostEqual(float(c[7]), 300.25 / 0.278, delta=0.01)
+
+    def test_source_column(self):
+        groups = [{"sample": "S", "level": None, "entries": [
+            {"spectrum": "Survey", "row": dict(
+                region="Cl 2p", background="Linear", rsf=1.0, area=10.0,
+                area_t=None, basis="data", source=quant.SOURCE_SURVEY,
+                components=[])},
+            {"spectrum": "C 1s", "row": dict(
+                region="C 1s", background="Shirley", rsf=0.278, area=100.0,
+                area_t=None, basis="data", source=quant.SOURCE_HIGH_RES,
+                components=[])}]}]
+        rows = quant.csv_rows(groups)
+        self.assertEqual(rows[0][-1], "Source")
+        by_region = {r[3]: r for r in rows[1:]}
+        self.assertEqual(by_region["Cl 2p"][-1], "survey")
+        self.assertEqual(by_region["C 1s"][-1], "high-res")
 
 
 @unittest.skipUnless(HAVE_NP and os.path.isfile(REAL),

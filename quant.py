@@ -22,6 +22,9 @@ sum of the component areas is used instead and the row says so (``basis``).
 
 import casafit
 
+SOURCE_SURVEY = "survey"
+SOURCE_HIGH_RES = "high-res"
+
 
 def _trapz(y, x):
     """Trapezoid rule; x ascending."""
@@ -48,7 +51,10 @@ def fit_rows(r, curves=False):
 
     Keys: region, background, rsf, area, area_t (with the transmission function
     divided out, None when the file has none), basis ("data" or "components"),
-    be_lo / be_hi (region limits, binding energy), avg, rms, approximate,
+    source ("survey" or "high-res", from ``r.is_survey`` -- CasaXPS can
+    quantify a wide survey region as readily as a fitted high-resolution one,
+    but the two should not be treated as equally precise when mixed in one
+    total), be_lo / be_hi (region limits, binding energy), avg, rms, approximate,
     background_known, scale_known, and components (name, group, index, be,
     fwhm, area, shape, rsf, plus ``gk`` / ``state``: its chemical state's key
     and name). With ``curves=True`` a row also has ``curves``: ``i0`` (index of
@@ -106,6 +112,7 @@ def fit_rows(r, curves=False):
             "region": cv.region, "background": cv.background_type,
             "rsf": getattr(reg, "rsf", None), "area": area, "area_t": area_t,
             "basis": basis,
+            "source": SOURCE_SURVEY if r.is_survey else SOURCE_HIGH_RES,
             "be_lo": None if hi is None else hv - (hi + rshift),
             "be_hi": None if lo is None else hv - (lo + rshift),
             "avg": getattr(reg, "avg", 1), "rms": cv.residual_rms,
@@ -188,7 +195,7 @@ def states(row, at_pct=None):
 
 CSV_HEADER = ("Sample", "Level", "Spectrum", "Region", "Background", "RSF",
               "Area (counts/s.eV)", "Area / RSF", "at %", "State",
-              "State at %", "Note")
+              "State at %", "Note", "Source")
 
 
 def _g(v):
@@ -214,12 +221,12 @@ def csv_rows(groups, include=None, transmission=False):
             out.append([g["sample"], lv, e["spectrum"], row["region"],
                         row.get("background", ""), _g(row.get("rsf")),
                         _g(area), _g(x["corrected"]), _g(x["at_pct"]), "", "",
-                        x["why"]])
+                        x["why"], row.get("source", "")])
             if x["at_pct"] is not None:
                 for st in states(row, x["at_pct"]):
                     out.append([g["sample"], lv, e["spectrum"], row["region"],
                                 "", "", "", "", "", st["name"],
-                                _g(st["at_pct"]), ""])
+                                _g(st["at_pct"]), "", ""])
     return out
 
 

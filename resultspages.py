@@ -143,6 +143,7 @@ def collect(docs, display=None, key_of=None):
             _settle(level, sample.label, sample.notes)
         sample.notes = list(dict.fromkeys(sample.notes))
         _element_note(sample)
+        _source_note(sample)
         if sample.label in approx:
             sample.notes.append(
                 "The background under some of the fits of "
@@ -213,21 +214,62 @@ def _element_note(sample):
                 + ", ".join(names) + "), so its share includes both.")
 
 
+def _source_note(sample):
+    """One note when a level's counted total mixes CasaXPS regions
+    quantified from a survey scan with others from a dedicated
+    high-resolution scan: the elements only available from the survey are
+    named, since a survey's cruder background and coarser point spacing
+    typically make its quantification less precise than a dedicated scan's."""
+    survey_only = set()
+    for level in sample.levels:
+        survey_els, hr_els = set(), set()
+        for e, inc in zip(level.entries, level.include):
+            if not inc:
+                continue
+            el = element_of(e["row"]["region"])
+            if not el:
+                continue
+            dest = survey_els if e["row"].get("source") == "survey" else hr_els
+            dest.add(el)
+        if hr_els:
+            survey_only |= survey_els - hr_els
+    if survey_only:
+        names = sorted(survey_only)
+        verb = "is" if len(names) == 1 else "are"
+        sample.notes.append(
+            f"{', '.join(names)} {verb} quantified only from a survey scan "
+            f"of {sample.label}, not a dedicated high-resolution scan, so "
+            "this total mixes quantification of different precision.")
+
+
 # -- cells ----------------------------------------------------------------------------
 def _fmt(v, spec):
     return "" if v is None else format(v, spec)
+
+
+SURVEY_FOOTNOTE = ("† survey-scan quantification, not a dedicated "
+                   "high-resolution scan.")
+
+
+def has_survey_rows(level):
+    """True if any region at this level was quantified from a survey scan
+    (marked with "†" in ``composition_cells``; see ``SURVEY_FOOTNOTE``)."""
+    return any(e["row"].get("source") == "survey" for e in level.entries)
 
 
 def composition_cells(level):
     """``[(kind, [cells])]`` for one sample at one level: a "region" row
     (region, background, RSF, area, area / RSF, at %; the reason instead of
     the percent when it is left out) with a "state" row under it for each
-    chemical state."""
+    chemical state. A region quantified from a survey scan rather than a
+    dedicated high-resolution scan is marked "†" (``SURVEY_FOOTNOTE``)."""
     rows = []
     for e, x in zip(level.entries, level.res):
         row = e["row"]
         pct = f"{x['at_pct']:.1f}" if x["at_pct"] is not None else x["why"]
-        rows.append(("region", [row["region"], row.get("background") or "",
+        name = row["region"] + (" †" if row.get("source") == "survey"
+                                else "")
+        rows.append(("region", [name, row.get("background") or "",
                                 _fmt(row.get("rsf"), ".4g"),
                                 _fmt(row.get("area"), ".4g"),
                                 _fmt(x["corrected"], ".4g"), pct]))

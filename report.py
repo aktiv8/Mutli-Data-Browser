@@ -277,6 +277,9 @@ def results_story(results, skip=(), look=None, sid="results"):
                                   [c for _k, c in rows],
                                   [40, 30, 20, 36, 30, 24], look,
                                   right_from=2, kinds=[k for k, _c in rows])]
+            if resultspages.has_survey_rows(s.levels[0]):
+                story.append(Paragraph(
+                    xml_escape(resultspages.SURVEY_FOOTNOTE), st["small"]))
             continue
         png = resultspages.profile_png(s, size=(7.0, 3.0), dpi=200)
         block = [head]

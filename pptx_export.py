@@ -555,9 +555,10 @@ def _results_slides(deck, results, skip=()):
     notes = results.notes_for(samples)
     said = results.method + ("\n\n" + "\n".join(notes) if notes else "")
 
-    def finish(slide):
-        deck.text(slide, MARGIN, 6.55, BODY_W, 0.35, [foot], size=10,
-                  color=GREY, space_after=0)
+    def finish(slide, extra=None):
+        lines = [foot] if extra is None else [foot, extra]
+        deck.text(slide, MARGIN, 6.55, BODY_W, 0.35 if extra is None else 0.55,
+                  lines, size=10, color=GREY, space_after=0)
         slide.notes_slide.notes_text_frame.text = said
 
     def right(shape, first):
@@ -569,6 +570,9 @@ def _results_slides(deck, results, skip=()):
     for s in samples:
         if not s.is_profile:
             rows = resultspages.composition_cells(s.levels[0])
+            survey_note = (resultspages.SURVEY_FOOTNOTE
+                          if resultspages.has_survey_rows(s.levels[0])
+                          else None)
             for i in range(0, len(rows), RESULT_ROWS):
                 chunk = rows[i:i + RESULT_ROWS]
                 slide = deck.content_slide(
@@ -587,7 +591,7 @@ def _results_slides(deck, results, skip=()):
                                 for r in p.runs:
                                     r.font.size = deck.Pt(10)
                                     r.font.color.rgb = deck.rgb(GREY)
-                finish(slide)
+                finish(slide, survey_note)
             continue
         slide = deck.content_slide(
             f"Quantification \u2013 {s.label}: depth profile", s.label)

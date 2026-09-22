@@ -56,6 +56,13 @@ def row(region, rsf, area, states=(), background="Shirley"):
             "components": comps}
 
 
+def row_src(region, rsf, area, source, **kw):
+    """``row`` with a ``source`` tag ("survey" or "high-res") set."""
+    r = row(region, rsf, area, **kw)
+    r["source"] = source
+    return r
+
+
 def level(n, rows, etch=None, depth=None):
     lv = rp.Level(n, etch, depth)
     lv.entries = [{"spectrum": r["region"], "row": r} for r in rows]
@@ -133,6 +140,54 @@ class TestNumbers(unittest.TestCase):
         direct = quant.normalise([e["row"] for e in lv.entries])
         self.assertEqual([x["at_pct"] for x in lv.res],
                          [x["at_pct"] for x in direct])
+
+    def test_a_survey_row_is_marked_in_the_table(self):
+        lv = level(None, [row_src("Cl 2p", 1.0, 10.0, "survey"),
+                          row_src("C 1s", 0.25, 100.0, "high-res")])
+        self.assertTrue(rp.has_survey_rows(lv))
+        names = [c[0] for k, c in rp.composition_cells(lv) if k == "region"]
+        self.assertEqual(names, ["Cl 2p †", "C 1s"])
+
+    def test_no_marker_without_a_survey_row(self):
+        lv = level(None, [row_src("C 1s", 0.25, 100.0, "high-res")])
+        self.assertFalse(rp.has_survey_rows(lv))
+        names = [c[0] for k, c in rp.composition_cells(lv) if k == "region"]
+        self.assertEqual(names, ["C 1s"])
+
+    def test_a_survey_only_element_gets_a_mixing_note(self):
+        s = sample("S", [level(None, [row_src("Cl 2p", 1.0, 10.0, "survey"),
+                                      row_src("C 1s", 0.25, 100.0,
+                                              "high-res")])])
+        rp._source_note(s)
+        self.assertEqual(len(s.notes), 1)
+        self.assertIn("Cl", s.notes[0])
+        self.assertIn("survey scan", s.notes[0])
+        self.assertIn("S", s.notes[0])
+
+    def test_no_mixing_note_when_everything_is_one_source(self):
+        s = sample("S", [level(None, [row_src("Cl 2p", 1.0, 10.0, "survey"),
+                                      row_src("F 1s", 0.5, 20.0, "survey")])])
+        rp._source_note(s)
+        self.assertEqual(s.notes, [])
+        s2 = sample("S", [level(None, [row_src("C 1s", 0.25, 100.0,
+                                               "high-res"),
+                                       row_src("O 1s", 1.0, 50.0,
+                                               "high-res")])])
+        rp._source_note(s2)
+        self.assertEqual(s2.notes, [])
+
+    def test_no_mixing_note_when_the_survey_row_is_not_counted(self):
+        # the dedicated scan wins the dedup; the losing survey duplicate of
+        # the same region must not itself trigger a mixing note
+        lv = rp.Level(None)
+        lv.entries = [{"spectrum": "Survey", "row": row_src(
+                          "C 1s", 0.25, 10.0, "survey")},
+                      {"spectrum": "C 1s", "row": row_src(
+                          "C 1s", 0.25, 100.0, "high-res")}]
+        s = sample("S", [lv])
+        rp._settle(lv, "S", s.notes)
+        rp._source_note(s)
+        self.assertEqual([n for n in s.notes if "survey scan" in n], [])
 
 
 class TestDepthProfile(unittest.TestCase):

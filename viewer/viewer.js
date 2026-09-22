@@ -221,7 +221,7 @@
      tests compare both on the same rows). Rows of one sample (and one depth
      level) are normalised together. */
   V.QUANT_HEADER = ['Sample', 'Level', 'Spectrum', 'Region', 'Background', 'RSF', 'Area (counts/s.eV)',
-                    'Area / RSF', 'at %', 'State', 'State at %', 'Note'];
+                    'Area / RSF', 'at %', 'State', 'State at %', 'Note', 'Source'];
   /* the fit rows of these spectra grouped by sample and level, in order of appearance;
      an entry's key is stable, so a page can remember which rows are ticked */
   V.quantGroups = function (specs) {
@@ -276,10 +276,10 @@
         var row = e.row, x = res[i];
         var area = transmission && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
         rows.push([g.sample, lv, e.spectrum, row.region, row.background || '', sig6(row.rsf), sig6(area),
-                   sig6(x.corrected), sig6(x.at), '', '', x.why]);
+                   sig6(x.corrected), sig6(x.at), '', '', x.why, row.source || '']);
         if (x.at !== null) {
           V.quantStates(row, x.at).forEach(function (st) {
-            rows.push([g.sample, lv, e.spectrum, row.region, '', '', '', '', '', st.name, sig6(st.at), '']);
+            rows.push([g.sample, lv, e.spectrum, row.region, '', '', '', '', '', st.name, sig6(st.at), '', '']);
           });
         }
       });
@@ -1577,7 +1577,7 @@
         cb.checked = !off;
         cb.addEventListener('change', function () { q.include[e.key] = cb.checked; renderQuant(); });
         var area = q.transmission && hasT && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
-        var name = row.region + (e.spectrum !== row.region ? '  (' + e.spectrum + ')' : '');
+        var name = row.region + (e.spectrum !== row.region ? '  (' + e.spectrum + ')' : '') + (row.source === 'survey' ? ' †' : '');
         tb.appendChild(h('tr', { class: off ? 'off' : '' },
           h('td', null, cb), h('td', { text: name }), h('td', { text: row.background }),
           h('td', { class: 'num', text: row.rsf ? String(+row.rsf.toPrecision(4)) : '' }),
@@ -1599,6 +1599,9 @@
       }
       var reg = g.entries.length > 1 && g.entries.some(function (e) { return e.row.region === g.entries[0].row.region && e !== g.entries[0]; });
       if (reg) box.appendChild(h('p', { class: 'muted small', text: 'The same region appears more than once (for example from a survey and from its own scan): untick one to avoid counting it twice.' }));
+      if (g.entries.some(function (e) { return e.row.source === 'survey'; })) {
+        box.appendChild(h('p', { class: 'muted small', text: '† survey-scan quantification, not a dedicated high-resolution scan — typically less precise than the rest of this total.' }));
+      }
     });
   }
 
