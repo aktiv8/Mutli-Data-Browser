@@ -432,7 +432,10 @@ def draw_fit(ax, x, fit, scale, muted, accent):
     "background"}, "colours": [...]}``; ``x`` are the panel's x values (one
     per data point) and ``scale`` multiplies every curve (normalisation).
     Components sharing an INDEX are one chemical state and one colour; a
-    legend names them."""
+    legend names them. The residual RMS of each curve with one to show (see
+    ``casafit.Curves.residual_rms``) is noted in the top-right corner, since a
+    number for how well the fit reproduces the data is otherwise only in the
+    report's quantification table, not visible while looking at the plot."""
     import math
     show = fit.get("show", {})
     cols = fit.get("colours") or ["#888888"]
@@ -479,6 +482,14 @@ def draw_fit(ax, x, fit, scale, muted, accent):
         else:
             ax.legend(handles=handles, loc="upper left", fontsize=fs,
                       frameon=False, handlelength=1.0)
+    rms_bits = [(f"{cv.region}: " if len(fit["curves"]) > 1 else "")
+               + f"{100 * cv.residual_rms:.1f}%"
+               for cv in fit["curves"] if cv.residual_rms is not None]
+    if rms_bits:
+        fs = max(6, int(ax.xaxis.label.get_fontsize()) - 2)
+        ax.text(0.98, 0.98, "RMS " + ", ".join(rms_bits),
+                transform=ax.transAxes, ha="right", va="top",
+                fontsize=fs, color=muted)
 
 
 def draw_reels(ax, a0, hv, reels, scale, muted, accent, note_size=8):

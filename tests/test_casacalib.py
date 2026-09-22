@@ -494,6 +494,29 @@ class TestFitLegend(unittest.TestCase):
         self.assertEqual(self.labels(lines),
                          ["Ti 2p3/2 Ti(IV)", "Ti 2p1/2 Ti(IV)"])
 
+    def test_residual_rms_is_noted_on_the_panel(self):
+        fit = casafit.parse(CASA)
+        be, counts = model_data(fit, HV, 0.27, 25)
+        cvs = casafit.curves(fit, be, counts, HV, 0.27, 25)
+        self.assertIsNotNone(cvs[0].residual_rms)
+        ax = Figure().add_subplot()
+        plots.draw_fit(ax, be, {"curves": cvs, "colours": ["#aa0000"],
+                                "show": {"envelope": True}}, 1.0, "grey",
+                       "red")
+        texts = [t.get_text() for t in ax.texts]
+        self.assertEqual(len(texts), 1)
+        self.assertTrue(texts[0].startswith("RMS "))
+        self.assertIn(f"{100 * cvs[0].residual_rms:.1f}%", texts[0])
+
+    def test_no_rms_text_when_it_is_unknown(self):
+        ax = Figure().add_subplot()
+        cv = casafit.Curves(region="X", background_type="Linear",
+                            background=None, components=[], envelope=None,
+                            approximate=False, scale_known=True,
+                            residual_rms=None)
+        plots.draw_fit(ax, [], {"curves": [cv], "show": {}}, 1.0, "grey", "red")
+        self.assertEqual(len(ax.texts), 0)
+
 
 # ------------------------------------------------------- real CasaXPS files
 @unittest.skipUnless(HAVE_NP, "numpy not installed")
