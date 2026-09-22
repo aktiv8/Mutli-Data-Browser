@@ -152,16 +152,28 @@ class ReportGeneratorDialog(tk.Toplevel):
         for value, text in (("pdf", "PDF report"), ("pptx", "PowerPoint deck"),
                             ("both", "Both")):
             ttk.Radiobutton(out, text=text, value=value,
-                            variable=self.output).pack(side="left",
-                                                       padx=(12, 0))
+                            variable=self.output,
+                            command=self._sync_preview_button).pack(
+                side="left", padx=(12, 0))
         act = ttk.Frame(bottom)
         act.grid(row=2, column=0, columnspan=4, sticky="e", pady=(12, 0))
         ttk.Button(act, text="Close", command=self.close).pack(side="right")
         ttk.Button(act, text="Generate…", command=self.generate).pack(
             side="right", padx=(0, 6))
-        ttk.Button(act, text="Preview PDF", command=self.preview).pack(
-            side="right", padx=(0, 6))
+        self.preview_btn = ttk.Button(act, text="Preview PDF",
+                                      command=self.preview)
+        self.preview_btn.pack(side="right", padx=(0, 6))
+        self._sync_preview_button()
         self._refresh_presets()
+
+    def _sync_preview_button(self):
+        """The PDF preview only makes sense when a PDF is actually part of
+        the chosen output (a PowerPoint deck cannot be shown here: there is
+        no slide renderer)."""
+        pdf = self.output.get() != "pptx"
+        self.preview_btn.config(
+            state="normal" if pdf else "disabled",
+            text="Preview PDF" if pdf else "No PDF in this output")
 
     def _cover_tab(self, nb):
         tab = ttk.Frame(nb, padding=10)

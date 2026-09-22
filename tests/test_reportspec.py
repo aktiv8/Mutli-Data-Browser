@@ -494,6 +494,18 @@ class TestInTheApp(unittest.TestCase):
         self.assertIn("Data files", names)
         self.assertEqual(len(dlg.rows), len(rs.SECTION_IDS))   # 1 file: no kids
 
+    def test_preview_button_is_disabled_for_a_pptx_only_output(self):
+        dlg = self.dialog()
+        self.assertEqual(str(dlg.preview_btn["state"]), "normal")
+        dlg.output.set("pptx")
+        dlg._sync_preview_button()
+        self.assertEqual(str(dlg.preview_btn["state"]), "disabled")
+        self.assertNotEqual(dlg.preview_btn["text"], "Preview PDF")
+        dlg.output.set("both")
+        dlg._sync_preview_button()
+        self.assertEqual(str(dlg.preview_btn["state"]), "normal")
+        self.assertEqual(dlg.preview_btn["text"], "Preview PDF")
+
     def test_ticking_moving_and_selecting_change_the_apps_choice(self):
         dlg = self.dialog()
         self.assertTrue(dlg.toggle_section("summary"))
