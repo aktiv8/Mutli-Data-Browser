@@ -392,13 +392,14 @@ def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
     return story
 
 
-def _build_pdf(path, story, details, look):
-    """Typeset ``story`` (A4 portrait) to ``path``; returns the tagged
-    headings as ``[(section, child, page)]``."""
+def _build_pdf(path, story, details, look, pagesize=None):
+    """Typeset ``story`` (portrait; A4 unless ``pagesize`` says otherwise, see
+    ``pdfstyle.page_size``) to ``path``; returns the tagged headings as
+    ``[(section, child, page)]``."""
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import mm
 
-    doc = _doc_class()(path, pagesize=A4,
+    doc = _doc_class()(path, pagesize=pagesize or A4,
                        leftMargin=15 * mm, rightMargin=15 * mm,
                        topMargin=15 * mm, bottomMargin=16 * mm,
                        title=(details.get("title") or "").strip()
@@ -536,6 +537,7 @@ def build_report(path, details, logo, file_rows, docs, figures,
                           "(pip install reportlab).")
     mu = _mupdf()
     look = pdfstyle.look(reportspec.cover_of(spec)["accent"])
+    pagesize = pdfstyle.page_size(reportspec.option(spec, "page"))[0]
     art = None
     if any(sid == "cover" for sid, _s in items):
         art = covers.art(reportspec.cover_of(spec), "pdf", cover_data)
@@ -561,7 +563,7 @@ def build_report(path, details, logo, file_rows, docs, figures,
                 story = _flow_story(run, details, logo, file_rows, docs, sha,
                                     art, look, results)
                 if story:
-                    marks = _build_pdf(part, story, details, look)
+                    marks = _build_pdf(part, story, details, look, pagesize)
                     add(k, kind, run[0][0], _page_count(mu, part), marks)
             elif kind == "images" and render_images is not None:
                 from matplotlib.backends.backend_pdf import PdfPages
@@ -598,7 +600,7 @@ def build_report(path, details, logo, file_rows, docs, figures,
                     parts.remove(contents)
                     break
                 _build_pdf(contents["path"], contents_story(listed, look),
-                           details, look)
+                           details, look, pagesize)
                 pages = _page_count(mu, contents["path"])
                 if pages == contents["pages"]:
                     break

@@ -107,6 +107,7 @@ import reportspec
 import resultspages
 import reportgen_ui
 import pptx_export
+import pdfstyle
 import importplan
 import workbook_ui
 import iss_ui
@@ -566,6 +567,7 @@ class Workspace:
         self._axinfo = {}           # axes -> (photon energy, kind, n traces)
         self._zoom_sig = {}         # axes -> what a panel's zoom depends on
         self._gen_prog = None       # progress dialog while a report/deck builds
+        self._pdf_figure_size = (11.7, 8.3)  # landscape figure/image page, in
         self._click_cb = None       # persistent plot-click hook (Identify)
         self._xps_lines = None      # element line table, loaded on demand
 
@@ -3420,11 +3422,14 @@ class Workspace:
         return out
 
     def _report_figure_pages(self, pdf, number, fig):
-        """Draw one saved figure (all its pages) onto a PdfPages."""
+        """Draw one saved figure (all its pages) onto a PdfPages, sized to
+        match the report's page (``_build_report`` sets ``_pdf_figure_size``
+        from the spec's "page" option)."""
         def consume(page):
             pdf.savefig(page)
             return 1
-        return len(self._render_figure_pages(fig, consume, number=number))
+        return len(self._render_figure_pages(
+            fig, consume, size=self._pdf_figure_size, number=number))
 
     # -- camera pictures and SnapMaps for the report and the slides -------------
     def _has_image_pages(self):
@@ -3469,14 +3474,15 @@ class Workspace:
         return out
 
     def _report_image_pages(self, pdf, skip=(), mosaics=False):
-        """Camera sheets, mosaics and SnapMap pages onto a PdfPages; returns
-        how many (``skip``: keys of pictures and sites left out)."""
+        """Camera sheets, mosaics and SnapMap pages onto a PdfPages, sized to
+        match the report's page (see ``_report_figure_pages``); returns how
+        many (``skip``: keys of pictures and sites left out)."""
         def consume(_pg, page):
             pdf.savefig(page)
             return 1
         return len(self._render_image_pages(
             self._image_page_plan(skip=skip, mosaics=mosaics), consume,
-            (11.7, 8.3), (0.0, 0.03, 1.0, 0.93)))
+            self._pdf_figure_size, (0.0, 0.03, 1.0, 0.93)))
 
     def _deck_image_pages(self, skip=(), mosaics=False):
         """The same pages as slide pictures: ``[{"title", "png", "notes"}]``,
@@ -3594,6 +3600,8 @@ class Workspace:
         spec = self._spec_for_output(spec)
         left_out = reportspec.skipped(spec, "images")
         mosaics = reportspec.option(spec, "mosaic") == "on"
+        self._pdf_figure_size = pdfstyle.page_size(
+            reportspec.option(spec, "page"))[1]
         return report.build_report(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,

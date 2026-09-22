@@ -59,6 +59,18 @@ def font_file():
     return _font_file(fonts.FILES[0]) if register_fonts()[0] == REGULAR else ""
 
 
+def page_size(option="a4"):
+    """``(portrait, figure_landscape_in)`` for the PDF's ``page`` option
+    ("a4" or "letter", see ``reportspec.OPTIONS``; anything else is "a4"):
+    the reportlab page size (points, portrait) for the text-flow document,
+    and the matching landscape size in inches a figure or camera/SnapMap
+    page should use so every page in the report is the same size."""
+    from reportlab.lib.pagesizes import A4, LETTER
+    from reportlab.lib.units import inch
+    portrait = LETTER if option == "letter" else A4
+    return portrait, (portrait[1] / inch, portrait[0] / inch)
+
+
 @dataclass(frozen=True)
 class Look:
     accent: str = covers.DEFAULT_ACCENT

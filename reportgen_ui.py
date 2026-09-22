@@ -49,6 +49,7 @@ class ReportGeneratorDialog(tk.Toplevel):
             value=reportspec.option(self.spec, "dividers"))
         self.mosaic = tk.StringVar(
             value=reportspec.option(self.spec, "mosaic"))
+        self.page = tk.StringVar(value=reportspec.option(self.spec, "page"))
         self.preset = tk.StringVar()
         self._build()
         self.populate()
@@ -308,6 +309,12 @@ class ReportGeneratorDialog(tk.Toplevel):
                             command=lambda: self.set_option(
                                 "mosaic", self.mosaic.get())).pack(
                 anchor="w", padx=(12, 0), pady=2)
+        ttk.Label(tab, text="PDF page size").pack(anchor="w", pady=(14, 0))
+        for value, text in (("a4", "A4"), ("letter", "US Letter")):
+            ttk.Radiobutton(tab, text=text, value=value, variable=self.page,
+                            command=lambda: self.set_option(
+                                "page", self.page.get())).pack(
+                anchor="w", padx=(12, 0), pady=2)
 
     # -- the tree ----------------------------------------------------------------
     def populate(self):
@@ -449,6 +456,7 @@ class ReportGeneratorDialog(tk.Toplevel):
             self.sha.set(reportspec.option(presets[name], "sha"))
             self.dividers.set(reportspec.option(presets[name], "dividers"))
             self.mosaic.set(reportspec.option(presets[name], "mosaic"))
+            self.page.set(reportspec.option(presets[name], "page"))
             # a preset says what goes in; the look of the cover stays yours
             self._set(reportspec.with_cover_of(presets[name], self.spec))
 

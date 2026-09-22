@@ -47,6 +47,16 @@ class TestLook(unittest.TestCase):
         self.assertIn(lk.font, (pdfstyle.REGULAR, pdfstyle.FALLBACK[0]))
         self.assertEqual(lk.bold == pdfstyle.BOLD, lk.font == pdfstyle.REGULAR)
 
+    def test_page_size_resolves_a4_or_letter(self):
+        a4, a4_fig = pdfstyle.page_size("a4")
+        letter, letter_fig = pdfstyle.page_size("letter")
+        self.assertEqual((round(a4[0]), round(a4[1])), (595, 842))
+        self.assertEqual((round(letter[0]), round(letter[1])), (612, 792))
+        self.assertAlmostEqual(a4_fig[0], 11.69, places=1)
+        self.assertAlmostEqual(a4_fig[1], 8.27, places=1)
+        self.assertEqual(letter_fig, (11.0, 8.5))
+        self.assertEqual(pdfstyle.page_size("nope")[0], a4)   # bad -> a4
+
 
 class TestOldSpecs(unittest.TestCase):
     def test_a_spec_from_before_the_contents_gets_it_after_the_cover(self):
@@ -165,6 +175,26 @@ class TestReport(unittest.TestCase):
 
     def test_the_greek_letter_survives(self):
         self.assertIn("Kα", self.build()[0])
+
+    def test_page_size_option_changes_every_text_page(self):
+        # no figures: isolate the text-flow pages report.py itself sizes
+        # (a figure/image page's size is the caller's own responsibility,
+        # verified separately against a real Workspace); separate paths and
+        # docs so one is not still open (Windows locks it) when the other
+        # writes.
+        import report
+
+        def sizes(name, spec):
+            path = os.path.join(self.dir, name)
+            report.build_report(path, self.details, "", self.rows,
+                                self.docs, [], self.render, spec=spec)
+            with mupdf.open(path) as doc:
+                return {tuple(round(x, 1) for x in p.rect[2:]) for p in doc}
+        self.assertEqual(sizes("a4.pdf", rs.default_spec()), {(595.3, 841.9)})
+        self.assertEqual(
+            sizes("letter.pdf", rs.with_option(rs.default_spec(), "page",
+                                               "letter")),
+            {(612.0, 792.0)})
 
     def test_contents_alone_is_not_a_report(self):
         import report

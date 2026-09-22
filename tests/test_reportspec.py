@@ -62,7 +62,7 @@ class TestSpec(unittest.TestCase):
         self.assertTrue(rs.is_on(s, "summary"))       # a section the input lacked
         self.assertEqual(s["skip"], {"figures": ["a", "3"]})
         self.assertEqual(s["options"], {"sha": "short", "dividers": "auto",
-                                     "mosaic": "on"})
+                                     "mosaic": "on", "page": "a4"})
 
     def test_changes_return_new_specs_and_leave_the_old_alone(self):
         a = rs.default_spec()

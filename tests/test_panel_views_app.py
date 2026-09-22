@@ -177,6 +177,27 @@ class TestPanelViewsInApp(unittest.TestCase):
                             render=False)
         self.assertEqual(self.ws.panel_views, {depth: {"norm": "Max = 1"}})
 
+    def test_report_figure_pages_follow_the_reports_page_size(self):
+        import pdfstyle
+
+        class FakePdf:
+            def __init__(self):
+                self.pages = []
+
+            def savefig(self, page):
+                self.pages.append(page)
+        fig = {"name": "F", "caption": "", "state": self.ws.capture_state()}
+        self.ws._pdf_figure_size = pdfstyle.page_size("a4")[1]
+        pdf = FakePdf()
+        self.ws._report_figure_pages(pdf, 1, fig)
+        w, h = pdf.pages[0].get_size_inches()
+        self.assertAlmostEqual(w, 11.69, places=1)
+        self.assertAlmostEqual(h, 8.27, places=1)
+        self.ws._pdf_figure_size = pdfstyle.page_size("letter")[1]
+        pdf = FakePdf()
+        self.ws._report_figure_pages(pdf, 1, fig)
+        self.assertEqual(pdf.pages[0].get_size_inches().tolist(), [11.0, 8.5])
+
     def test_figure_pages_are_drawn_per_panel(self):
         depth, bulk = self.keys
         self.ws.panel_views = {depth: {"view": "Waterfall 3D"}}
