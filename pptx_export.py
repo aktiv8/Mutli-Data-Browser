@@ -580,7 +580,7 @@ def _results_slides(deck, results, skip=()):
                     + (" (continued)" if i else ""), None if i else s.label)
                 shape = deck.table(
                     slide, MARGIN, TABLE_TOP, BODY_W,
-                    [4.0, 3.0, 1.6, 3.4, 2.6, 1.8],
+                    [4.0, 3.0, 1.6, 3.4, 2.6, 1.8, 1.6],
                     resultspages.COMPOSITION_HEADER, [c for _k, c in chunk],
                     size=11, row_h=0.32)
                 right(shape, 2)

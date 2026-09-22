@@ -90,6 +90,16 @@ class TestNumbers(unittest.TestCase):
         self.assertEqual(cells["B"][5], "33.3")
         self.assertEqual(cells["C"][5], "no RSF")        # listed, with the reason
 
+    def test_fit_rms_is_shown_as_a_percentage_and_blank_when_unknown(self):
+        lv = level(None, [row("A", 1.0, 100.0),
+                          dict(row("B", 2.0, 100.0), rms=None)])
+        cells = dict((c[0], c) for _k, c in rp.composition_cells(lv))
+        self.assertEqual(cells["A"][-1], "1.0%")            # row()'s rms=0.01
+        self.assertEqual(cells["B"][-1], "")
+        states = [c for k, c in rp.composition_cells(
+            three_element_level(None)) if k == "state"]
+        self.assertTrue(all(c[-1] == "" for c in states))
+
     def test_states_are_listed_under_a_region_with_more_than_one(self):
         lv = three_element_level(None)
         kinds = [k for k, _c in rp.composition_cells(lv)]
@@ -347,7 +357,7 @@ class TestPdf(Tmp):
         for token in ("Quantification", "Film A", "Etched", "Ti 2p", "O 1s",
                       "Shirley", "Area / RSF", "Etch time (s)",
                       "counts/s·eV", "the first is counted",
-                      "no transmission correction"):
+                      "no transmission correction", "Fit RMS", "1.0%"):
             self.assertIn(token, text)
         self.assertGreaterEqual(sum(len(p.get_images())
                                     for p in self.doc), 1)   # the profile chart
@@ -406,7 +416,9 @@ class TestDeck(Tmp):
         table = slides[titles.index("Quantification – Film A")]
         cells = [sh for sh in table.shapes if sh.has_table][0].table
         self.assertEqual(cells.cell(0, 5).text, "at %")
+        self.assertEqual(cells.cell(0, 6).text, "Fit RMS")
         self.assertEqual(cells.cell(1, 0).text, "Ti 2p")
+        self.assertEqual(cells.cell(1, 6).text, "1.0%")
         chart = slides[titles.index(
             "Quantification – Etched: depth profile")]
         self.assertTrue(any(sh.shape_type == 13 for sh in chart.shapes))

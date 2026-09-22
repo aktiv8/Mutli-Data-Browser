@@ -40,7 +40,7 @@ METHOD = ("Atomic percent is each fitted region's area divided by its "
           "correction is applied.")
 
 COMPOSITION_HEADER = ("Region", "Background", "RSF", "Area (counts/s·eV)",
-                      "Area / RSF", "at %")
+                      "Area / RSF", "at %", "Fit RMS")
 PROFILE_AXES = (("depth", "Depth (nm)"), ("etch", "Etch time (s)"),
                 ("fluence", "Ion fluence (ions/cm²)"), ("level", "Level"))
 
@@ -257,12 +257,22 @@ def has_survey_rows(level):
     return any(e["row"].get("source") == "survey" for e in level.entries)
 
 
+def _fmt_rms(v):
+    """Residual RMS (a fraction of the region's data range) as a percentage,
+    or "" when there is no envelope to compare against (a component-less
+    survey region, or one whose background is not reproduced)."""
+    return "" if v is None else f"{100 * v:.1f}%"
+
+
 def composition_cells(level):
     """``[(kind, [cells])]`` for one sample at one level: a "region" row
-    (region, background, RSF, area, area / RSF, at %; the reason instead of
-    the percent when it is left out) with a "state" row under it for each
-    chemical state. A region quantified from a survey scan rather than a
-    dedicated high-resolution scan is marked "†" (``SURVEY_FOOTNOTE``)."""
+    (region, background, RSF, area, area / RSF, at %, fit RMS; the reason
+    instead of the percent when it is left out) with a "state" row under it
+    for each chemical state. A region quantified from a survey scan rather
+    than a dedicated high-resolution scan is marked "†" (``SURVEY_FOOTNOTE``).
+    Fit RMS is the residual between the data and the fitted envelope as a
+    percentage of the region's data range; blank where there is no envelope
+    (a component-less survey region, or an unreproduced background)."""
     rows = []
     for e, x in zip(level.entries, level.res):
         row = e["row"]
@@ -272,14 +282,15 @@ def composition_cells(level):
         rows.append(("region", [name, row.get("background") or "",
                                 _fmt(row.get("rsf"), ".4g"),
                                 _fmt(row.get("area"), ".4g"),
-                                _fmt(x["corrected"], ".4g"), pct]))
+                                _fmt(x["corrected"], ".4g"), pct,
+                                _fmt_rms(row.get("rms"))]))
         states = (quant.states(row, x["at_pct"])
                   if x["at_pct"] is not None else [])
         if len(states) > 1:                 # one state says nothing more
             for st in states:
                 rows.append(("state", ["    " + st["name"], "", "", "",
                                        f"{100 * st['frac']:.0f}% of region",
-                                       f"{st['at_pct']:.1f}"]))
+                                       f"{st['at_pct']:.1f}", ""]))
     return rows
 
 
