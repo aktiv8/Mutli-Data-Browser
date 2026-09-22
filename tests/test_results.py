@@ -90,6 +90,13 @@ class TestNumbers(unittest.TestCase):
         self.assertEqual(cells["B"][5], "33.3")
         self.assertEqual(cells["C"][5], "no RSF")        # listed, with the reason
 
+    def test_composition_chart_is_a_png_with_one_bar_per_usable_region(self):
+        lv = three_element_level(None)
+        png = rp.composition_png(lv, dpi=60)
+        self.assertEqual(png[:8], b"\x89PNG\r\n\x1a\n")
+        lv_none = level(None, [row("C", None, 50.0)])   # no RSF: no at_pct
+        self.assertIsNone(rp.composition_png(lv_none, dpi=60))
+
     def test_fit_rms_is_shown_as_a_percentage_and_blank_when_unknown(self):
         lv = level(None, [row("A", 1.0, 100.0),
                           dict(row("B", 2.0, 100.0), rms=None)])
@@ -411,17 +418,21 @@ class TestDeck(Tmp):
         slides = self.build()
         titles = [self.title(s) for s in slides]
         self.assertIn("Quantification – Film A", titles)
+        self.assertIn("Quantification – Film A: composition table", titles)
         self.assertIn("Quantification – Etched: depth profile", titles)
         self.assertIn("Quantification – Etched: at % by level", titles)
-        table = slides[titles.index("Quantification – Film A")]
+        chart = slides[titles.index("Quantification – Film A")]
+        self.assertTrue(any(sh.shape_type == 13 for sh in chart.shapes))
+        table = slides[titles.index(
+            "Quantification – Film A: composition table")]
         cells = [sh for sh in table.shapes if sh.has_table][0].table
         self.assertEqual(cells.cell(0, 5).text, "at %")
         self.assertEqual(cells.cell(0, 6).text, "Fit RMS")
         self.assertEqual(cells.cell(1, 0).text, "Ti 2p")
         self.assertEqual(cells.cell(1, 6).text, "1.0%")
-        chart = slides[titles.index(
+        profile_chart = slides[titles.index(
             "Quantification – Etched: depth profile")]
-        self.assertTrue(any(sh.shape_type == 13 for sh in chart.shapes))
+        self.assertTrue(any(sh.shape_type == 13 for sh in profile_chart.shapes))
         notes = table.notes_slide.notes_text_frame.text
         self.assertIn("sensitivity factor", notes)
         self.assertIn("the first is counted", notes)

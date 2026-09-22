@@ -294,6 +294,51 @@ def composition_cells(level):
     return rows
 
 
+def composition_png(level, size=(7.0, 3.0), dpi=200):
+    """The composition of one sample at one level as a bar chart (PNG bytes),
+    or None without matplotlib: one bar per region with a usable at %, in the
+    same order as ``composition_cells``. Chemical states are not broken out
+    (the table already does that); a survey-derived region keeps its "†"."""
+    try:
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+    except ImportError:
+        return None
+    import themes
+    names, values, survey = [], [], []
+    for e, x in zip(level.entries, level.res):
+        if x["at_pct"] is None:
+            continue
+        row = e["row"]
+        names.append(row["region"]
+                     + (" †" if row.get("source") == "survey" else ""))
+        values.append(x["at_pct"])
+        survey.append(row.get("source") == "survey")
+    if not names:
+        return None
+    fig = Figure(figsize=size, dpi=dpi)
+    FigureCanvasAgg(fig)
+    ax = fig.add_axes((0.09, 0.22, 0.88, 0.72))
+    cycle = themes.PALETTES["Light"]["cycle"]
+    bars = ax.bar(names, values,
+                  color=[cycle[i % len(cycle)] for i in range(len(names))])
+    for bar, is_survey in zip(bars, survey):
+        if is_survey:
+            bar.set_alpha(0.55)
+            bar.set_hatch("//")
+    ax.set_ylabel("Atomic %", fontsize=9)
+    ax.set_ylim(bottom=0)
+    ax.tick_params(labelsize=8)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    ax.grid(axis="y", linewidth=0.4, alpha=0.5)
+    for i, v in enumerate(values):
+        ax.text(i, v, f"{v:.1f}", ha="center", va="bottom", fontsize=7)
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi)
+    return buf.getvalue()
+
+
 def profile_axis(sample):
     """``(label, [x per level])``: depth if every level has a distinct one,
     else etch time, else fluence, else the level number."""

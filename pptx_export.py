@@ -544,9 +544,10 @@ def _fit_picture(deck, slide, png):
 
 
 def _results_slides(deck, results, skip=()):
-    """The Quantification slides: for each sample its composition table (one
-    depth level) or its depth profile (a chart, then at % by level), a footnote
-    on how the numbers are made, and the method and notes as speaker notes."""
+    """The Quantification slides: for each sample its composition (a chart,
+    then a table, one depth level) or its depth profile (a chart, then at %
+    by level), a footnote on how the numbers are made, and the method and
+    notes as speaker notes."""
     samples = results.chosen(skip) if results else []
     if not samples:
         return
@@ -573,11 +574,20 @@ def _results_slides(deck, results, skip=()):
             survey_note = (resultspages.SURVEY_FOOTNOTE
                           if resultspages.has_survey_rows(s.levels[0])
                           else None)
+            cpng = resultspages.composition_png(s.levels[0], size=FIGURE_SIZE,
+                                                dpi=150)
+            if cpng:
+                slide = deck.content_slide(f"Quantification \u2013 {s.label}",
+                                           s.label)
+                _fit_picture(deck, slide, cpng)
+                finish(slide, survey_note)
             for i in range(0, len(rows), RESULT_ROWS):
                 chunk = rows[i:i + RESULT_ROWS]
+                suffix = ": composition table" if cpng else ""
                 slide = deck.content_slide(
-                    f"Quantification \u2013 {s.label}"
-                    + (" (continued)" if i else ""), None if i else s.label)
+                    f"Quantification \u2013 {s.label}{suffix}"
+                    + (" (continued)" if i else ""),
+                    None if (cpng or i) else s.label)
                 shape = deck.table(
                     slide, MARGIN, TABLE_TOP, BODY_W,
                     [4.0, 3.0, 1.6, 3.4, 2.6, 1.8, 1.6],

@@ -253,8 +253,8 @@ def _grid(header, rows, widths, look, right_from=1, kinds=None):
 
 def results_story(results, skip=(), look=None, sid="results"):
     """The Quantification section: how the numbers are made, then for each
-    sample its composition (one level) or its depth profile (chart and table),
-    and the notes."""
+    sample its composition (chart and table, one level) or its depth profile
+    (chart and table), and the notes."""
     from reportlab.lib.units import mm
     from reportlab.platypus import (CondPageBreak, Image, KeepTogether,
                                     Paragraph, Spacer)
@@ -273,10 +273,18 @@ def results_story(results, skip=(), look=None, sid="results"):
         head = _mark(Paragraph(xml_escape(s.label), st["h2"]), sid, s.label)
         if not s.is_profile:
             rows = resultspages.composition_cells(s.levels[0])
-            story += [head, _grid(resultspages.COMPOSITION_HEADER,
-                                  [c for _k, c in rows],
-                                  [36, 26, 18, 32, 26, 20, 22], look,
-                                  right_from=2, kinds=[k for k, _c in rows])]
+            cpng = resultspages.composition_png(s.levels[0], size=(7.0, 3.0),
+                                                dpi=200)
+            block = [head]
+            if cpng:
+                block.append(Image(io.BytesIO(cpng), width=170 * mm,
+                                   height=170 * mm * 3.0 / 7.0,
+                                   hAlign="LEFT"))
+            block.append(_grid(resultspages.COMPOSITION_HEADER,
+                               [c for _k, c in rows],
+                               [36, 26, 18, 32, 26, 20, 22], look,
+                               right_from=2, kinds=[k for k, _c in rows]))
+            story += block
             if resultspages.has_survey_rows(s.levels[0]):
                 story.append(Paragraph(
                     xml_escape(resultspages.SURVEY_FOOTNOTE), st["small"]))
