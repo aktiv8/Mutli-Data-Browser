@@ -133,6 +133,28 @@ class TestPanelViewsInApp(unittest.TestCase):
         self.assertTrue(any("no fit stored" in n
                             for n in self.ws._view_notes))
 
+    def test_zoom_is_kept_when_nothing_about_a_panel_changed(self):
+        depth, _bulk = self.keys
+        self.ws._render()
+        ax = next(a for a, k in self.ws._axmap.items() if k == depth)
+        ax.set_xlim(280.0, 284.0)
+        ax.set_ylim(200.0, 800.0)
+        self.ws._render()          # nothing changed: same ticks, same look
+        ax2 = next(a for a, k in self.ws._axmap.items() if k == depth)
+        self.assertEqual(ax2.get_xlim(), (280.0, 284.0))
+        self.assertEqual(ax2.get_ylim(), (200.0, 800.0))
+
+    def test_zoom_is_dropped_when_the_panels_own_data_changes(self):
+        depth, _bulk = self.keys
+        self.ws._render()
+        ax = next(a for a, k in self.ws._axmap.items() if k == depth)
+        ax.set_xlim(280.0, 284.0)
+        ax.set_ylim(200.0, 800.0)
+        self.ws.norm_var.set("Max = 1")    # the panel's own values change
+        self.ws._render()
+        ax2 = next(a for a, k in self.ws._axmap.items() if k == depth)
+        self.assertNotEqual(ax2.get_ylim(), (200.0, 800.0))
+
     def test_old_look_without_panel_views_clears_them(self):
         depth, _bulk = self.keys
         st = self.ws.capture_state()

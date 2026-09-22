@@ -559,6 +559,7 @@ class Workspace:
         self._results_memo = None   # (key, resultspages.Results)
         self._pick_cb = None        # set while waiting for a click on the plot
         self._axinfo = {}           # axes -> (photon energy, kind, n traces)
+        self._zoom_sig = {}         # axes -> what a panel's zoom depends on
         self._click_cb = None       # persistent plot-click hook (Identify)
         self._xps_lines = None      # element line table, loaded on demand
 
@@ -2523,6 +2524,35 @@ class Workspace:
                 self._stop_play()
             self._layout_bottom()
 
+    def _capture_zoom(self):
+        """Each visible panel's x/y limits, keyed by its group key, alongside
+        what it depends on (``_zoom_sig``) so a redraw only restores a panel
+        whose data/grouping/view has not itself changed underneath it (a page
+        turn or view switch gets a fresh auto-scaled view, not a stale one)."""
+        out = {}
+        for ax, key in self._axmap.items():
+            sig = self._zoom_sig.get(ax)
+            if sig is None:
+                continue
+            try:
+                out[key] = (sig, ax.get_xlim(), ax.get_ylim())
+            except Exception:
+                pass
+        return out
+
+    def _restore_zoom(self, saved):
+        """Put back the x/y limits ``_capture_zoom`` saved, on whichever new
+        panel now has the same key and the same signature."""
+        for ax, key in self._axmap.items():
+            prev = saved.get(key)
+            if prev is None or self._zoom_sig.get(ax) != prev[0]:
+                continue
+            try:
+                ax.set_xlim(prev[1])
+                ax.set_ylim(prev[2])
+            except Exception:
+                pass
+
     def _render(self):
         self._render_job = None
         groups = self._groups()
@@ -2559,8 +2589,10 @@ class Workspace:
                               for lk in looks.values()) else "")
         self._set_scrollbar(HAVE_MPL and n_groups > npp)
         if HAVE_MPL:
+            zoom = self._capture_zoom()
             self.fig.clear()
             self._axmap = {}
+            self._zoom_sig = {}
             if chunk:
                 self._axmap = self._draw_page(self.fig, chunk, limit,
                                               self.trace_start)
@@ -2571,6 +2603,7 @@ class Workspace:
                               "stacked on one panel.",
                               ha="center", va="center",
                               color=self.palette["muted"])
+            self._restore_zoom(zoom)
             self.fig.set_facecolor(self.palette["plot_bg"])
             self.canvas.draw()
             if n_groups:
@@ -2598,6 +2631,7 @@ class Workspace:
                     | {id(self._display(r)) for r in self.sel_regions})
         axmap, stacked_axes, axhv = {}, [], {}
         axinfo = {}
+        zoom_sig = {}
         notes = []
         if fig is self.fig:
             self._view_notes = notes
@@ -2612,6 +2646,8 @@ class Workspace:
             lim = self._panel_limit(limit, look)
             s = min(start, len(rs) - lim) if lim and len(rs) > lim else 0
             vis = rs[s:s + lim] if lim and len(rs) > lim else rs
+            sig = (view, norm, offset, scale, look.get("z_axis"), s,
+                  tuple(id(r) for r in vis))
             colours = self.trace_colours(rs, base)[s:s + len(vis)]
             disp = [self._display(r) for r in vis]      # names, BE shift
             if scale == "Kinetic" and not all(
@@ -2658,6 +2694,7 @@ class Workspace:
                 axmap[ax] = key
                 axinfo[ax] = (viewdata.photon_energy(disp), view.lower(),
                               len(disp), zvis.label)
+                zoom_sig[ax] = sig
                 continue
             ax = fig.add_subplot(rows, cols, i + 1)
             cur = None
@@ -2690,11 +2727,13 @@ class Workspace:
             axhv[ax] = viewdata.photon_energy(disp)
             axinfo[ax] = (axhv[ax], "fit" if view == "Fit" else "stack",
                           len(disp), "")
+            zoom_sig[ax] = sig
             if len(vis) > 1 and plotstyle.end_labels(style):
                 stacked_axes.append(ax)
         if fig is self.fig:
             self._axhv = axhv
             self._axinfo = axinfo
+            self._zoom_sig = zoom_sig
         if rect is not None:            # leave room for a heading / caption
             fig.tight_layout(rect=rect)
         else:
