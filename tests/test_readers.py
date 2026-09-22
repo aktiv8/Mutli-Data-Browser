@@ -204,6 +204,30 @@ class TestThermoAvg(Tmp):
         self.assertEqual(r.date, "2008-05-12 17:34:00")            # D/M/Y
         self.assertAlmostEqual(float(r.conditions["X-ray Power"].split()[0]), 25.2, 1)
 
+    def test_ion_gun_properties_fill_the_sputter_hint(self):
+        vals = [100 + i for i in range(8)]
+        rows = "\n".join(
+            "LIST@ %3d=  %s" % (k, ",  ".join("%.6f" % v for v in vals[k:k + 4]))
+            for k in (0, 4))
+        extra = (
+            "DS_DEPTHPROFILE_IONGUNPROPID_CURRENT        : VT_R4   = 10.000000\n"
+            "DS_DEPTHPROFILE_IONGUNPROPID_ENERGY         : VT_R4   = 2000.000000\n"
+            "DS_DEPTHPROFILE_IONGUNPROPID_RASTER_WIDTH   : VT_R4   = 1.000000\n"
+            "DS_DEPTHPROFILE_IONGUNPROPID_RASTER_HEIGHT  : VT_R4   = 0.000000\n"
+            "DS_DEPTHPROFILE_IONGUNPROPID_SPUTTERRATE    : VT_R4   = 2.204846\n"
+            "DS_DEPTHPROFILE_IONGUNPROPID_IONTYPE        : VT_BSTR = 'Ar+'\n")
+        text = AVG_TEMPLATE.format(title="C1s Scan", rows=rows)
+        text = text.replace("$DATAAXES=", extra + "$DATAAXES=")
+        f = load_file(self.write("C1s Scan.avg", text))
+        hint = f.sputter_hint
+        self.assertEqual(hint["ion"], "Ar+")
+        self.assertEqual(hint["energy_ev"], 2000.0)
+        self.assertEqual(hint["current"], 10.0)
+        self.assertEqual(hint["current_unit"], "µA")
+        self.assertEqual((hint["raster_x"], hint["raster_y"]), (1.0, 1.0))
+        self.assertAlmostEqual(hint["etch_rate"], 2.204846)
+        self.assertEqual(hint["rate_unit"], "nm/min")
+
     def test_header_only_dump_is_no_data_not_an_error(self):
         rows = "\n".join("LIST@ %3d=  #empty#,  #empty#,  #empty#,  #empty#"
                          % k for k in (0, 4))

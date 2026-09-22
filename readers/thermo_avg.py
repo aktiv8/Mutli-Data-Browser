@@ -406,6 +406,36 @@ class ThermoDataSpaceFile(SpectrumFile):
         if p.get("DS_ANPROPID_MODE") == 1:       # FAT in CasaXPS's own export
             x["analyser_mode"] = CAE
 
+    @staticmethod
+    def _iongun_props(p):
+        """Avantage ``DS_DEPTHPROFILE_IONGUNPROPID_*`` fields as a partial
+        sputter settings dict. These are typed floats/strings with the unit
+        implied only by the property, not by its key name (unlike the
+        ``..._EV`` convention ``sputter.from_properties`` relies on), so they
+        are read explicitly here rather than through that generic scan.
+        Units: energy in eV, current in µA (matches the flood gun current
+        of the same DataSpace family, already shown as µA above), raster
+        width/height in mm (0 height means a square raster), sputter rate in
+        nm/min (Avantage's own Depth Profile dialog label; confirmed against
+        a real file's rate against its "Low current" description)."""
+        import sputter
+        out = {}
+        if "DS_DEPTHPROFILE_IONGUNPROPID_ENERGY" in p:
+            out["energy_ev"] = p["DS_DEPTHPROFILE_IONGUNPROPID_ENERGY"]
+        if "DS_DEPTHPROFILE_IONGUNPROPID_CURRENT" in p:
+            out["current"] = p["DS_DEPTHPROFILE_IONGUNPROPID_CURRENT"]
+            out["current_unit"] = "µA"
+        if "DS_DEPTHPROFILE_IONGUNPROPID_RASTER_WIDTH" in p:
+            out["raster_x"] = p["DS_DEPTHPROFILE_IONGUNPROPID_RASTER_WIDTH"]
+        if "DS_DEPTHPROFILE_IONGUNPROPID_RASTER_HEIGHT" in p:
+            out["raster_y"] = p["DS_DEPTHPROFILE_IONGUNPROPID_RASTER_HEIGHT"]
+        if "DS_DEPTHPROFILE_IONGUNPROPID_SPUTTERRATE" in p:
+            out["etch_rate"] = p["DS_DEPTHPROFILE_IONGUNPROPID_SPUTTERRATE"]
+            out["rate_unit"] = "nm/min"
+        if "DS_DEPTHPROFILE_IONGUNPROPID_IONTYPE" in p:
+            out["ion"] = str(p["DS_DEPTHPROFILE_IONGUNPROPID_IONTYPE"])
+        return sputter.sanitise(out) if out else {}
+
     def _instrument_from(self, p):
         hv = p.get(K_ENERGY)
         hv = round(float(hv), 3) if hv else None
@@ -430,7 +460,8 @@ class ThermoDataSpaceFile(SpectrumFile):
             instr["Charge neutraliser"] = fg
         self.instrument = {k: v for k, v in instr.items() if v}
         import sputter
-        self.sputter_hint = sputter.from_properties(p)
+        self.sputter_hint = sputter.merge_prefill(
+            self._iongun_props(p), sputter.from_properties(p))
 
     # -- SnapMap -----------------------------------------------------------------
     def _map_from(self, ds, blocks, make, stage, energy):
