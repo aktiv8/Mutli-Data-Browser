@@ -32,7 +32,11 @@ class TestTable(unittest.TestCase):
             if "be" in e:
                 self.assertTrue(0 < e["be"] < 1500, e)
             else:
-                self.assertTrue(0 < e["ke"] < 1500, e)
+                # Auger kinetic energy is set by the atom's own level
+                # spacing, not by the exciting photon energy, so it can
+                # legitimately exceed a survey's BE range (up to ~2.4 keV
+                # in the bundled table).
+                self.assertTrue(0 < e["ke"] < 2500, e)
 
     def test_missing_or_broken_file_gives_an_empty_table(self):
         self.assertEqual(xl.load_lines("/no/such/file.json"), [])
@@ -53,11 +57,11 @@ class TestCandidates(unittest.TestCase):
         self.assertEqual(label(532.4), "O 1s")
         self.assertEqual(label(399.6), "N 1s")
         self.assertEqual(label(228.9), "Mo 3d5/2")
-        self.assertEqual(label(163.5), "S 2p")
+        self.assertEqual(label(161.4), "S 2p3/2")
         self.assertEqual(label(83.9), "Au 4f7/2")
 
     def test_nothing_in_the_window(self):
-        self.assertIsNone(label(1400.0))
+        self.assertIsNone(label(700.0))
         self.assertEqual(xl.candidates(287.5, 0.1, LINES), [])
 
     def test_sorted_nearest_first_with_secondary_lines_penalised(self):
@@ -66,9 +70,19 @@ class TestCandidates(unittest.TestCase):
         self.assertLessEqual(abs(c[0][0]), abs(c[-1][0]) + 1.6)
 
     def test_auger_lines_follow_the_photon_energy(self):
-        self.assertEqual(label(976.6, hv=1486.6), "O KLL")
-        self.assertNotEqual(label(976.6, hv=1253.6), "O KLL")
-        self.assertEqual(label(743.6, hv=1253.6), "O KLL")
+        # O KL1 (ke=506): an Auger line's binding-energy position is
+        # hv-dependent (BE = hv - KE), unlike every photoelectron line. The
+        # richer table now has hundreds of Auger entries, so rather than
+        # pin whichever label happens to rank first globally at one BE
+        # (fragile as the table grows), check the specific O KL1 entry's
+        # own computed BE shifts exactly with hv, and is found in the
+        # candidate list near the BE it implies for a given hv.
+        o_kl1 = next(e for e in LINES if e["el"] == "O" and e["line"] == "KL1")
+        be_at_al_ka = xl.line_be(o_kl1, hv=1486.6)
+        be_at_mg_ka = xl.line_be(o_kl1, hv=1253.6)
+        self.assertAlmostEqual(be_at_al_ka - be_at_mg_ka, 1486.6 - 1253.6)
+        cands = xl.candidates(be_at_al_ka, 0.5, LINES, hv=1486.6)
+        self.assertIn("O KL1", [xl.label_of(e) for _d, e in cands])
 
 
 def survey(peaks, lo=0.0, hi=1100.0, step=0.5, width=1.2, noise=0.0):
@@ -106,7 +120,7 @@ class TestPeaks(unittest.TestCase):
         e, y = survey([(285.3, 3000), (532.6, 9000), (74.0, 800),
                        (228.5, 2500)])
         got = dict((lbl, be) for be, lbl in xl.auto_label(e, y, LINES))
-        for lbl, be in (("O 1s", 532.6), ("C 1s", 285.3), ("Al 2p", 74.0),
+        for lbl, be in (("O 1s", 532.6), ("C 1s", 285.3), ("Al 2p3/2", 74.0),
                         ("Mo 3d5/2", 228.5)):
             self.assertIn(lbl, got)
             self.assertAlmostEqual(got[lbl], be, delta=0.5)

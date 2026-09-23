@@ -236,7 +236,7 @@ function near(a, b, msg, tol) {
     check(ex.table.lines.some((l) => l[2] === null), 'the fixture has Auger lines');
     near(V.lineBe(['O', 'KLL', null, 510, 1], 1486.6, 1486.6), 976.6, 'Auger binding energy follows hv', 1e-9);
     near(V.lineBe(['O', 'KLL', null, 510, 1], null, 1253.6), 743.6, 'default hv when none is given', 1e-9);
-    eq(V.candidates(1000, 1, ex.table, 1486.6), [], 'nothing near 1000 eV within 1 eV');
+    eq(V.candidates(700, 1, ex.table, 1486.6), [], 'nothing near 700 eV within 1 eV');
     eq(V.lineLabel(['C', '1s', 285, null, 1]), 'C 1s', 'line label');
   }
 
