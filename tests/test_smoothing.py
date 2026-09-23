@@ -67,6 +67,53 @@ class TestFourierLowpass(unittest.TestCase):
         np.testing.assert_array_equal(out, y)
 
 
+class TestGaussHermiteTransfer(unittest.TestCase):
+    def test_unity_at_dc(self):
+        tf = smoothing.gauss_hermite_transfer(50, nc=10)
+        self.assertAlmostEqual(tf[0], 1.0, places=9)
+
+    def test_half_power_at_nc(self):
+        tf = smoothing.gauss_hermite_transfer(50, nc=10)
+        self.assertAlmostEqual(tf[10], 0.5, places=6)
+
+    def test_monotonically_decreasing(self):
+        tf = smoothing.gauss_hermite_transfer(50, nc=10)
+        self.assertTrue(np.all(np.diff(tf) <= 1e-12))
+
+
+class TestGaussHermiteSmooth(unittest.TestCase):
+    def test_preserves_length(self):
+        y = np.random.default_rng(6).normal(size=80)
+        out = smoothing.gauss_hermite_smooth(y, nc=8)
+        self.assertEqual(len(out), len(y))
+
+    def test_reduces_noise(self):
+        rng = np.random.default_rng(7)
+        x = np.linspace(0, 10, 200)
+        signal = np.sin(x)
+        noisy = signal + rng.normal(0, 0.3, size=x.size)
+        out = smoothing.gauss_hermite_smooth(noisy, nc=6)
+        err_raw = np.mean((noisy - signal) ** 2)
+        err_smooth = np.mean((out - signal) ** 2)
+        self.assertLess(err_smooth, err_raw * 0.5)
+
+    def test_detrends_sloping_background(self):
+        # a strong linear background plus noise: the line/parabola removal
+        # should stop the ends running away the way a bare FFT low-pass can.
+        rng = np.random.default_rng(8)
+        x = np.linspace(0, 1, 150)
+        trend = 40 * x
+        noisy = trend + rng.normal(0, 0.5, size=x.size)
+        out = smoothing.gauss_hermite_smooth(noisy, nc=10)
+        self.assertLess(abs(out[0] - trend[0]), 5.0)
+        self.assertLess(abs(out[-1] - trend[-1]), 5.0)
+
+    def test_too_short_returns_unchanged(self):
+        y = np.array([1.0, 2.0, 3.0])
+        out = smoothing.gauss_hermite_smooth(y, nc=1)
+        np.testing.assert_array_equal(out, y)
+
+
 class TestAutoCutoff(unittest.TestCase):
     def test_finds_knee_between_signal_and_noise(self):
         rng = np.random.default_rng(3)
@@ -108,6 +155,15 @@ class TestSmoothDispatcher(unittest.TestCase):
         y = np.sin(np.linspace(0, 6, 200)) + rng.normal(0, 0.2, 200)
         gentle = smoothing.smooth(y, "Fourier low-pass", 0.0)
         strong = smoothing.smooth(y, "Fourier low-pass", 1.0)
+        self.assertEqual(len(gentle), len(y))
+        self.assertEqual(len(strong), len(y))
+        self.assertLess(np.std(np.diff(strong)), np.std(np.diff(gentle)))
+
+    def test_gauss_hermite_strength_changes_nc(self):
+        rng = np.random.default_rng(9)
+        y = np.sin(np.linspace(0, 6, 200)) + rng.normal(0, 0.2, 200)
+        gentle = smoothing.smooth(y, "Gauss-Hermite Smooth", 0.0)
+        strong = smoothing.smooth(y, "Gauss-Hermite Smooth", 1.0)
         self.assertEqual(len(gentle), len(y))
         self.assertEqual(len(strong), len(y))
         self.assertLess(np.std(np.diff(strong)), np.std(np.diff(gentle)))

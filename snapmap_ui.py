@@ -83,7 +83,7 @@ class SnapMapDialog(tk.Toplevel):
         bar2 = ttk.Frame(body)
         bar2.pack(fill="x", pady=(4, 0))
         ttk.Label(bar2, text="Smoothing").pack(side="left")
-        smooth_cb = ttk.Combobox(bar2, state="readonly", width=15,
+        smooth_cb = ttk.Combobox(bar2, state="readonly", width=19,
                                  textvariable=self.smooth_method,
                                  values=smoothing.METHODS)
         smooth_cb.pack(side="left", padx=(4, 12))
