@@ -18,6 +18,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, ttk
 
+import smoothing
 import snapmap
 import snapshot
 import themes
@@ -44,6 +45,11 @@ class SnapMapDialog(tk.Toplevel):
         self.background = tk.BooleanVar(value=bool(cfg.get("background", False)))
         self.overlay = tk.BooleanVar(value=False)
         self.alpha = tk.DoubleVar(value=float(cfg.get("alpha", 0.65)))
+        self.smooth_method = tk.StringVar(
+            value=cfg.get("smooth_method", "None")
+            if cfg.get("smooth_method") in smoothing.METHODS else "None")
+        self.smooth_strength = tk.DoubleVar(
+            value=float(cfg.get("smooth_strength", 0.5)))
         self.title(f"SnapMap — {region.sample}")
 
         body = ttk.Frame(self, padding=8)
@@ -73,6 +79,19 @@ class SnapMapDialog(tk.Toplevel):
         ttk.Scale(bar, from_=0.15, to=1.0, variable=self.alpha, length=70,
                   command=lambda v: self._settings_changed(quiet=True)).pack(
             side="left", padx=(6, 0))
+
+        bar2 = ttk.Frame(body)
+        bar2.pack(fill="x", pady=(4, 0))
+        ttk.Label(bar2, text="Smoothing").pack(side="left")
+        smooth_cb = ttk.Combobox(bar2, state="readonly", width=15,
+                                 textvariable=self.smooth_method,
+                                 values=smoothing.METHODS)
+        smooth_cb.pack(side="left", padx=(4, 12))
+        smooth_cb.bind("<<ComboboxSelected>>", lambda e: self._smoothing_changed())
+        ttk.Label(bar2, text="Strength").pack(side="left")
+        ttk.Scale(bar2, from_=0.0, to=1.0, variable=self.smooth_strength,
+                  length=110, command=self._smoothing_changed).pack(
+            side="left", padx=(4, 0))
 
         self.fig = Figure(figsize=(10.4, 4.9), dpi=100)
         self.canvas = FigureCanvasTkAgg(self.fig, master=body)
@@ -109,13 +128,34 @@ class SnapMapDialog(tk.Toplevel):
         lo, hi = self.window
         return self.cube.image(lo, hi, background=self.background.get())
 
+    def _save_cfg(self):
+        self.app.cfg["snapmap"] = {
+            "scale": self.scale.get(),
+            "background": self.background.get(),
+            "alpha": round(self.alpha.get(), 2),
+            "smooth_method": self.smooth_method.get(),
+            "smooth_strength": round(self.smooth_strength.get(), 2),
+        }
+
     def _settings_changed(self, quiet=False):
-        self.app.cfg["snapmap"] = {"scale": self.scale.get(),
-                                   "background": self.background.get(),
-                                   "alpha": round(self.alpha.get(), 2)}
+        self._save_cfg()
         if quiet and self.overlay.get() is False:
             return
         self._update_map()
+
+    def _smoothing_changed(self, *_args):
+        self._save_cfg()
+        self._update_spectrum()
+
+    def _label_with_smoothing(self, base, extra=None):
+        """``base`` (+ ``extra`` in parentheses) with the active smoothing
+        method appended, so a smoothed trace is never shown unlabelled."""
+        method = self.smooth_method.get()
+        if method == "None":
+            return base if extra is None else f"{base} ({extra})"
+        if extra is None:
+            return f"{base} ({method})"
+        return f"{base} ({extra}, {method})"
 
     def _element(self):
         self.region = self.entries[self.el_cb.current()]
@@ -216,6 +256,8 @@ class SnapMapDialog(tk.Toplevel):
             ec=self.app.palette["accent"], zorder=5))
 
     def _mean_spectra(self):
+        """The whole-map and (if any) ROI spectra, smoothed for display when
+        a smoothing method is chosen. Never touches ``cube.data`` itself."""
         cube = self.cube
         n_all = cube.nx * cube.ny
         whole = [v / n_all for v in cube.total()]
@@ -223,6 +265,12 @@ class SnapMapDialog(tk.Toplevel):
         if self.mask is not None and self.mask.any():
             n = int(self.mask.sum())
             roi = [v / n for v in cube.roi_spectrum(self.mask)]
+        method = self.smooth_method.get()
+        if method != "None":
+            strength = self.smooth_strength.get()
+            whole = smoothing.smooth(whole, method, strength).tolist()
+            if roi is not None:
+                roi = smoothing.smooth(roi, method, strength).tolist()
         return whole, roi
 
     def _draw_spectrum(self):
@@ -234,10 +282,11 @@ class SnapMapDialog(tk.Toplevel):
         whole, roi = self._mean_spectra()
         e = self.cube.energy
         ax.plot(e, whole, color=pal["muted"] if roi else pal["accent"], lw=1.4,
-                label="whole map")
+                label=self._label_with_smoothing("whole map"))
         if roi:
             ax.plot(e, roi, color=pal["accent"], lw=1.6,
-                    label=f"area ({int(self.mask.sum())} px)")
+                    label=self._label_with_smoothing(
+                        "area", f"{int(self.mask.sum())} px"))
             ax.legend(fontsize=8, frameon=False, labelcolor=pal["plot_fg"])
         r = self.region
         binding = "inding" in (r.energy_label or "")
@@ -275,6 +324,13 @@ class SnapMapDialog(tk.Toplevel):
         lo, hi = self.window
         self.win_patch = self.ax_spec.axvspan(
             lo, hi, color=self.app.palette["accent"], alpha=0.14, lw=0)
+        self.canvas.draw_idle()
+
+    def _update_spectrum(self):
+        """Smoothing changed: redraw just the spectrum panel (as ``_on_roi``
+        already does for a new ROI), leaving the map untouched."""
+        self._draw_spectrum()
+        self.span.extents = self.window
         self.canvas.draw_idle()
 
     # -- interaction -------------------------------------------------------------------
@@ -367,17 +423,25 @@ class SnapMapDialog(tk.Toplevel):
             fh.write(snapmap.to_csv_grid(self.cube, self._image()))
         self.app.status.config(text=f"Saved {os.path.basename(path)}")
 
+    def _csv_smooth_suffix(self):
+        """Appended to a CSV column header so a smoothed export never looks
+        like raw data."""
+        method = self.smooth_method.get()
+        return f", {method}" if method != "None" else ""
+
     def _save_spectra(self):
         path = self._ask(".csv", "CSV")
         if not path:
             return
         whole, roi = self._mean_spectra()
+        suffix = self._csv_smooth_suffix()
         with open(path, "w", encoding="utf-8", newline="") as fh:
             w = csv.writer(fh)
             head = [f"{self.region.energy_label} ({self.region.energy_units})",
-                    "Whole map (counts per pixel)"]
+                    f"Whole map (counts per pixel{suffix})"]
             if roi:
-                head.append(f"Area, {int(self.mask.sum())} px (counts per pixel)")
+                head.append(
+                    f"Area, {int(self.mask.sum())} px (counts per pixel{suffix})")
             w.writerow(head)
             for i, e in enumerate(self.cube.energy):
                 w.writerow([f"{e:.4f}", f"{whole[i]:.6g}"]
