@@ -1182,6 +1182,7 @@ class Workspace:
                 "through the rest.")
         ttk.Label(self.footer, text="Traces").pack(side="left")
         self.traces_var = tk.StringVar(value=cfg.get("traces_per_panel", "All"))
+        self._traces_last = self.traces_var.get()
         tbx = ttk.Combobox(self.footer, textvariable=self.traces_var, width=5,
                            values=self.TRACE_CHOICES)
         tbx.pack(side="left", padx=(6, 14))
@@ -1307,6 +1308,22 @@ class Workspace:
                                before=self.canvas.get_tk_widget())
         else:
             self.panel_sb.pack_forget()
+
+    def _set_trace_bar(self, on):
+        """Show or hide the trace slider without repacking ``self.footer``
+        (see ``_set_scrollbar``) — unmapping the Traces combobox's own parent
+        mid-render is what was silently swallowing a click on its drop-down
+        list."""
+        if on == self._trace_bar_on:
+            return
+        self._trace_bar_on = on
+        if not on:
+            self._stop_play()
+        if on:
+            self.trace_bar.pack(side="bottom", fill="x", padx=10,
+                                before=self.footer)
+        else:
+            self.trace_bar.pack_forget()
 
     def _make_toolbar(self):
         """(Re)create the matplotlib navigation toolbar under the plot,
@@ -2400,6 +2417,10 @@ class Workspace:
     def _on_traces_changed(self):
         if self._traces_limit() is None:
             self.traces_var.set("All")
+        val = self.traces_var.get()
+        if val == self._traces_last:
+            return
+        self._traces_last = val
         self._schedule_render()
 
     def _schedule_render(self, reset_page=False):
@@ -2526,11 +2547,7 @@ class Workspace:
             a = self.trace_start + 1
             self.trace_lbl.config(
                 text=f"Traces {a}–{min(a + limit - 1, longest)} of {longest}")
-        if on != self._trace_bar_on:
-            self._trace_bar_on = on
-            if not on:
-                self._stop_play()
-            self._layout_bottom()
+        self._set_trace_bar(on)
 
     def _capture_zoom(self):
         """Each visible panel's x/y limits, keyed by its group key, alongside
