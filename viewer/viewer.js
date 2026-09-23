@@ -315,6 +315,24 @@
     out.sort(function (a, b) { return a.key - b.key || a.i - b.i; });
     return out;
   };
+  /* other candidate lines near `be` besides the primary match `exclude`
+     (its label): mirrors xpslines.nearby_lines exactly. Up to `maxExtra`
+     other photoelectron lines (nearest first) when `secondary` is set, and
+     every Auger line in the window when `auger` is set. */
+  V.nearbyLines = function (be, win, el, hv, exclude, secondary, auger, maxExtra) {
+    maxExtra = maxExtra === undefined ? 2 : maxExtra;
+    var extraSecondary = [], extraAuger = [];
+    V.candidates(be, win, el, hv).forEach(function (c) {
+      if (c.label === exclude) return;
+      var isAuger = c.line[2] === null || c.line[2] === undefined;
+      if (isAuger) {
+        if (auger) extraAuger.push({ be: c.be, label: c.label, tier: 'auger' });
+      } else if (secondary) {
+        extraSecondary.push({ be: c.be, label: c.label, tier: 'secondary' });
+      }
+    });
+    return extraSecondary.slice(0, maxExtra).concat(extraAuger);
+  };
 
   /* ------------------------------------------------------------ ZIP download */
   /* a small store-only ZIP writer (no compression, UTF-8 names), so the page can hand
@@ -694,7 +712,8 @@
             fit: { components: true, envelope: true, background: true, residual: false, hidden: {} },
             q: { include: {}, transmission: false, level: {} },
             d: { sample: null, mode: 'element', axis: null, last: null },
-            ident: { on: false, win: 2, auto: false, clicked: null, extra: {} },
+            ident: { on: false, win: 2, auto: false, secondary: false, auger: false,
+                    clicked: null, extra: {} },
             M: { id: null, data: null, energy: null, total: null, win: null, mask: null, count: 0,
                  scale: 'Viridis', bg: false, overlay: false, alpha: 0.65, loading: false, drag: null } };
   var $ = function (id) { return document.getElementById(id); };
@@ -732,7 +751,7 @@
     var cs = G.getComputedStyle(document.documentElement);
     var g = function (n) { return cs.getPropertyValue(n).trim(); };
     return { bg: g('--plot-bg'), fg: g('--plot-fg'), muted: g('--plot-muted'), grid: g('--plot-grid'),
-             accent: g('--accent') };
+             accent: g('--accent'), auger: cycle()[1] };
   }
   function cycle() { return S.data.palette[isDark() ? 'dark' : 'light']; }
 
@@ -958,6 +977,7 @@
     });
     $('fitbar').hidden = !anyFit;
     $('autoField').hidden = !specs.some(function (s) { return (s.reg.auto || []).length > 0; });
+    $('nearbyField').hidden = !specs.some(function (s) { return (s.reg.markers || []).length > 0; });
     $('notes').textContent = notes.join('; ');
     refreshSwatches();
     var cols = colours(), cmap = traceColourMap();
@@ -1263,12 +1283,14 @@
     }).filter(function (m) { return m.v !== null && m.v >= lo && m.v <= hi; })
       .sort(function (a, b) { return (b.mine - a.mine) || (a.auto - b.auto); }).forEach(function (m) {
       var x = X(m.v);
-      ctx.strokeStyle = C.muted; ctx.globalAlpha = m.auto ? 0.6 : 1; ctx.setLineDash([2, 3]); ctx.beginPath();
+      var colour = m.tier === 'secondary' ? C.accent : m.tier === 'auger' ? C.auger
+        : (m.mine ? C.accent : C.muted);
+      ctx.strokeStyle = colour; ctx.globalAlpha = m.auto ? 0.6 : 1; ctx.setLineDash([2, 3]); ctx.beginPath();
       ctx.moveTo(x, lay.t); ctx.lineTo(x, by); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
       if (drawnLabels.some(function (o) { return Math.abs(o - x) < 11; })) return;
       drawnLabels.push(x);
       ctx.save(); ctx.translate(x, lay.t + 4); ctx.rotate(-Math.PI / 2);
-      ctx.fillStyle = m.mine ? C.accent : C.muted; ctx.font = font(10); ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = colour; ctx.font = font(10); ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
       ctx.fillText(m.label, 0, 0); ctx.restore();
     });
 
@@ -1336,17 +1358,29 @@
      the same label at (almost) the same energy on several spectra is drawn once */
   function panelMarks(g) {
     var out = [], seen = {};
+    var mark = function (be, label, kin, hv, auto, mine, tier) {
+      var k = label + '|' + Math.round(be * 2) + '|' + (kin ? 'k' : 'b');
+      if (seen[k]) return;
+      seen[k] = true;
+      out.push({ be: be, label: label, kin: !!kin, hv: hv, auto: auto, mine: mine, tier: tier || null });
+    };
     g.items.forEach(function (s) {
       var lists = [[s.reg.markers || [], false, false], [S.ident.auto ? (s.reg.auto || []) : [], true, false],
                    [S.ident.extra[s.id] || [], false, true]];
       lists.forEach(function (l) {
-        l[0].forEach(function (m) {
-          var k = m.label + '|' + Math.round(m.be * 2) + '|' + (m.kin ? 'k' : 'b');
-          if (seen[k]) return;
-          seen[k] = true;
-          out.push({ be: m.be, label: m.label, kin: !!m.kin, hv: s.reg.hv, auto: l[1], mine: l[2] });
-        });
+        l[0].forEach(function (m) { mark(m.be, m.label, m.kin, s.reg.hv, l[1], l[2]); });
       });
+      /* other candidate lines near each of this spectrum's own committed
+         markers, when the Secondary/Auger toggles ask for them */
+      if (S.ident.secondary || S.ident.auger) {
+        (s.reg.markers || []).forEach(function (m) {
+          if (m.kin) return;
+          V.nearbyLines(m.be, S.ident.win, S.data.elements, s.reg.hv, m.label,
+                        S.ident.secondary, S.ident.auger, 2).forEach(function (x) {
+            mark(x.be, x.label, false, s.reg.hv, false, false, x.tier);
+          });
+        });
+      }
     });
     return out;
   }
@@ -2361,6 +2395,8 @@
       renderIdBox();
     });
     $('autolabel').addEventListener('change', function (e) { S.ident.auto = e.target.checked; requestRender(); });
+    $('nearbySecondary').addEventListener('change', function (e) { S.ident.secondary = e.target.checked; requestRender(); });
+    $('nearbyAuger').addEventListener('change', function (e) { S.ident.auger = e.target.checked; requestRender(); });
     V.FIT_LAYERS.forEach(function (k) {
       $('fit-' + k).addEventListener('change', function (e) { S.fit[k] = e.target.checked; requestRender(); });
     });

@@ -57,6 +57,10 @@
           <button type="button" id="csv" title="Download the ticked spectra as CSV">Download CSV</button>
           <button type="button" id="identify" aria-pressed="false" title="Click a peak on a plot to see which element lines lie near it">Identify peaks</button>
           <label class="field" id="autoField" hidden title="Automatic labels from approximate line positions: check them before relying on them"><input type="checkbox" id="autolabel"> Label survey peaks</label>
+          <span id="nearbyField" hidden>
+            <label class="field" title="Another candidate photoelectron line near an identified peak (up to 2, nearest first), in a different colour, to help confirm speciation"><input type="checkbox" id="nearbySecondary"> Secondary</label>
+            <label class="field" title="A candidate Auger line near an identified peak, in a different colour"><input type="checkbox" id="nearbyAuger"> Auger</label>
+          </span>
         </div>
         <div class="idbox" id="idbox" hidden></div>
         <div class="controls levelbar" id="levelbar" hidden>

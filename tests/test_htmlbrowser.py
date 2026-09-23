@@ -715,7 +715,20 @@ class TestJavaScript(unittest.TestCase):
             cases.append({"be": be, "win": win, "hv": hv,
                           "labels": [xpslines.label_of(e) for _d, e in got],
                           "deltas": [d for d, _e in got]})
-        return {"table": table, "cases": cases}
+        nearby = []
+        for be, win, hv, exclude, secondary, auger in (
+                (15.6, 2.0, 1486.6, "Hf 4f7/2", True, False),
+                (15.6, 2.0, 1486.6, "Hf 4f7/2", False, True),
+                (15.6, 2.0, 1486.6, "Hf 4f7/2", True, True)):
+            got = xpslines.nearby_lines(be, win, lines, hv, exclude,
+                                        secondary, auger)
+            nearby.append({"be": be, "win": win, "hv": hv,
+                           "exclude": exclude, "secondary": secondary,
+                           "auger": auger,
+                           "labels": [g[1] for g in got],
+                           "tiers": [g[2] for g in got],
+                           "candidate_be": [g[0] for g in got]})
+        return {"table": table, "cases": cases, "nearby": nearby}
 
     def fit_fixture(self, tmp):
         """A fitted spectrum: the payload, the app's own CSV of it (which
