@@ -13,7 +13,9 @@ VIEWS = ("Stack", "Waterfall 3D", "Heatmap", "Fit")
 SERIES = ("Waterfall 3D", "Heatmap")           # read in z order
 NORMS = ("None", "Max = 1", "Area = 1", "At cursor")
 FIT_LAYERS = ("components", "envelope", "background")
-KEYS = ("view", "norm", "offset", "z_axis", "reverse", "fit_show")
+IDENT_LAYERS = ("secondary", "auger")
+KEYS = ("view", "norm", "offset", "z_axis", "reverse", "fit_show",
+        "ident_show")
 OFFSET_RANGE = (0.0, 3.0)
 
 
@@ -44,6 +46,11 @@ def sanitise(d):
         fs = {k: fs[k] for k in FIT_LAYERS if isinstance(fs.get(k), bool)}
         if fs:
             out["fit_show"] = fs
+    ids = d.get("ident_show")
+    if isinstance(ids, dict):
+        ids = {k: ids[k] for k in IDENT_LAYERS if isinstance(ids.get(k), bool)}
+        if ids:
+            out["ident_show"] = ids
     return out
 
 
@@ -64,21 +71,24 @@ def resolve(defaults, override=None):
     """The full look of a panel: the page default with the override on top."""
     look = dict(defaults)
     look["fit_show"] = dict(defaults.get("fit_show") or {})
+    look["ident_show"] = dict(defaults.get("ident_show") or {})
     ov = sanitise(override)
     fs = ov.pop("fit_show", {})
+    ids = ov.pop("ident_show", {})
     look.update(ov)
     look["fit_show"].update(fs)
+    look["ident_show"].update(ids)
     return look
 
 
 def with_value(views, label, key, value):
     """A copy of ``views`` with one key of one panel's override set. For
-    ``fit_show`` pass ``(layer, bool)`` as the value."""
+    ``fit_show``/``ident_show`` pass ``(layer, bool)`` as the value."""
     out = {k: dict(v) for k, v in views.items()}
     cur = out.setdefault(label, {})
-    if key == "fit_show":
+    if key in ("fit_show", "ident_show"):
         layer, on = value
-        cur["fit_show"] = {**cur.get("fit_show", {}), layer: bool(on)}
+        cur[key] = {**cur.get(key, {}), layer: bool(on)}
     else:
         cur[key] = value
     cleaned = sanitise_all(out)
@@ -122,4 +132,7 @@ def describe(override, defaults=None):
         on = [k for k in FIT_LAYERS if look.get("fit_show", {}).get(k, True)]
         if len(on) < len(FIT_LAYERS):
             parts.append("showing " + (", ".join(on) if on else "no layers"))
+    ident_on = [k for k in IDENT_LAYERS if look.get("ident_show", {}).get(k)]
+    if ident_on:
+        parts.append("nearby lines: " + ", ".join(ident_on))
     return ", ".join(parts)

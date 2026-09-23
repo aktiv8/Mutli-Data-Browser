@@ -15,7 +15,8 @@ import panelview as pv  # noqa: E402
 DEFAULTS = {"view": "Stack", "norm": "None", "offset": 0.6, "z_axis": "Auto",
             "reverse": False,
             "fit_show": {"components": True, "envelope": True,
-                         "background": True}}
+                         "background": True},
+            "ident_show": {"secondary": False, "auger": False}}
 
 
 class TestSanitise(unittest.TestCase):
@@ -35,6 +36,12 @@ class TestSanitise(unittest.TestCase):
                                       "components": "no"}})
         self.assertEqual(d, {"fit_show": {"envelope": False}})
         self.assertEqual(pv.sanitise({"fit_show": {"x": True}}), {})
+
+    def test_ident_show_keeps_only_known_bool_layers(self):
+        d = pv.sanitise({"ident_show": {"secondary": True, "x": True,
+                                        "auger": "no"}})
+        self.assertEqual(d, {"ident_show": {"secondary": True}})
+        self.assertEqual(pv.sanitise({"ident_show": {"x": True}}), {})
 
     def test_not_a_dict(self):
         self.assertEqual(pv.sanitise(None), {})
@@ -63,6 +70,12 @@ class TestResolve(unittest.TestCase):
         self.assertTrue(DEFAULTS["fit_show"]["envelope"])
         self.assertEqual(look["norm"], "None")
 
+    def test_ident_show_override_wins_and_default_untouched(self):
+        look = pv.resolve(DEFAULTS, {"ident_show": {"secondary": True}})
+        self.assertEqual(look["ident_show"],
+                         {"secondary": True, "auger": False})
+        self.assertFalse(DEFAULTS["ident_show"]["secondary"])
+
     def test_default_change_reaches_panels_without_that_key(self):
         d2 = dict(DEFAULTS, view="Heatmap")
         self.assertEqual(pv.resolve(d2, {"norm": "Max = 1"})["view"],
@@ -83,6 +96,12 @@ class TestEditing(unittest.TestCase):
         out = pv.with_value(out, "A", "fit_show", ("envelope", True))
         self.assertEqual(out["A"]["fit_show"],
                          {"components": False, "envelope": True})
+
+    def test_ident_layer(self):
+        out = pv.with_value({}, "A", "ident_show", ("secondary", True))
+        out = pv.with_value(out, "A", "ident_show", ("auger", True))
+        self.assertEqual(out["A"]["ident_show"],
+                         {"secondary": True, "auger": True})
 
     def test_invalid_value_leaves_no_entry(self):
         self.assertEqual(pv.with_value({}, "A", "view", "nope"), {})
@@ -138,6 +157,11 @@ class TestDescribe(unittest.TestCase):
     def test_stack_offset_and_norm(self):
         s = pv.describe({"offset": 1.0, "norm": "Max = 1"}, DEFAULTS)
         self.assertEqual(s, "Stack, normalised Max = 1, offset 1×")
+
+    def test_nearby_lines_shown(self):
+        s = pv.describe({"ident_show": {"secondary": True, "auger": True}},
+                        DEFAULTS)
+        self.assertEqual(s, "Stack, nearby lines: secondary, auger")
 
 
 if __name__ == "__main__":

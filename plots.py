@@ -114,7 +114,7 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
                first_col=True, bottom_row=True, accent="#0F6B8C",
                muted="#56636E", scale="Binding", ke_top=False,
                top_row=False, markers=(), style=None, fit=None,
-               reels=None):
+               reels=None, auger_colour=None):
     """Draw one panel: a single spectrum plain, several stacked by y offset.
 
     Stacked panels drop the (meaningless) y ticks for a scale bar and label
@@ -203,24 +203,27 @@ def draw_stack(ax, regs, offset=0.6, norm="None", cursor=None, colours=None,
         draw_reels(ax, a0, r0.photon_energy, reels,
                    1.0 / norm_factor(r0, norm, cursor), muted, accent,
                    note_size=small)
-    if markers:      # peak labels: (energy, text[, True if a kinetic energy])
+    if markers:      # peak labels: (energy, text[, kinetic?[, tier]])
         lo, hi = ax.get_xlim()
         xtf = ax.get_xaxis_transform()       # x in data, y as axes fraction
         hv = r0.photon_energy
+        tier_colour = {"secondary": accent, "auger": auger_colour or muted}
         for mk in markers:
             be, text = mk[0], mk[1]
             kin = len(mk) > 2 and mk[2]
+            tier = mk[3] if len(mk) > 3 else None
+            colour = tier_colour.get(tier, muted)
             if kin:                          # ISS peaks: a kinetic energy
                 x = (hv - be if hv else None) if binding else be
             else:
                 x = be if binding else (hv - be if hv else None)
             if x is None or not lo <= x <= hi:
                 continue
-            ax.plot([x, x], [0, 1], transform=xtf, color=muted, lw=0.7,
+            ax.plot([x, x], [0, 1], transform=xtf, color=colour, lw=0.7,
                     ls=":", zorder=1, scalex=False, scaley=False)
             ax.text(x, 0.99, text, transform=xtf, rotation=90, va="top",
                     ha="center", fontsize=plotstyle.note_size(st, -1),
-                    color=muted,
+                    color=colour,
                     bbox=dict(fc=ax.get_facecolor(), ec="none", pad=0.6,
                               alpha=0.85))
     if binding:

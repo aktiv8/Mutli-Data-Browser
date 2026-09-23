@@ -112,3 +112,24 @@ def auto_label(energy, counts, lines, hv=None, window=2.0, **kw):
         if cand:
             out.append((be, label_of(cand[0][1])))
     return sorted(out)
+
+
+def nearby_lines(be, window, lines, hv=None, exclude=None, secondary=False,
+                 auger=False, max_extra=2):
+    """Other candidate lines near ``be`` besides the primary match
+    (``exclude``, its label from :func:`label_of`), for showing alongside an
+    already-identified peak: up to ``max_extra`` other photoelectron lines
+    (nearest first) when ``secondary`` is set, and every Auger line in the
+    window when ``auger`` is set. ``[(be, "El line", "secondary"|"auger")]``,
+    each tier nearest first."""
+    extra_secondary, extra_auger = [], []
+    for _d, e in candidates(be, window, lines, hv):
+        label = label_of(e)
+        if label == exclude:
+            continue
+        if "ke" in e:
+            if auger:
+                extra_auger.append((line_be(e, hv), label, "auger"))
+        elif secondary:
+            extra_secondary.append((line_be(e, hv), label, "secondary"))
+    return extra_secondary[:max_extra] + extra_auger

@@ -85,6 +85,50 @@ class TestCandidates(unittest.TestCase):
         self.assertIn("O KL1", [xl.label_of(e) for _d, e in cands])
 
 
+class TestNearbyLines(unittest.TestCase):
+    HV = 1486.6
+    TABLE = [
+        {"el": "X", "line": "1s", "be": 100.0, "rank": 1},
+        {"el": "X", "line": "2s", "be": 101.0, "rank": 2},
+        {"el": "X", "line": "3s", "be": 102.0, "rank": 3},
+        {"el": "Y", "line": "KLL", "ke": 1386.6, "rank": 3},   # be = hv-ke = 100.0
+    ]
+
+    def test_excludes_the_primary_and_returns_secondary_nearest_first(self):
+        got = xl.nearby_lines(100.0, 3.0, self.TABLE, hv=self.HV,
+                              exclude="X 1s", secondary=True)
+        self.assertEqual([g[1] for g in got], ["X 2s", "X 3s"])
+        self.assertTrue(all(g[2] == "secondary" for g in got))
+
+    def test_auger_only_when_asked(self):
+        without = xl.nearby_lines(100.0, 3.0, self.TABLE, hv=self.HV,
+                                  exclude="X 1s", secondary=True)
+        self.assertNotIn("Y KLL", [g[1] for g in without])
+        got = xl.nearby_lines(100.0, 3.0, self.TABLE, hv=self.HV,
+                              exclude="X 1s", auger=True)
+        self.assertEqual([(g[1], g[2]) for g in got], [("Y KLL", "auger")])
+
+    def test_max_extra_caps_secondary_not_auger(self):
+        got = xl.nearby_lines(100.0, 3.0, self.TABLE, hv=self.HV,
+                              exclude="X 1s", secondary=True, auger=True,
+                              max_extra=1)
+        secondary = [g for g in got if g[2] == "secondary"]
+        self.assertEqual([g[1] for g in secondary], ["X 2s"])
+        self.assertIn("Y KLL", [g[1] for g in got])
+
+    def test_neither_flag_gives_nothing(self):
+        self.assertEqual(
+            xl.nearby_lines(100.0, 3.0, self.TABLE, hv=self.HV,
+                            exclude="X 1s"), [])
+
+    def test_be_of_each_candidate(self):
+        got = xl.nearby_lines(100.0, 3.0, self.TABLE, hv=self.HV,
+                              exclude="X 1s", secondary=True, auger=True)
+        by_label = {g[1]: g[0] for g in got}
+        self.assertAlmostEqual(by_label["X 2s"], 101.0)
+        self.assertAlmostEqual(by_label["Y KLL"], 100.0)
+
+
 def survey(peaks, lo=0.0, hi=1100.0, step=0.5, width=1.2, noise=0.0):
     n = int((hi - lo) / step) + 1
     e = [hi - i * step for i in range(n)]

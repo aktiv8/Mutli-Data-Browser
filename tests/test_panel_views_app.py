@@ -240,6 +240,53 @@ class TestPanelViewsInApp(unittest.TestCase):
         self.ws.reset_panel_views()
         self.assertEqual(self.ws.panel_views, {})
 
+    def test_menu_edits_ident_show_per_panel(self):
+        depth, _bulk = self.keys
+        self.ws._set_panel_view(depth, "ident_show", ("secondary", True))
+        self.assertEqual(self.ws.panel_views,
+                         {depth: {"ident_show": {"secondary": True}}})
+        self.ws.reset_panel_views()
+        self.assertEqual(self.ws.panel_views, {})
+
+    def test_ident_show_round_trips_through_state(self):
+        self.addCleanup(self.ws.ident_vars["secondary"].set, False)
+        self.ws.ident_vars["secondary"].set(True)
+        st = self.ws.capture_state()
+        self.assertEqual(st["ident_show"],
+                         {"secondary": True, "auger": False})
+        self.ws.ident_vars["secondary"].set(False)
+        self.ws.apply_state(st, render=False)
+        self.assertTrue(self.ws.ident_vars["secondary"].get())
+
+    def test_secondary_and_auger_markers_drawn_in_a_different_colour(self):
+        # Isolate this from the real (and changeable) bundled table: a
+        # small synthetic one with a known secondary line and an Auger
+        # line landing on the same displayed BE as the primary marker.
+        depth, _bulk = self.keys
+        synthetic = [
+            {"el": "C", "line": "1s", "be": 286.0, "rank": 1},
+            {"el": "C", "line": "2s", "be": 287.0, "rank": 2},
+            {"el": "Z", "line": "KLL", "ke": 1200.6, "rank": 3},
+        ]
+        orig_lines = self.ws._xps_lines
+        self.ws._xps_lines = synthetic
+        self.addCleanup(setattr, self.ws, "_xps_lines", orig_lines)
+        self.addCleanup(self.ws.ann.markers.clear)
+        self.addCleanup(self.ws.ident_vars["secondary"].set, False)
+        self.addCleanup(self.ws.ident_vars["auger"].set, False)
+
+        r = dict(self.ws._groups())[depth][0]
+        self.ws.identify_add(r, 286.0, "C 1s")
+        self.ws.ident_vars["secondary"].set(True)
+        self.ws.ident_vars["auger"].set(True)
+        self.ws._render()
+        ax = next(a for a, k in self.ws._axmap.items() if k == depth)
+        colours = {t.get_text(): t.get_color() for t in ax.texts}
+        pal = self.ws.palette
+        self.assertEqual(colours.get("C 1s"), pal["muted"])
+        self.assertEqual(colours.get("C 2s"), pal["accent"])
+        self.assertEqual(colours.get("Z KLL"), pal["cycle"][1])
+
 
 if __name__ == "__main__":
     unittest.main()

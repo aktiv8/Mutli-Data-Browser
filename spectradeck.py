@@ -475,6 +475,7 @@ class Workspace:
 
     PANEL_CHOICES = ["Auto", "1", "2", "4", "6", "9", "12", "16"]
     TRACE_CHOICES = ["All", "1", "3", "5", "10", "20", "50", "100"]
+    IDENT_NEARBY_WINDOW = 2.0        # eV, matches xpslines.candidates' default
     NORM_MODES = list(panelview.NORMS)
     GROUP_MODES = {"Element name": "name", "Energy range": "range",
                    "Element, per sample": "sample",
@@ -957,6 +958,8 @@ class Workspace:
         cfg["colour_reverse"] = bool(self.colrev_var.get())
         for k, v in self.fit_vars.items():
             cfg["fit_" + k] = bool(v.get())
+        for k, v in self.ident_vars.items():
+            cfg["ident_" + k] = bool(v.get())
         cfg["axis_colour"] = self.axis_choice
         cfg["axis_colour_custom"] = self.axis_custom
         cfg["view_mode"] = self.view_var.get()
@@ -1158,6 +1161,25 @@ class Workspace:
             cb.pack(side="left", padx=(0, 6))
             tip(cb, tipt + " Shown on a panel with one spectrum that has a "
                            "fit; LA and LF shapes are reconstructions.")
+        self.ident_frame = ttk.Frame(ctl3)
+        self.ident_frame.pack(side="left", padx=(14, 0))
+        ttk.Label(self.ident_frame, text="Nearby lines").pack(
+            side="left", padx=(0, 4))
+        self.ident_vars = {}
+        for key, text, tipt in (
+                ("secondary", "Secondary",
+                 "Other candidate photoelectron lines near an identified "
+                 "peak (up to 2, nearest first)."),
+                ("auger", "Auger",
+                 "Candidate Auger lines near an identified peak.")):
+            v = tk.BooleanVar(value=bool(cfg.get("ident_" + key, False)))
+            self.ident_vars[key] = v
+            cb = ttk.Checkbutton(self.ident_frame, text=text, variable=v,
+                                 command=self._schedule_render)
+            cb.pack(side="left", padx=(0, 6))
+            tip(cb, tipt + " Shown in a different colour beside each peak "
+                           "already labelled with Identify peaks, to help "
+                           "confirm speciation.")
         sty = ttk.Button(ctl3, text="Style…", style="Tool.TButton",
                          command=self.edit_plot_style)
         sty.pack(side="left", padx=(12, 0))
@@ -2379,7 +2401,9 @@ class Workspace:
                 "z_axis": self.z_var.get(),
                 "reverse": bool(self.reverse.get()),
                 "fit_show": {k: bool(v.get())
-                             for k, v in self.fit_vars.items()}}
+                             for k, v in self.fit_vars.items()},
+                "ident_show": {k: bool(v.get())
+                              for k, v in self.ident_vars.items()}}
 
     def _look_for(self, key, defaults=None):
         """The full look of the panel with this group label."""
@@ -2733,9 +2757,24 @@ class Workspace:
             marks = []
             if vis:
                 shift0 = self._marker_shift(vis[0])
+                prim = self.identify_markers(vis[0])
                 marks = [(m["be"] + (0.0 if m.get("kin") else shift0),
                           m["label"], bool(m.get("kin")))
-                         for m in self.identify_markers(vis[0])]
+                         for m in prim]
+                ident_show = look.get("ident_show", {})
+                if prim and (ident_show.get("secondary")
+                             or ident_show.get("auger")):
+                    hv = vis[0].photon_energy
+                    lines = self.element_lines()
+                    for m in prim:
+                        if m.get("kin"):
+                            continue
+                        for be, lbl, tier in xpslines.nearby_lines(
+                                m["be"], self.IDENT_NEARBY_WINDOW, lines,
+                                hv=hv, exclude=m["label"],
+                                secondary=bool(ident_show.get("secondary")),
+                                auger=bool(ident_show.get("auger"))):
+                            marks.append((be + shift0, lbl, False, tier))
             reels_arg = (self.ann.reels_for(*self._marker_key(vis[0]))
                          if len(vis) == 1 else None)
             fit_arg = self._fit_overlay(vis, disp, base, notes,
@@ -2749,7 +2788,7 @@ class Workspace:
                        accent=pal["accent"], muted=pal["muted"],
                        scale=scale, ke_top=ke_top, top_row=top_row,
                        markers=marks, style=style, fit=fit_arg,
-                       reels=reels_arg)
+                       reels=reels_arg, auger_colour=pal["cycle"][1])
             axmap[ax] = key
             axhv[ax] = viewdata.photon_energy(disp)
             axinfo[ax] = (axhv[ax], "fit" if view == "Fit" else "stack",
@@ -2875,7 +2914,8 @@ class Workspace:
         series = panelview.is_series(look["view"])
         if getattr(self, "_pmenu", None) is None:
             self._pmenu = {n: self._menu(self.root) for n in
-                           ("root", "view", "norm", "offset", "z", "fit")}
+                           ("root", "view", "norm", "offset", "z", "fit",
+                            "ident")}
         pm = self._pmenu
         for m in pm.values():
             m.delete(0, "end")
@@ -2900,6 +2940,12 @@ class Workspace:
                 label=mark(on, layer.capitalize()),
                 command=lambda layer=layer, on=on: self._set_panel_view(
                     key, "fit_show", (layer, not on)))
+        for layer in panelview.IDENT_LAYERS:
+            on = look["ident_show"].get(layer, False)
+            pm["ident"].add_command(
+                label=mark(on, layer.capitalize()),
+                command=lambda layer=layer, on=on: self._set_panel_view(
+                    key, "ident_show", (layer, not on)))
         root = pm["root"]
         root.add_command(label=f"Panel: {key}", state="disabled")
         root.add_separator()
@@ -2915,6 +2961,8 @@ class Workspace:
             command=lambda: self._set_panel_view(key, "reverse",
                                                  not look["reverse"]))
         root.add_cascade(label="Fit layers", menu=pm["fit"],
+                         state="disabled" if series else "normal")
+        root.add_cascade(label="Nearby lines", menu=pm["ident"],
                          state="disabled" if series else "normal")
         root.add_separator()
         root.add_command(label="Use the page's view",
@@ -3031,6 +3079,8 @@ class Workspace:
             "colour_scale": self.colscale_var.get(),
             "colour_reverse": bool(self.colrev_var.get()),
             "fit_show": {k: bool(v.get()) for k, v in self.fit_vars.items()},
+            "ident_show": {k: bool(v.get())
+                          for k, v in self.ident_vars.items()},
             "axis_colour": self.axis_choice,
             "axis_colour_custom": self.axis_custom,
             "panels_per_page": self.panels_var.get(),
@@ -3074,6 +3124,11 @@ class Workspace:
             for k, v in self.fit_vars.items():
                 if isinstance(fs.get(k), bool):
                     v.set(fs[k])
+        ids = st.get("ident_show")
+        if isinstance(ids, dict):
+            for k, v in self.ident_vars.items():
+                if isinstance(ids.get(k), bool):
+                    v.set(ids[k])
         tr = str(st.get("traces_per_panel", "")).strip()
         if tr == "All" or (tr.isdigit() and int(tr) > 0):
             self.traces_var.set(tr)
