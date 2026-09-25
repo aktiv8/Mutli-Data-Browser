@@ -305,7 +305,8 @@ def fit_notes(rows):
     """The caveats of a fit, as the app's plots state them."""
     out = []
     if any(r["approximate"] for r in rows):
-        out.append("LA / LF line shapes are reconstructed")
+        out.append("LA / LF (or a tail-modified GL / SGL) line shapes are "
+                   "reconstructed")
     unknown = sorted({r["background"] for r in rows
                       if not r["background_known"]})
     if unknown:

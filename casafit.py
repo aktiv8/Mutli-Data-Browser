@@ -279,7 +279,8 @@ class Curves:
     background: list | None
     components: list                # [(FitComponent, values)]
     envelope: list | None           # None when the background is not known
-    approximate: bool               # LA / LF shapes are reconstructions
+    approximate: bool               # LA / LF, or a tail-modified GL / SGL,
+                                    # are reconstructions
     scale_known: bool               # False: dwell / scans unknown (CPS shown)
     residual_rms: float | None = None   # rms(data - envelope) / data range
     background_known: bool = True   # False: this background type is not

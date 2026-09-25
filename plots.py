@@ -432,16 +432,27 @@ def draw_fit(ax, x, fit, scale, muted, accent):
     """Overlay a reconstructed CasaXPS fit on a single-spectrum panel.
 
     ``fit`` is ``{"curves": [casafit.Curves], "show": {"envelope", "components",
-    "background"}, "colours": [...]}``; ``x`` are the panel's x values (one
-    per data point) and ``scale`` multiplies every curve (normalisation).
-    Components sharing an INDEX are one chemical state and one colour; a
-    legend names them. The residual RMS of each curve with one to show (see
+    "background"}, "colours": [...], "state_colour": {name: colour}}``; ``x``
+    are the panel's x values (one per data point) and ``scale`` multiplies
+    every curve (normalisation).
+
+    Components are named the same way CasaXPS shows them (a group's own tag,
+    unless that is just the region's label, in which case the first
+    component names it); two components with the same name -- whether
+    they share an INDEX, come from different regions on this panel, or
+    (via ``state_colour``, a dict the caller keeps across panels) appear on
+    another panel of the same page or report -- get one legend entry and one
+    colour. Without ``state_colour`` the mapping is local to this call only.
+    The residual RMS of each curve with one to show (see
     ``casafit.Curves.residual_rms``) is noted in the top-right corner, since a
     number for how well the fit reproduces the data is otherwise only in the
     report's quantification table, not visible while looking at the plot."""
     import math
     show = fit.get("show", {})
     cols = fit.get("colours") or ["#888888"]
+    state_colour = fit.get("state_colour")
+    if state_colour is None:
+        state_colour = {}
     names = {}
     for cv in fit["curves"]:
         base = ([(b * scale) if b == b else b for b in cv.background]
@@ -450,17 +461,18 @@ def draw_fit(ax, x, fit, scale, muted, accent):
             ax.plot(x, base, color=muted, lw=1.0, ls="--", zorder=2.2)
         if show.get("components"):
             for comp, vals in cv.components:
-                key = (f"i{comp.index}" if comp.index >= 0
-                       else f"n{comp.name}")
-                if key not in names:
-                    # a group's own name, unless CasaXPS just tagged it with
-                    # the region's label: then the first component names it
-                    grp = comp.group.strip()
-                    named = (comp.index >= 0 and grp and grp.lower()
-                             != (cv.region or "").strip().lower())
-                    names[key] = (cols[len(names) % len(cols)],
-                                  grp if named else comp.name)
-                col = names[key][0]
+                # a group's own name, unless CasaXPS just tagged it with
+                # the region's label: then the first component names it
+                grp = comp.group.strip()
+                named = (comp.index >= 0 and grp and grp.lower()
+                         != (cv.region or "").strip().lower())
+                name = (grp if named else comp.name).strip()
+                if name not in state_colour:
+                    n = len(state_colour)
+                    state_colour[name] = cols[n % len(cols)]
+                if name not in names:
+                    names[name] = (state_colour[name], name)
+                col = names[name][0]
                 y = [v * scale for v in vals]
                 lo = base if base is not None else [0.0] * len(y)
                 top = [(b + v) if (v == v and b == b) else float("nan")

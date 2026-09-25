@@ -493,9 +493,22 @@ state and one colour.
   envelope and the status bar says so. CasaXPS does not publish its `LA` and `LF`
   kernels, so those are **reconstructions** from the stored parameters (the
   status bar says so): checked against real CasaXPS fits (titanium, copper,
-  vanadium, a titanium depth profile) they reproduce the data to 3–7 % rms of
-  the peak height (the fit's own scatter included). The areas, positions and
-  widths shown are CasaXPS's own numbers.
+  vanadium, a titanium depth profile, MXene) they reproduce the data to
+  3–7 % rms of the peak height (the fit's own scatter included). A strongly
+  asymmetric `LA`/`LF` component (one exponent several times the other, as
+  CasaXPS uses for a sharp metallic-tail cutoff) reconstructs with the wrong
+  peak *height* if each side of the Lorentzian is given the file's stated
+  FWHM directly — raising a Lorentzian to a power narrows its own half-max
+  width, so the two sides are made to share one Lorentzian width instead,
+  chosen so their own half-max distances add up to the stated FWHM
+  (`lineshapes.py`'s `_shared_width`, the same approach as the open-source
+  KherveFitting fitting tool). This took the worst *local* deviation seen
+  (not just the whole-curve rms) from ~18 % of the peak height above the raw
+  data on the real titanium example down to ~9 %, and similarly on the real
+  vanadium example; a remaining, smaller gap on the most extreme exponents is
+  a still-open limitation of the calibrated Gaussian-broadening scale
+  (`GAUSS_K`), tracked by `TestLAAsymmetryAccuracy` in `tests/test_casafit.py`.
+  The areas, positions and widths shown are CasaXPS's own numbers.
 * **Export.** VAMAS export writes the fit back unchanged (CasaXPS reopens its
   own fit); CSV export adds the background, each component and the envelope as
   columns. The metadata lists the number of components and the calibration.

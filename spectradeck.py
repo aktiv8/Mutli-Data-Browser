@@ -546,6 +546,9 @@ class Workspace:
         self.blank_img = self.swatches.blank
         self.trace_color = {}       # id(region) -> colour used on the plot
         self.color_slot = {}        # id(region) -> stable palette slot
+        self.fit_state_colour = {}  # CasaXPS fit state name -> colour, kept
+                                    # across panels/pages so the same state
+                                    # is always the same colour (plots.draw_fit)
         self.leaf_region = {}       # tree iid -> its Region (leaf rows)
         # experiment workbook (.xpscontainer) session
         self.details = {k: "" for k in wbk.DETAIL_FIELDS}
@@ -1747,6 +1750,7 @@ class Workspace:
 
     def _recompute_colours(self):
         self.color_slot = colour_slots(self.docs)
+        self.fit_state_colour = {}
 
     # -- annotations: what the user changed, applied on the way out -------------
     def _display(self, r):
@@ -2815,7 +2819,9 @@ class Workspace:
         """The CasaXPS fit to draw under a panel that shows one spectrum (or
         None): reconstructed on that spectrum's own points, with the panel's
         three toggles (``show``) applied. ``notes`` gets a line about
-        approximated shapes."""
+        approximated shapes. ``self.fit_state_colour`` is passed through so a
+        chemical state gets the same colour on every panel/page it appears
+        on (``plots.draw_fit``)."""
         if len(disp) != 1 or getattr(disp[0], "fit", None) is None:
             return None
         show = {k: bool(show.get(k, True)) for k in panelview.FIT_LAYERS}
@@ -2830,7 +2836,8 @@ class Workspace:
         if not cvs:
             return None
         if any(c.approximate for c in cvs):
-            notes.append("fit: LA / LF shapes are reconstructed")
+            notes.append("fit: LA / LF (or a tail-modified GL / SGL) "
+                        "shapes are reconstructed")
         unknown = sorted({c.background_type for c in cvs
                           if not c.background_known})
         if unknown:
@@ -2839,7 +2846,8 @@ class Workspace:
         if not all(c.scale_known for c in cvs):
             notes.append("fit: dwell time unknown, curves in counts/s")
         return {"curves": cvs, "show": show,
-                "colours": list(base["cycle"])[1:] or list(base["cycle"])}
+                "colours": list(base["cycle"])[1:] or list(base["cycle"]),
+                "state_colour": self.fit_state_colour}
 
     def _binding_at(self, event):
         """Binding energy (as measured, before any shift) under the pointer,

@@ -70,10 +70,30 @@ class TestShapes(unittest.TestCase):
         return float(self.ke[idx[-1]] - self.ke[idx[0]])
 
     def test_area_is_the_stored_area(self):
+        # a window wide enough to hold the full extent of every shape here,
+        # including GL(100)'s slow Lorentzian tail: a component is
+        # normalised against its own extent, not the window it happens to
+        # be drawn on, so a narrower window is allowed to show less than
+        # the stored area (see test_a_narrow_window_does_not_inflate_the_peak).
+        wide = np.linspace(1005.0 - 200 * 1.3, 1005.0 + 200 * 1.3, 8001)
         for shape in ("GL(0)", "GL(30)", "GL(100)", "SGL(30)",
                       "LA(1.1,1.9,7)", "LA(50)", "LF(1.1,1.2,75,200)"):
-            y = ls.component_curve(self.ke, shape, 1005.0, 1.3, 1234.5)
-            self.assertAlmostEqual(self.area(y) / 1234.5, 1.0, 2, shape)
+            y = ls.component_curve(wide, shape, 1005.0, 1.3, 1234.5)
+            area = float(np.trapezoid(y, wide) if hasattr(np, "trapezoid")
+                         else np.trapz(y, wide))
+            self.assertAlmostEqual(area / 1234.5, 1.0, 2, shape)
+
+    def test_a_narrow_window_does_not_inflate_the_peak(self):
+        # GL(100) is a pure Lorentzian: its tail reaches well past a tight
+        # window. The regression this guards: component_curve used to
+        # normalise over whatever grid it was given, so a window narrower
+        # than the tail inflated the visible peak to make up the missing
+        # area -- exactly the bug that let a reconstructed fit envelope
+        # rise above the raw data it was fitted to.
+        full = ls.component_curve(self.ke, "GL(100)", 1005.0, 1.3, 1234.5)
+        narrow_x = np.linspace(1003.0, 1007.0, 1601)      # +-1.54 FWHM only
+        narrow = ls.component_curve(narrow_x, "GL(100)", 1005.0, 1.3, 1234.5)
+        self.assertAlmostEqual(float(narrow.max()), float(full.max()), 6)
 
     def test_gl_and_sgl_have_the_stated_fwhm_and_position(self):
         for shape in ("GL(0)", "GL(30)", "GL(100)", "SGL(30)"):
@@ -94,16 +114,18 @@ class TestShapes(unittest.TestCase):
         self.assertLess(float(np.abs(lor - want).max()) / lor.max(), 1e-9)
 
     def test_sgl_is_the_sum_and_gl_the_product(self):
+        # compares shapes (each normalised to its own peak), not the area
+        # scale -- that is test_area_is_the_stored_area's job, and is no
+        # longer just "integral over this window" (see component_curve).
         t = (self.ke - 1005.0) / 1.3
         lor = 1 / (1 + 4 * t * t)
         gau = np.exp(-4 * np.log(2) * t * t)
         sgl = ls.component_curve(self.ke, "SGL(30)", 1005.0, 1.3, 1.0)
-        step = self.ke[1] - self.ke[0]
-        s = (0.3 * lor + 0.7 * gau).sum() * step
-        np.testing.assert_allclose(sgl, (0.3 * lor + 0.7 * gau) / s, rtol=1e-9)
+        want = 0.3 * lor + 0.7 * gau
+        np.testing.assert_allclose(sgl / sgl.max(), want / want.max(), rtol=1e-9)
         gl = ls.component_curve(self.ke, "GL(30)", 1005.0, 1.3, 1.0)
-        s = (lor ** 0.3 * gau ** 0.7).sum() * step
-        np.testing.assert_allclose(gl, lor ** 0.3 * gau ** 0.7 / s, rtol=1e-9)
+        want = lor ** 0.3 * gau ** 0.7
+        np.testing.assert_allclose(gl / gl.max(), want / want.max(), rtol=1e-9)
 
     def test_la_asymmetry_puts_the_tail_on_the_high_ke_side(self):
         y = ls.component_curve(self.ke, "LA(1.0,3.0,0)", 1005.0, 1.3, 1.0)
@@ -115,6 +137,20 @@ class TestShapes(unittest.TestCase):
     def test_symmetric_la_is_symmetric(self):
         y = ls.component_curve(self.ke, "LA(1.5,1.5,0)", 1005.0, 1.3, 1.0)
         np.testing.assert_allclose(y, y[::-1], atol=1e-3 * y.max())
+
+    def test_shared_width_is_fwhm_for_an_unmodified_lorentzian(self):
+        # a = b = 1 is the "no rescaling" baseline (GL/SGL and the 2-argument
+        # LA(m)/LF(...) shorthand, which default a and b to 1): every such
+        # already-working shape is untouched by the shared-width formula.
+        self.assertAlmostEqual(ls._shared_width(1.3, 1.0, 1.0), 1.3, 9)
+
+    def test_shared_width_matches_a_hand_computed_value(self):
+        # F = 2*fwhm / (sqrt(2**(1/a)-1) + sqrt(2**(1/b)-1)), a=1.2, b=5
+        import math
+        want = 2 * 1.3 / (math.sqrt(2 ** (1 / 1.2) - 1)
+                          + math.sqrt(2 ** (1 / 5.0) - 1))
+        self.assertAlmostEqual(ls._shared_width(1.3, 1.2, 5.0), want, 9)
+        self.assertAlmostEqual(want / 1.3, 1.575, 3)   # wider than fwhm
 
     def test_broadening_lowers_the_peak_and_keeps_the_area(self):
         sharp = ls.component_curve(self.ke, "LA(1.1,1.9,0)", 1005.0, 1.3, 1.0)
@@ -145,6 +181,24 @@ class TestShapes(unittest.TestCase):
         self.assertEqual(ls.parse_shape(None)["kind"], "GL")
         self.assertTrue(ls.is_exact("GL(30)") and ls.is_exact("SGL(50)"))
         self.assertFalse(ls.is_exact("LA(1,1,1)") or ls.is_exact("LF(1,1,1,1)"))
+
+    def test_parse_shape_with_tail_suffix(self):
+        """CasaXPS's GL/SGL tail suffix (GL(30)T(1.5)) must not corrupt the
+        base shape's own mix -- the greedy single-regex parser used to
+        swallow the whole "30)T(1.5" as an unparseable parameter list and
+        silently fall back to mix=30 regardless of the real value."""
+        p = ls.parse_shape("GL(30)T(1.5)")
+        self.assertEqual((p["kind"], p["mix"], p["tail"]), ("GL", 30.0, True))
+        p = ls.parse_shape("SGL(50)T(0.3)")
+        self.assertEqual((p["kind"], p["mix"], p["tail"]),
+                         ("SGL", 50.0, True))
+        # A mix distinguishable from the old silent-fallback default (30).
+        p = ls.parse_shape("GL(70)T(2)")
+        self.assertEqual((p["mix"], p["tail"]), (70.0, True))
+        self.assertFalse(ls.parse_shape("GL(30)")["tail"])
+        self.assertFalse(ls.is_exact("GL(30)T(1.5)"))
+        self.assertFalse(ls.is_exact("SGL(50)T(0.3)"))
+        self.assertTrue(ls.is_exact("GL(30)"))
 
 
 @unittest.skipUnless(HAVE_NP, "numpy not installed")
@@ -303,6 +357,51 @@ class TestCurves(unittest.TestCase):
         self.assertLess(cv.residual_rms, 0.05)         # within the Shirley model
         self.assertFalse(cv.approximate)                # GL is exact
         self.assertTrue(cv.scale_known)
+
+    def test_envelope_never_exceeds_the_data_it_was_built_from(self):
+        """Regression for the reported bug: a component's tail can run past
+        its own CasaXPS region window (a broad or asymmetric peak commonly
+        does -- a tight region box does not mean the instrument stopped
+        recording there). The reconstructed envelope must not be inflated
+        to compensate: CasaXPS's own rendering never rises above the raw
+        data, and neither should ours."""
+        reg = casafit.FitRegion(name="Wide", background="none",
+                                start_ke=1025.0, end_ke=1029.0)
+        comp = casafit.FitComponent(name="Wide", shape="GL(100)",
+                                    area=6000.0, fwhm=4.0, pos_ke=1027.0,
+                                    region="Wide")
+        fit = casafit.Fit(regions=[reg], components=[comp])
+        # the "true" data: the same component evaluated over a range much
+        # wider than the CasaXPS region box, as the instrument would record
+        be = np.linspace(self.hv - 1027.0 - 30, self.hv - 1027.0 + 30,
+                         601).tolist()
+        ke = np.array([self.hv - b for b in be])
+        counts = ls.component_curve(ke, "GL(100)", 1027.0, 4.0, 6000.0)
+        cv = casafit.curves(fit, be, counts.tolist(), self.hv, None, 1)[0]
+        env = np.array(cv.envelope)
+        keep = ~np.isnan(env)
+        self.assertTrue(keep.any())
+        diff = env[keep] - counts[keep]
+        self.assertLessEqual(float(diff.max()), 1e-6 * float(counts.max()))
+
+    def test_tail_modified_component_is_marked_approximate(self):
+        """A GL/SGL component with a CasaXPS tail suffix reconstructs as its
+        plain base shape (the tail itself is not modelled) but must be
+        flagged approximate, not silently treated as exact."""
+        reg = casafit.FitRegion(name="Tail", background="none",
+                                start_ke=1025.0, end_ke=1029.0)
+        comp = casafit.FitComponent(name="Tail", shape="GL(30)T(1.5)",
+                                    area=6000.0, fwhm=4.0, pos_ke=1027.0,
+                                    region="Tail")
+        fit = casafit.Fit(regions=[reg], components=[comp])
+        be = np.linspace(self.hv - 1027.0 - 10, self.hv - 1027.0 + 10,
+                         201).tolist()
+        ke = np.array([self.hv - b for b in be])
+        counts = ls.component_curve(ke, "GL(30)", 1027.0, 4.0, 6000.0)
+        cv = casafit.curves(fit, be, counts.tolist(), self.hv, None, 1)[0]
+        self.assertTrue(cv.approximate)
+        self.assertIsNotNone(cv.envelope)                # base shape drawn
+        self.assertTrue(np.isfinite(np.array(cv.envelope)).any())
 
     def test_intensity_is_in_the_spectrums_own_counts(self):
         be, counts = model_data(self.fit, self.hv, 0.27, 25)
@@ -548,6 +647,75 @@ class TestRealCasaFits(unittest.TestCase):
         a = self.curves_of(r)[0]
         c = self.curves_of(b)[0]
         self.assertAlmostEqual(a.residual_rms, c.residual_rms, 3)
+
+
+GK_DIR = os.environ.get("XPS_ASYM_DIR", os.path.join(
+    os.path.expanduser("~"), "Downloads", "For GK"))
+
+
+def _max_overshoot_pct(cv, counts):
+    """How far the reconstructed envelope rises above the raw data, as a
+    percentage of the region's peak height (0 if it never does)."""
+    env = np.array(cv.envelope, dtype=float)
+    data = np.array(counts, dtype=float)
+    keep = ~np.isnan(env)
+    if not keep.any():
+        return 0.0
+    over = float((env[keep] - data[keep]).max())
+    peak = float(data[keep].max())
+    return 100.0 * over / peak if peak > 0 else 0.0
+
+
+@unittest.skipUnless(HAVE_NP, "numpy not installed")
+class TestLAAsymmetryAccuracy(unittest.TestCase):
+    """Canary for the LA/LF asymmetric-kernel limitation documented in
+    ``lineshapes.py``: even with the shared-width fix (``_shared_width``),
+    the reconstructed peak height for a strongly asymmetric exponent pair
+    (e.g. ``LA(1.2,5,8)``, CasaXPS's sharp metallic-tail cutoff) can still
+    run somewhat ahead of the raw data, which ``residual_rms`` (a
+    whole-curve average) does not show -- confirmed on the real titanium and
+    vanadium examples. This does NOT assert the gap is zero (the shared
+    Gaussian-broadening scale, ``GAUSS_K``, is still an open question -- see
+    the module docstring) -- only that it does not get worse than what real
+    files currently show, so a future change to ``component_curve`` is
+    caught even though it passes ``residual_rms``. Skipped entirely when
+    neither reference directory is on this machine."""
+
+    CEILING = 12.0   # % of peak height; titanium's ~8.8% is the worst seen
+
+    def _regions(self):
+        for d in (REAL_DIR, GK_DIR):
+            if not os.path.isdir(d):
+                continue
+            for name in sorted(os.listdir(d)):
+                if not name.endswith(".vms"):
+                    continue
+                try:
+                    doc = readers.load_file(os.path.join(d, name))
+                except Exception:
+                    continue
+                for r in doc.regions:
+                    if r.fit is None or not r.fit.components:
+                        continue
+                    if any(ls.parse_shape(c.shape)["kind"] in ("LA", "LF")
+                          for c in r.fit.components):
+                        yield name, r
+
+    def test_la_lf_overshoot_does_not_get_worse(self):
+        n = 0
+        for name, r in self._regions():
+            for cv in casafit.curves(r.fit, r.energy, r.counts,
+                                     r.photon_energy, r.dwell,
+                                     r.extra.get("n_scans", 1)):
+                if cv.envelope is None:
+                    continue
+                n += 1
+                pct = _max_overshoot_pct(cv, r.counts)
+                self.assertLess(pct, self.CEILING,
+                                f"{name} {cv.region}: {pct:.1f}% of peak")
+        if n == 0:
+            self.skipTest("no real LA/LF-fitted spectrum found on this "
+                          "machine")
 
 
 if __name__ == "__main__":

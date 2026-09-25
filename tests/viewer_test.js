@@ -155,9 +155,9 @@ function near(a, b, msg, tol) {
     eq(full, [null, null, 5, 6, null, null], 'curveFull places a curve at its first point');
     eq(V.curveFull(null, [1], 3), null, 'no curves, no curve');
     eq(V.residual([10, 20, 30], [9, null, 33]), [1, null, -3], 'residual is data - envelope');
-    eq(V.fitStates(fspecs[0].reg).map((x) => x.gk + '|' + x.name + '|' + x.slot),
-       fx.fit.states.filter((x, i, a) => a.findIndex((y) => y.gk === x.gk) === i)
-         .map((x, i) => x.gk + '|' + x.name + '|' + i), 'chemical states in order of appearance');
+    eq(V.fitStates(fspecs[0].reg).map((x) => x.name + '|' + x.slot),
+       fx.fit.states.filter((x, i, a) => a.findIndex((y) => y.name === x.name) === i)
+         .map((x, i) => x.name + '|' + i), 'chemical states in order of appearance, merged by name');
     eq(V.fitRows({}).length, 0, 'a spectrum without a fit has no rows');
   }
 

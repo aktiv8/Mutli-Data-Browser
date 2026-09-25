@@ -202,13 +202,16 @@
     return out;
   };
   V.fitRows = function (reg) { return reg && reg.fit ? reg.fit.rows : []; };
-  /* the chemical states of a spectrum's fit in first-appearance order, with a
-     colour slot each (what the app's legend does) */
+  /* the chemical states of a spectrum's fit, by display name, in
+     first-appearance order (what the app's legend shows): two components
+     with the same name -- even from different fit regions of this
+     spectrum -- are one state here, mirroring plots.draw_fit. Colour is a
+     page-level concern (redrawFit/fitLegend/updateFitBox), not this. */
   V.fitStates = function (reg) {
     var out = [], seen = {};
     V.fitRows(reg).forEach(function (row) {
       row.components.forEach(function (c) {
-        if (!(c.gk in seen)) { seen[c.gk] = out.length; out.push({ gk: c.gk, name: c.state, slot: out.length }); }
+        if (!(c.state in seen)) { seen[c.state] = out.length; out.push({ name: c.state, slot: out.length }); }
       });
     });
     return out;
@@ -709,7 +712,8 @@
             norm: 'none', offset: 0.6, scale: 'Binding', levelOn: false, levelIdx: 0, levels: [],
             panels: new Map(), theme: 'auto', printing: false, nodes: [], holderIdx: 0,
             holderHot: null, tab: 'plot', filter: '', camIdx: 0, mapById: {}, camById: {},
-            fit: { components: true, envelope: true, background: true, residual: false, hidden: {} },
+            fit: { components: true, envelope: true, background: true, residual: false, hidden: {},
+                  colour: {} },   // state name -> colour, kept across every panel on the page
             q: { include: {}, transmission: false, level: {} },
             d: { sample: null, mode: 'element', axis: null, last: null },
             ident: { on: false, win: 2, auto: false, secondary: false, auger: false,
@@ -993,6 +997,20 @@
     var c = cycle();
     return c.length > 1 ? c.slice(1) : c;
   }
+  /* the colour for a fit state name, stable across every panel on the page
+     (S.fit.colour), assigning the next unused colour the first time a name
+     is seen -- so 'V2p(II)' is always the same colour, and the same legend
+     entry, wherever it is drawn (mirrors Workspace.fit_state_colour). */
+  function fitStateColour(name) {
+    var map = S.fit.colour, cols = fitColours();
+    if (!(name in map)) map[name] = cols[Object.keys(map).length % cols.length];
+    return map[name];
+  }
+  function fitSlotMap(reg) {
+    var slot = {};
+    V.fitStates(reg).forEach(function (x) { slot[x.name] = fitStateColour(x.name); });
+    return slot;
+  }
   /* the fit's curves on every point of the spectrum, scaled like the data */
   function fitCurves(s, f) {
     var n = s.y.length, sc = function (a) { return a ? a.map(function (v) { return v === null ? null : v / f; }) : null; };
@@ -1010,8 +1028,7 @@
     var s = singleFit(p.group);
     if (!s) { if (p.fitbox) { p.wrap.removeChild(p.fitbox); p.fitbox = null; } return; }
     if (!p.fitbox) { p.fitbox = h('div', { class: 'fitbox' }); p.wrap.appendChild(p.fitbox); }
-    var box = clear(p.fitbox), st = V.fitStates(s.reg), slot = {}, cols = fitColours(), kin = S.scale === 'Kinetic' && s.reg.hv;
-    st.forEach(function (x) { slot[x.gk] = cols[x.slot % cols.length]; });
+    var box = clear(p.fitbox), slot = fitSlotMap(s.reg), kin = S.scale === 'Kinetic' && s.reg.hv;
     var rows = s.reg.fit.rows, shown = 0;
     rows.forEach(function (row, ri) {
       if (shown >= 8) return;
@@ -1030,7 +1047,7 @@
         cb.checked = !off;
         var tr = h('tr', { class: off ? 'off' : '' },
           h('td', null, cb),
-          h('td', null, h('span', { class: 'sw', style: 'background:' + (slot[c.gk] || '#888') })),
+          h('td', null, h('span', { class: 'sw', style: 'background:' + (slot[c.state] || '#888') })),
           h('td', { text: c.name }),
           h('td', { class: 'num', text: fmtN(kin ? s.reg.hv - c.be : c.be, 2) }),
           h('td', { class: 'num', text: fmtN(c.fwhm, 2) }),
@@ -1449,8 +1466,7 @@
     }
   }
   function drawFit(ctx, C, lay, X, Y, xs, fit, s, resBase, rr, font) {
-    var cols = fitColours(), slot = {};
-    V.fitStates(s.reg).forEach(function (x) { slot[x.gk] = cols[x.slot % cols.length]; });
+    var slot = fitSlotMap(s.reg);
     ctx.lineJoin = 'round';
     fit.forEach(function (fr) {
       var zero = xs.map(function () { return 0; });
@@ -1461,7 +1477,7 @@
       if (S.fit.components) {
         fr.comps.forEach(function (cv, j) {
           if (!cv || S.fit.hidden[fr.ri + ':' + j]) return;
-          var c = fr.row.components[j], col = slot[c.gk] || '#888888';
+          var c = fr.row.components[j], col = slot[c.state] || '#888888';
           var lo = fr.bg || zero, top = cv.map(function (v, k) { return v === null || lo[k] === null ? null : lo[k] + v; });
           ctx.fillStyle = col; ctx.globalAlpha = 0.35; fillBetween(ctx, xs, top, lo, X, Y); ctx.globalAlpha = 1;
           ctx.strokeStyle = col; ctx.lineWidth = 1; strokeCurve(ctx, xs, top, X, Y);
@@ -1483,12 +1499,12 @@
   }
   /* the states of the fit, top left of the plot; a long list is left to the table */
   function fitLegend(ctx, C, lay, s, font) {
-    var st = V.fitStates(s.reg), cols = fitColours();
+    var st = V.fitStates(s.reg);
     if (!st.length || st.length > 6) return;
     ctx.font = font(11); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     st.forEach(function (x, i) {
       var y = lay.t + 12 + i * 15;
-      ctx.fillStyle = cols[x.slot % cols.length]; ctx.globalAlpha = 0.5; ctx.fillRect(lay.l + 8, y - 5, 10, 10); ctx.globalAlpha = 1;
+      ctx.fillStyle = fitStateColour(x.name); ctx.globalAlpha = 0.5; ctx.fillRect(lay.l + 8, y - 5, 10, 10); ctx.globalAlpha = 1;
       ctx.fillStyle = C.fg;
       ctx.fillText(x.name.length > 22 ? x.name.slice(0, 21) + '…' : x.name, lay.l + 24, y);
     });
