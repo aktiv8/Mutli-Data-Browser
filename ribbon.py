@@ -88,6 +88,8 @@ PAGES = {
         ], "The experiment report as a PDF.", True),
         ("Slides", "slides", "export_powerpoint",
          "Export a PowerPoint deck.", True),
+        ("Word", "word", "export_docx",
+         "Export an editable Word document.", True),
         ("Hand-over", "package", "export_handover",
          "A ZIP with report, spectra, figures and workbook.", True),
         ("Browser", "web", "export_html_browser",

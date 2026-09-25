@@ -40,9 +40,12 @@ BUILTIN = (("ribbon", "Spectrum ribbon"), ("band", "Band"),
 NAMES = dict(BUILTIN)
 
 # where the art goes and how big: (width, height) in mm for the PDF (inside the
-# page margins) and in inches for a slide (a strip along the bottom); the
-# resolution it is drawn at is chosen so a photograph stays light
-SIZES = {"pdf": (180.0, 45.0, "mm", 200), "pptx": (13.333, 1.55, "in", 150)}
+# page margins), in inches for a slide (a strip along the bottom) and for the
+# Word document (a banner at the top, the same 4:1 shape as the PDF's, sized
+# to its default content width); the resolution it is drawn at is chosen so a
+# photograph stays light
+SIZES = {"pdf": (180.0, 45.0, "mm", 200), "pptx": (13.333, 1.55, "in", 150),
+         "docx": (6.5, 1.625, "in", 200)}
 THUMB = (240, 60, 100)                       # pixels and dpi of a preview
 
 try:

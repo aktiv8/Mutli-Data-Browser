@@ -107,6 +107,7 @@ import reportspec
 import resultspages
 import reportgen_ui
 import pptx_export
+import docx_export
 import pdfstyle
 import importplan
 import workbook_ui
@@ -664,6 +665,8 @@ class Workspace:
                         command=self.save_report)
         wbm.add_command(label="Export PowerPoint…",
                         command=self.export_powerpoint)
+        wbm.add_command(label="Export Word document…",
+                        command=self.export_docx)
         wbm.add_command(label="Hand-over package (ZIP)…",
                         command=self.export_handover)
         wbm.add_command(label="Interactive data browser (HTML)…",
@@ -3934,9 +3937,27 @@ class Workspace:
     def save_report(self):
         self.generate_report("pdf")
 
+    def export_docx(self):
+        self.generate_report("docx")
+
+    def _build_docx(self, path, spec=None, notes=None):
+        spec = self._spec_for_output(spec)
+        left_out = reportspec.skipped(spec, "images")
+        mosaics = reportspec.option(spec, "mosaic") == "on"
+        return docx_export.build_document(
+            path, self._report_details(),
+            self.logo, self._report_file_rows(), self.docs,
+            self._report_figures(), self._deck_images,
+            image_pages=((lambda: self._deck_image_pages(left_out, mosaics))
+                         if self._has_image_pages() else None),
+            spec=spec,
+            cover_data=self.cover_data(), notes=notes,
+            results=self._results())
+
     def generate_report(self, kind="pdf"):
-        """Write the PDF report, the PowerPoint deck or both, with what the
-        Report generator says goes in (``kind``: "pdf", "pptx" or "both")."""
+        """Write the PDF report, the PowerPoint deck, the Word document, or
+        both the PDF and the deck, with what the Report generator says goes
+        in (``kind``: "pdf", "pptx", "docx" or "both")."""
         if not self._report_ready():
             return
         spec = self._spec_for_output()
@@ -3953,6 +3974,11 @@ class Workspace:
                 title="Export PowerPoint", defaultextension=".pptx",
                 initialfile=stem + ".pptx",
                 filetypes=[("PowerPoint presentation", "*.pptx")])
+        elif kind == "docx":
+            path = filedialog.asksaveasfilename(
+                title="Export Word document", defaultextension=".docx",
+                initialfile=stem + ".docx",
+                filetypes=[("Word document", "*.docx")])
         else:
             path = filedialog.asksaveasfilename(
                 title=("Save the report (the deck is saved beside it)"
@@ -3976,6 +4002,9 @@ class Workspace:
                     + ".pptx"
                 n = self._build_deck(deck, spec, notes)
                 saved.append((deck, f"Presentation ({n} slides)"))
+            if kind == "docx":
+                n = self._build_docx(path, spec, notes)
+                saved.append((path, f"Word document ({n} sections)"))
         except ReportCancelled:
             if saved:
                 text = "\n".join(f"{what} was already saved to\n{where}"
@@ -3984,7 +4013,8 @@ class Workspace:
             else:
                 messagebox.showinfo("Report cancelled", "Nothing was saved.")
             return
-        except (report.ReportError, pptx_export.PptxError) as exc:
+        except (report.ReportError, pptx_export.PptxError,
+                docx_export.DocxError) as exc:
             messagebox.showerror("Report", str(exc))
             return
         except Exception as exc:

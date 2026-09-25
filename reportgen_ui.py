@@ -4,7 +4,8 @@ once for the PDF, the slides and the hand-over package.
 Left, the contents: every section with a tick, what it holds ("6 figures",
 or why it is empty), figures and files as children that can be ticked one by
 one, and Move up / Move down. Right, the cover details and the options. Below,
-named presets, the output (PDF, PowerPoint or both) and *Generate*.
+named presets, the output (PDF, PowerPoint, Word, or PDF and PowerPoint
+together) and *Generate*.
 
 Every change is applied to the app straight away (``app.set_report_spec``), so
 the choice is remembered and the *Save PDF* / *Export PowerPoint* menu items
@@ -150,7 +151,7 @@ class ReportGeneratorDialog(tk.Toplevel):
         out.grid(row=1, column=0, columnspan=4, sticky="w", pady=(10, 0))
         ttk.Label(out, text="Make").pack(side="left")
         for value, text in (("pdf", "PDF report"), ("pptx", "PowerPoint deck"),
-                            ("both", "Both")):
+                            ("docx", "Word document"), ("both", "Both")):
             ttk.Radiobutton(out, text=text, value=value,
                             variable=self.output,
                             command=self._sync_preview_button).pack(
@@ -168,9 +169,9 @@ class ReportGeneratorDialog(tk.Toplevel):
 
     def _sync_preview_button(self):
         """The PDF preview only makes sense when a PDF is actually part of
-        the chosen output (a PowerPoint deck cannot be shown here: there is
-        no slide renderer)."""
-        pdf = self.output.get() != "pptx"
+        the chosen output (a PowerPoint deck or a Word document cannot be
+        shown here: there is no slide or page renderer for either)."""
+        pdf = self.output.get() not in ("pptx", "docx")
         self.preview_btn.config(
             state="normal" if pdf else "disabled",
             text="Preview PDF" if pdf else "No PDF in this output")
