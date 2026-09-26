@@ -77,7 +77,7 @@ FIELDS: tuple[Field, ...] = (
     Field("fill_alpha", "Fill opacity", "float", 0.15, "Traces",
           lo=0.02, hi=0.9, step=0.05),
     # -- axes --------------------------------------------------------------
-    Field("frame", "Frame", "choice", "Open", "Axes",
+    Field("frame", "Frame", "choice", "Box", "Axes",
           "Open: left and bottom lines only. Box: all four sides.",
           choices=("Open", "Box")),
     Field("spine_width", "Axis line width", "float", 0.8, "Axes",

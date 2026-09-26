@@ -213,11 +213,15 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(rc["font.size"], 9)
         self.assertEqual(rc["axes.titlesize"], 10)
         self.assertEqual(rc["xtick.labelsize"], 8)
-        self.assertFalse(rc["axes.spines.top"])
+        self.assertTrue(rc["axes.spines.top"])   # Box is the default frame
         self.assertFalse(rc["axes.grid"])
         self.assertEqual(rc["font.family"], ["DejaVu Sans"])
         self.assertEqual(ps.rc_overrides(None, "IBM Plex Sans")["font.family"],
                          ["IBM Plex Sans", "DejaVu Sans"])
+        rc = ps.rc_overrides({"font": "Arial", "frame": "Open",
+                              "grid": "Horizontal", "tick_direction": "in",
+                              "title_bold": False, "minor_ticks": True})
+        self.assertFalse(rc["axes.spines.top"] or rc["axes.spines.right"])
         rc = ps.rc_overrides({"font": "Arial", "frame": "Box",
                               "grid": "Horizontal", "tick_direction": "in",
                               "title_bold": False, "minor_ticks": True})
@@ -381,8 +385,10 @@ class TestDrawing(unittest.TestCase):
     def test_box_frame_keeps_the_left_line_on_stacks(self):
         _fig, ax = self.stack(3, ps.sanitise({"frame": "Box"}))
         self.assertTrue(ax.spines["left"].get_visible())
-        _fig, ax = self.stack(3)
+        _fig, ax = self.stack(3, ps.sanitise({"frame": "Open"}))
         self.assertFalse(ax.spines["left"].get_visible())
+        _fig, ax = self.stack(3)   # Box is the default frame
+        self.assertTrue(ax.spines["left"].get_visible())
 
     def test_intensity_range(self):
         _fig, ax = self.stack(2, ps.sanitise({"y_min": 0, "y_max": 5000}))
