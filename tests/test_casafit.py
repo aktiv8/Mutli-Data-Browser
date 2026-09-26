@@ -200,6 +200,39 @@ class TestShapes(unittest.TestCase):
         self.assertFalse(ls.is_exact("SGL(50)T(0.3)"))
         self.assertTrue(ls.is_exact("GL(30)"))
 
+    def test_ds_shape_is_recognised_not_reconstructed_as_exact(self):
+        p = ls.parse_shape("DS(0.09,500)")
+        self.assertEqual((p["kind"], p["a"], p["m"]), ("DS", 0.09, 500.0))
+        self.assertFalse(ls.is_exact("DS(0.09,500)"))
+
+    def test_unrecognised_shape_name_is_not_silently_read_as_gl(self):
+        """A shape name this module does not implement (QF, or CasaXPS's own
+        undocumented H/F families) used to be coerced into an exact GL(mix)
+        using its first parameter as a 0-100 % mix -- e.g. DS(0.09,500) drew
+        as an almost-pure Gaussian GL(0.09) and reported itself as exact.
+        parse_shape must keep the real name and is_exact must say False."""
+        for shape in ("QF(1,2,3,4)", "H(0.09,250)", "LS(1.53,243,0.2)"):
+            p = ls.parse_shape(shape)
+            self.assertNotEqual(p["kind"], "GL", shape)
+            self.assertFalse(ls.is_exact(shape), shape)
+
+    def test_compound_shape_name_parses_its_leading_shape(self):
+        """CasaXPS writes a second shape name in its own parentheses right
+        after the first (H(0.09,250)SGL(90), or the documented
+        DS(a,n)GL(m)/DS(a,n)SGL(m) blend) -- this used to fail the shape
+        regex entirely (the anchored end-of-string match) and silently fall
+        back to a hard-coded GL(30)."""
+        p = ls.parse_shape("H(0.09,250)SGL(90)")
+        self.assertEqual(p["kind"], "H")
+        self.assertEqual(p["params"], [0.09, 250.0])
+        self.assertEqual(p["suffix"], "SGL(90)")
+        self.assertFalse(ls.is_exact("H(0.09,250)SGL(90)"))
+        p = ls.parse_shape("F(0.09,32,150)SGL(90)")
+        self.assertEqual((p["kind"], p["params"]), ("F", [0.09, 32.0, 150.0]))
+        p = ls.parse_shape("DS(0.09,500)GL(50)")
+        self.assertEqual((p["kind"], p["a"], p["m"], p["suffix"]),
+                         ("DS", 0.09, 500.0, "GL(50)"))
+
 
 @unittest.skipUnless(HAVE_NP, "numpy not installed")
 class TestBackgrounds(unittest.TestCase):
@@ -716,6 +749,69 @@ class TestLAAsymmetryAccuracy(unittest.TestCase):
         if n == 0:
             self.skipTest("no real LA/LF-fitted spectrum found on this "
                           "machine")
+
+
+DS_DIR = os.environ.get("XPS_DS_DIR", r"D:\Temp\for claude files")
+
+
+def _ds_file():
+    path = os.path.join(DS_DIR, "HOPG with different lineshapes.vms")
+    return path if os.path.isfile(path) else None
+
+
+@unittest.skipUnless(HAVE_NP and _ds_file(),
+                     "HOPG DS-shape sample not present")
+class TestDSShape(unittest.TestCase):
+    """The DS (Doniach-Sunjic) reconstruction, checked against real CasaXPS
+    DS fits: HOPG's C 1s, refitted three ways in ``HOPG with different
+    lineshapes.vms`` (region 0 is ``DS(0.09,500)`` + ``LA(50)`` on a Shirley
+    background; the other two refits use CasaXPS's undocumented ``H``/``F``
+    shapes, left unreconstructed -- see
+    ``test_unrecognised_shape_name_is_not_silently_read_as_gl``), and the
+    same underlying spectrum refitted seven more ways with different
+    ``DS(a,n)`` parameters in ``DS Variations.vms`` (see the DS paragraph of
+    lineshapes.py's module docstring for the ``GAUSS_K["DS"]``/``GAUSS_P["DS"]``
+    calibration this guards). ``CEILING``/``OVERSHOOT_CEILING`` leave
+    headroom over the measured worst case across all 8 real DS-fitted
+    regions (~1.93 % / ~6.69 %) without letting a regression back towards
+    the old GL(0.09) mis-read (12.1 % / 68 %) or the low-BE overshoot the
+    ``GAUSS_P`` fix corrects."""
+
+    CEILING = 0.03
+    OVERSHOOT_CEILING = 9.0   # % of peak height
+
+    def test_ds_component_reproduces_the_real_c1s_peak(self):
+        doc = readers.load_file(_ds_file())
+        r = next(r for r in doc.regions
+                 if r.fit is not None and any(
+                     ls.parse_shape(c.shape)["kind"] == "DS"
+                     for c in r.fit.components))
+        cv = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                            r.dwell, r.extra.get("n_scans", 1))[0]
+        self.assertLess(cv.residual_rms, self.CEILING)
+
+    def test_every_ds_fitted_region_in_the_samples_is_reproduced(self):
+        n = 0
+        for name in sorted(os.listdir(DS_DIR)):
+            if not name.endswith(".vms"):
+                continue
+            doc = readers.load_file(os.path.join(DS_DIR, name))
+            for r in doc.regions:
+                if r.fit is None or not r.fit.components:
+                    continue
+                if not any(ls.parse_shape(c.shape)["kind"] == "DS"
+                          for c in r.fit.components):
+                    continue
+                cv = casafit.curves(r.fit, r.energy, r.counts,
+                                    r.photon_energy, r.dwell,
+                                    r.extra.get("n_scans", 1))[0]
+                n += 1
+                pct = _max_overshoot_pct(cv, r.counts)
+                self.assertLess(cv.residual_rms, self.CEILING,
+                                f"{name} {cv.region}")
+                self.assertLess(pct, self.OVERSHOOT_CEILING,
+                                f"{name} {cv.region}: {pct:.1f}% of peak")
+        self.assertGreaterEqual(n, 1)
 
 
 if __name__ == "__main__":

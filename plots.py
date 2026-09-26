@@ -432,18 +432,28 @@ def draw_fit(ax, x, fit, scale, muted, accent):
     """Overlay a reconstructed CasaXPS fit on a single-spectrum panel.
 
     ``fit`` is ``{"curves": [casafit.Curves], "show": {"envelope", "components",
-    "background"}, "colours": [...], "state_colour": {name: colour}}``; ``x``
+    "background"}, "colours": [...], "state_colour": {key: colour}}``; ``x``
     are the panel's x values (one per data point) and ``scale`` multiplies
     every curve (normalisation).
 
     Components are named the same way CasaXPS shows them (a group's own tag,
     unless that is just the region's label, in which case the first
-    component names it); two components with the same name -- whether
-    they share an INDEX, come from different regions on this panel, or
-    (via ``state_colour``, a dict the caller keeps across panels) appear on
-    another panel of the same page or report -- get one legend entry and one
-    colour. Without ``state_colour`` the mapping is local to this call only.
-    The residual RMS of each curve with one to show (see
+    component names it -- ``named`` below). Two components that share a
+    real, distinct CasaXPS ``INDEX`` group tag -- whether on this panel, a
+    different region on it, or (via ``state_colour``, a dict the caller
+    keeps across panels) another panel of the same page or report -- are one
+    chemical state and get one legend entry and one colour. A component with
+    no such tag (no ``INDEX`` group, or one CasaXPS left tagged with the
+    region's own label) is never merged this way even if it happens to share
+    its *display* name with another such component (real files do this --
+    see ``tests/test_casacalib.py``'s ``TestFitLegend`` -- e.g. two
+    components of one asymmetric line shape both left named after the
+    region): each keeps its own colour, identified internally by the
+    component object itself rather than by its (possibly duplicate) display
+    text, mirroring ``casafit.Fit.group_of``'s real-group-or-``id(comp)``
+    split. Without ``state_colour`` the mapping is local to this call only.
+    The residual
+    RMS of each curve with one to show (see
     ``casafit.Curves.residual_rms``) is noted in the top-right corner, since a
     number for how well the fit reproduces the data is otherwise only in the
     report's quantification table, not visible while looking at the plot."""
@@ -467,12 +477,19 @@ def draw_fit(ax, x, fit, scale, muted, accent):
                 named = (comp.index >= 0 and grp and grp.lower()
                          != (cv.region or "").strip().lower())
                 name = (grp if named else comp.name).strip()
-                if name not in state_colour:
+                # a real, distinct group tag (``named``) merges into one
+                # colour/legend entry; anything that fell back to the
+                # component's own name -- no INDEX group, or one CasaXPS
+                # tagged with the region's own label -- never does, even if
+                # that display text collides with another's (see the module
+                # docstring)
+                key = name if named else (name, id(comp))
+                if key not in state_colour:
                     n = len(state_colour)
-                    state_colour[name] = cols[n % len(cols)]
-                if name not in names:
-                    names[name] = (state_colour[name], name)
-                col = names[name][0]
+                    state_colour[key] = cols[n % len(cols)]
+                if key not in names:
+                    names[key] = (state_colour[key], name)
+                col = names[key][0]
                 y = [v * scale for v in vals]
                 lo = base if base is not None else [0.0] * len(y)
                 top = [(b + v) if (v == v and b == b) else float("nan")

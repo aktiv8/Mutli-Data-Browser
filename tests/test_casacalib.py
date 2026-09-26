@@ -494,6 +494,73 @@ class TestFitLegend(unittest.TestCase):
         self.assertEqual(self.labels(lines),
                          ["Ti 2p3/2 Ti(IV)", "Ti 2p1/2 Ti(IV)"])
 
+    def test_standalone_components_with_the_same_name_get_distinct_colours(self):
+        """Real files exist where CasaXPS leaves two un-grouped (INDEX -1)
+        components of one asymmetric line shape both named after the region
+        (e.g. a DS + LA(50) pair fitting HOPG's C 1s in
+        D:\\Temp\\for claude files\\HOPG with different lineshapes.vms,
+        both literally "(*C 1s*)"). Colliding on that shared display text
+        used to collapse them into one legend entry and one fill colour, so
+        the smaller component visually vanished into the bigger one's fill.
+        They may legitimately show the same legend text, but must be drawn
+        in different colours -- unlike two components that share a real
+        INDEX group, which must still merge (the tests above)."""
+        # KE range chosen to fall inside model_data()'s default BE window
+        # (448-470 eV at HV, i.e. KE ~1017-1039), so the components actually
+        # sit inside the fit region rather than being masked out as NaN.
+        lines = [
+            "CASA region (*C 1s*) (*Shirley*) 1020 1035 1 1 (*C 1s*) 12.011",
+            "2",
+            "CASA comp (*C 1s*) (*GL(30)*) Area 500 0 900 -1 1 MFWHM 1 0 2 "
+            "-1 1 Position 1026 0 0 -1 1 RSF 1 MASS 12.011 INDEX -1 (*C 1s*)",
+            "CASA comp (*C 1s*) (*GL(30)*) Area 50 0 900 -1 1 MFWHM 1 0 2 "
+            "-1 1 Position 1029 0 0 -1 1 RSF 1 MASS 12.011 INDEX -1 (*C 1s*)",
+        ]
+        fit = casafit.parse(lines)
+        be, counts = model_data(fit, HV, 0.27, 25)
+        cvs = casafit.curves(fit, be, counts, HV, 0.27, 25)
+        ax = Figure().add_subplot()
+        plots.draw_fit(ax, be, {"curves": cvs,
+                                "colours": ["#aa0000", "#0000aa"],
+                                "show": {"components": True}}, 1.0, "grey",
+                       "red")
+        texts = [t.get_text() for t in ax.get_legend().get_texts()]
+        self.assertEqual(texts, ["C 1s", "C 1s"])
+        drawn = [tuple(c.get_facecolor()[0]) for c in ax.collections]
+        self.assertEqual(len(drawn), 2)
+        self.assertNotEqual(drawn[0], drawn[1])
+
+    def test_an_index_group_tagged_with_the_region_name_is_not_merged(self):
+        """A component can have a real ``INDEX`` (>= 0) yet still fall back
+        to its own name, when CasaXPS tagged the group with the region's own
+        label rather than a real group name (``named`` is False either way
+        -- see ``test_a_group_tagged_with_the_region_name_uses_the_component``
+        above). Two *different* components in this state (seen on the real
+        HOPG file's other two C1s refits: INDEX 0 and INDEX 1, both group
+        "C 1s" == the region name "C 1s") must still get distinct colours,
+        not merge just because both indices happen to be >= 0."""
+        lines = [
+            "CASA region (*C 1s*) (*Shirley*) 1020 1035 1 1 (*C 1s*) 12.011",
+            "2",
+            "CASA comp (*C 1s*) (*GL(30)*) Area 500 0 900 -1 1 MFWHM 1 0 2 "
+            "-1 1 Position 1026 0 0 -1 1 RSF 1 MASS 12.011 INDEX 0 (*C 1s*)",
+            "CASA comp (*C 1s*) (*GL(30)*) Area 50 0 900 -1 1 MFWHM 1 0 2 "
+            "-1 1 Position 1029 0 0 -1 1 RSF 1 MASS 12.011 INDEX 1 (*C 1s*)",
+        ]
+        fit = casafit.parse(lines)
+        be, counts = model_data(fit, HV, 0.27, 25)
+        cvs = casafit.curves(fit, be, counts, HV, 0.27, 25)
+        ax = Figure().add_subplot()
+        plots.draw_fit(ax, be, {"curves": cvs,
+                                "colours": ["#aa0000", "#0000aa"],
+                                "show": {"components": True}}, 1.0, "grey",
+                       "red")
+        texts = [t.get_text() for t in ax.get_legend().get_texts()]
+        self.assertEqual(texts, ["C 1s", "C 1s"])
+        drawn = [tuple(c.get_facecolor()[0]) for c in ax.collections]
+        self.assertEqual(len(drawn), 2)
+        self.assertNotEqual(drawn[0], drawn[1])
+
     def test_residual_rms_is_noted_on_the_panel(self):
         fit = casafit.parse(CASA)
         be, counts = model_data(fit, HV, 0.27, 25)

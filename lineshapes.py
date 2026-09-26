@@ -73,6 +73,71 @@ component is therefore drawn as its plain ``GL``/``SGL`` base shape and
 flagged ``approximate`` by ``is_exact`` (same signal as LA/LF and an
 unreproduced background) rather than silently misread.
 
+**Unrecognised shape names.** A shape name CasaXPS writes that this module
+does not implement (``QF``, or CasaXPS's own undocumented ``H``/``F``
+families -- seen, unreconstructed, on a real file with three refits of one
+C 1s region: ``H(0.09,250)SGL(90)`` and ``F(0.09,32,150)SGL(90)`` alongside
+the ``DS`` fit below) used to be silently coerced into an exact ``GL(mix)``
+using its first numeric token as a 0-100 % mix -- for ``DS(0.09,500)`` (see
+below) this drew an almost-pure Gaussian and reported it as *exact*, 12 % of
+peak height off and 68 % over the real peak at its own maximum, with no
+warning. ``parse_shape`` now keeps the real name (so ``is_exact`` correctly
+reports it unreconstructed) and ``_raw_values`` draws it as a plain
+unmodified Lorentzian of the component's own ``fwhm`` (the ``a = b = 1``,
+``w = 0`` default of the LA/LF branch below, no Gaussian broadening) purely
+so something renders -- not a guess at the real shape, just a placeholder
+that is honestly flagged. A compound name CasaXPS writes as a base shape
+followed by a second one in its own parentheses (``H(0.09,250)SGL(90)``, or
+the documented ``DS(a,n)GL(m)``/``DS(a,n)SGL(m)`` blend) parses as the
+leading shape with the remainder kept verbatim in ``parse_shape``'s
+``suffix`` key rather than failing to parse at all; the blend itself is not
+reconstructed (no real file with it has been available), so a ``DS`` with a
+suffix draws as plain ``DS``, same precedent as the ``T(k)`` tail.
+
+**DS(a, n): Doniach-Sunjic.** CasaXPS's asymmetric-tail shape for metallic /
+graphitic peaks (e.g. HOPG's C 1s). Reconstructed from the published kernel
+(Doniach & Sunjic 1970; the form here matches an independent reconstruction
+retrieved 2026-09-26 from public papers, itself unvalidated) --
+``t = 2(x-pos)/fwhm``, ``DS_raw(t; a) = cos(pi*a/2 + (1-a)*atan(t)) /
+(1+4t^2)**((1-a)/2)`` -- convolved with a Gaussian through the same
+``gauss_conv`` + area-normalisation pipeline LA/LF already use. This raw
+kernel's own asymmetry direction is exact (a fast, power-law-t^-(2-a) decay
+on the low-binding-energy side, KE > pos; the well-known long t^-(1-a) tail
+on the high-BE side, KE < pos) -- only the Gaussian convolution width is a
+calibration.
+
+The convolution width uses the same ``GAUSS_K`` dial as LA/LF but, unlike
+them, its own exponent on ``(25/n)`` (``GAUSS_P``, 1 for every other shape):
+``gw = fwhm * GAUSS_K["DS"] * (25/n) ** GAUSS_P["DS"]``. First calibrated on
+one ``DS(0.09,500)`` component (a plain ``K``, implicit exponent 1) it
+overshot the real data specifically on the low-BE side once more real
+``(a, n)`` variations of the *same* underlying spectrum became available
+(``D:\Temp\for claude files\DS Variations.vms``: 7 CasaXPS refits of one C1s
+scan, ``a`` in 0.05-0.10, ``n`` in 200/400/500) -- a symmetric Gaussian
+widens a naturally sharp edge (the fast-decaying low-BE side) far more
+visibly than it perturbs an already-broad tail, so too large a ``gw`` there
+reads exactly as "the low-BE side extends past the data". A per-region
+residual-minimising search over ``gw`` on those 7 regions showed the true
+optimum scales more weakly with ``n`` than ``25/n`` (exponent 1): fitting
+``gw* = fwhm * K' * (25/n)**p`` by ordinary least squares on
+``log(gw*/fwhm)`` vs ``log(25/n)`` gives **``GAUSS_K["DS"] = 1.8445``,
+``GAUSS_P["DS"] = 0.5737``** (R^2 = 0.886 over the 7 points -- real but
+imperfect; ``a`` has a secondary effect on the true optimum, ~5.5 % relative
+spread within one ``n`` group, not modelled -- a third parameter is not
+worth fitting on 7 points). Against today's numbers (``K=5.6``, implicit
+``p=1``) this drops the mean ``residual_rms`` across the 7 regions from
+1.49 % to 1.30 % of peak height and the mean low-BE-side overshoot from
+5.27 % to 3.83 % (worst case 6.68 % to 6.69 %; one region regresses
+~0.03 pp, the rest improve, e.g. ``DS(0.05,200)``'s overshoot 5.68 % to
+3.41 %). A ``gw`` with no ``n`` dependence at all was tried and rejected: it
+removes the low-BE overshoot almost entirely but then under-broadens the
+peak apex at ``n=200``, visibly worsening the whole-curve fit there --
+``n`` has to stay in the formula, just with a weaker exponent. **This is
+still one calibration spectrum** (now with rich ``(a, n)`` coverage rather
+than one point, not an independent second measurement): retune again only
+with a ``DS`` fit on genuinely different real data, not on general
+principle.
+
 numpy is needed for evaluation; everything else here is plain Python.
 """
 
@@ -81,22 +146,31 @@ from __future__ import annotations
 import math
 import re
 
-GAUSS_K = {"LF": 0.60, "LA": 0.20}       # Gaussian FWHM / component FWHM
+GAUSS_K = {"LF": 0.60, "LA": 0.20, "DS": 1.8445}  # Gaussian FWHM / component FWHM
+GAUSS_P = {"DS": 0.5737}  # exponent on (25/m); every other shape is 1 (below)
 _LN2_4 = 2.772588722239781               # 4 ln 2
 
 
 _TAIL_SUFFIX_RE = re.compile(r"^(.*\))\s*T\(\s*[^()]*\s*\)\s*$", re.IGNORECASE)
-_SHAPE_RE = re.compile(r"^\s*([A-Za-z]+)\s*\(([^()]*)\)\s*$")
+_SHAPE_RE = re.compile(r"^\s*([A-Za-z]+)\s*\(([^()]*)\)\s*(.*)$")
 
 
 def parse_shape(text) -> dict:
-    """``{"kind", "a", "b", "w", "m", "mix", "tail"}`` from a shape string
-    such as ``GL(30)``, ``LA(1.1,1.9,7)``, ``LF(1.1,1.2,75,200)`` or a
-    ``GL``/``SGL`` shape with a CasaXPS tail suffix (``GL(30)T(1.5)``, used
-    for asymmetric metallic peaks). ``tail`` is True when that suffix was
+    """``{"kind", "a", "b", "w", "m", "mix", "tail", "suffix", "params"}``
+    from a shape string such as ``GL(30)``, ``LA(1.1,1.9,7)``,
+    ``LF(1.1,1.2,75,200)``, ``DS(0.09,500)``, a ``GL``/``SGL`` shape with a
+    CasaXPS tail suffix (``GL(30)T(1.5)``, used for asymmetric metallic
+    peaks) or a compound shape naming a second one in its own parentheses
+    (``H(0.09,250)SGL(90)``, or the documented ``DS(a,n)GL(m)``/
+    ``DS(a,n)SGL(m)`` blend). ``tail`` is True when the ``T(k)`` suffix was
     present -- the base shape's own parameters still parse correctly, but
-    the tail itself is not reconstructed (see the module docstring). An
-    unreadable string is a symmetric Lorentzian-Gaussian mix ("GL(30)")."""
+    the tail itself is not reconstructed (see the module docstring).
+    ``suffix`` holds a compound name's second shape verbatim, unparsed. A
+    name this module does not implement (``QF``, CasaXPS's own ``H``/``F``
+    families, ...) keeps its real ``kind`` and stores its raw numeric tokens
+    in ``params`` rather than being coerced into a fabricated ``GL(mix)`` --
+    see the module docstring. An unreadable string (no ``NAME(...)`` at all)
+    is a symmetric Lorentzian-Gaussian mix ("GL(30)")."""
     text = str(text or "")
     tail = False
     tm = _TAIL_SUFFIX_RE.match(text)
@@ -106,7 +180,7 @@ def parse_shape(text) -> dict:
     m = _SHAPE_RE.match(text)
     if not m:
         return {"kind": "GL", "mix": 30.0, "a": 1.0, "b": 1.0, "w": 0.0,
-                "m": 0.0, "tail": tail}
+                "m": 0.0, "tail": tail, "suffix": "", "params": []}
     kind = m.group(1).upper()
     ps = []
     for tok in m.group(2).split(","):
@@ -114,8 +188,9 @@ def parse_shape(text) -> dict:
             ps.append(float(tok))
         except ValueError:
             pass
+    suffix = m.group(3).strip()
     out = {"kind": kind, "a": 1.0, "b": 1.0, "w": 0.0, "m": 0.0, "mix": 0.0,
-           "tail": tail}
+           "tail": tail, "suffix": suffix, "params": ps}
     if kind == "LF":
         out.update(a=ps[0] if ps else 1.0, b=ps[1] if len(ps) > 1 else 1.0,
                    w=ps[2] if len(ps) > 2 else 0.0,
@@ -125,8 +200,9 @@ def parse_shape(text) -> dict:
             out.update(a=ps[0], b=ps[1], m=ps[2])
         else:
             out.update(m=ps[0] if ps else 0.0)
-    else:
-        out["kind"] = kind if kind in ("GL", "SGL") else "GL"
+    elif kind == "DS":
+        out.update(a=ps[0] if ps else 0.0, m=ps[1] if len(ps) > 1 else 0.0)
+    elif kind in ("GL", "SGL"):
         out["mix"] = ps[0] if ps else 30.0
     return out
 
@@ -190,6 +266,11 @@ def _raw_values(x, sp, pos, fwhm):
         if sp["kind"] == "GL":
             return (lor ** mix) * (gau ** (1.0 - mix))
         return mix * lor + (1.0 - mix) * gau
+    if sp["kind"] == "DS":
+        t = 2.0 * (x - pos) / fwhm
+        a = sp["a"]
+        return np.cos(np.pi * a / 2.0 + (1.0 - a) * np.arctan(t)) \
+            / (1.0 + 4.0 * t * t) ** ((1.0 - a) / 2.0)
     F = _shared_width(fwhm, sp["a"], sp["b"])
     t = (x - pos) / F
     lor = 1.0 / (1.0 + 4.0 * t * t)
@@ -223,7 +304,8 @@ def component_curve(ke, shape, pos, fwhm, area):
         conv = v
     else:
         gw = fwhm * GAUSS_K.get(sp["kind"], 0.0) * (
-            25.0 / sp["m"] if sp["m"] else 0.0)
+            (25.0 / sp["m"]) ** GAUSS_P.get(sp["kind"], 1.0)
+            if sp["m"] else 0.0)
         conv = gauss_conv(ke, v, gw)
     span = _NORM_HALF_WIDTH * fwhm
     wide = np.linspace(pos - span, pos + span, _NORM_POINTS)
