@@ -324,6 +324,15 @@ class TestCollect(unittest.TestCase):
         self.assertTrue(seen)
         self.assertEqual(res.samples[0].label, "Renamed")
 
+    def test_an_unticked_region_is_left_out(self):
+        res = rp.collect(self.docs(), ticked=lambda r: False)
+        self.assertFalse(res)
+        self.assertEqual(res.children(), [])
+
+    def test_a_ticked_region_is_kept(self):
+        res = rp.collect(self.docs(), ticked=lambda r: True)
+        self.assertEqual(len(res.samples), 1)
+
 
 @unittest.skipUnless(HAVE_NP, "numpy not installed")
 class TestCasaxpsOverride(unittest.TestCase):
@@ -385,6 +394,22 @@ class TestCasaxpsOverride(unittest.TestCase):
         keys = dict(res.children())
         self.assertIn("casaxps:Extra", keys)
         self.assertEqual(keys["casaxps:Extra"], "Extra")
+
+    def test_an_unticked_casaxps_sample_is_left_out(self):
+        """CasaXPS's own export ("PtCl2 Area 2" in a real experiment) must
+        not appear in the report unless its sample is ticked in the tree,
+        even though the sidecar text file names it regardless."""
+        cq = casa_quant_of(S=dict(survey=[("O 1s", 1.82)]))
+        res = rp.collect(self.docs(), casa_quant=cq, ticked=lambda r: False)
+        self.assertFalse(res)
+        self.assertEqual(res.children(), [])
+
+    def test_a_ticked_casaxps_sample_is_kept(self):
+        cq = casa_quant_of(S=dict(survey=[("O 1s", 1.82)]))
+        res = rp.collect(self.docs(), casa_quant=cq, ticked=lambda r: True)
+        self.assertEqual(len(res.samples), 1)
+        self.assertEqual(res.samples[0].label, "S")
+        self.assertIsNotNone(res.samples[0].casaxps)
 
 
 class TestSpecAndInventory(unittest.TestCase):

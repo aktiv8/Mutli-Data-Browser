@@ -3713,15 +3713,18 @@ class Workspace:
         """The quantification the reports lay out (``resultspages``), read
         from the fits of the loaded files as they are drawn, or from
         CasaXPS's own exported files where a folder had them (preferred);
-        remembered until the files, the annotations or the quantification
-        change."""
+        only a sample with at least one region ticked in the tree is
+        included. Remembered until the files, the ticks, the annotations or
+        the quantification change."""
         key = (tuple(id(p) for p in self.docs), self._ann_serial,
               id(self.casa_quant),
-              len(self.casa_quant.samples) if self.casa_quant else 0)
+              len(self.casa_quant.samples) if self.casa_quant else 0,
+              frozenset(self.checked))
         if self._results_memo is None or self._results_memo[0] != key:
             self._results_memo = (key, resultspages.collect(
                 self.docs, self._display,
-                lambda p: reportspec.doc_key(p), self.casa_quant))
+                lambda p: reportspec.doc_key(p), self.casa_quant,
+                ticked=lambda r: id(r) in self.checked))
         return self._results_memo[1]
 
     def _build_report(self, path, spec=None, notes=None):

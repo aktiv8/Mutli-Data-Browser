@@ -111,7 +111,7 @@ CASAXPS_NOTE = ("Quantification for this sample is CasaXPS's own exported "
                "Quant_Dparam.txt), not recomputed from an embedded fit.")
 
 
-def collect(docs, display=None, key_of=None, casa_quant=None):
+def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None):
     """Read the CasaXPS fits of the loaded files (``display`` maps a region to
     the copy that is drawn, with the user's names and binding-energy shift).
 
@@ -123,14 +123,35 @@ def collect(docs, display=None, key_of=None, casa_quant=None):
     match strips a "Sample Name: " prefix from the region's own sample
     identifier before comparing: a VAMAS file CasaXPS itself exported can
     carry that same cosmetic prefix in its SAMPLE IDENTIFIER field, while
-    the quant text files never repeat it in the samples they list."""
+    the quant text files never repeat it in the samples they list.
+
+    ``ticked`` (a region predicate, e.g. ``lambda r: id(r) in app.checked``)
+    restricts the report to what is ticked in the tree: a fit-derived region
+    that fails it is skipped, and a ``casa_quant`` sample name is only kept
+    when at least one ticked region's sample matches it. ``None`` (the
+    default) reads every loaded region, ticked or not, as before."""
     key_of = key_of or reportspec.doc_key
     out = Results()
     by_sample, order = {}, []
     approx = set()
     casa_names = set(casa_quant.samples) if casa_quant else set()
+    ticked_casa_names = casa_names if ticked is None else set()
+    if casa_names and ticked is not None:
+        for p in docs:
+            for r in p.regions:
+                if not ticked(r):
+                    continue
+                d = display(r) if display else r
+                label = (d.sample or r.sample
+                        or os.path.basename((p.path or "").rstrip("\\/"))
+                        or "sample")
+                name = casaquant.strip_sample_prefix(label)
+                if name in casa_names:
+                    ticked_casa_names.add(name)
     for p in docs:
         for r in p.regions:
+            if ticked is not None and not ticked(r):
+                continue
             if getattr(r, "fit", None) is None or not r.decodable:
                 continue
             d = display(r) if display else r
@@ -173,6 +194,8 @@ def collect(docs, display=None, key_of=None, casa_quant=None):
                 "are approximate.")
         out.samples.append(sample)
     for name in sorted(casa_names):
+        if name not in ticked_casa_names:
+            continue
         sample = Sample(f"casaxps:{name}", name,
                         casaxps=casa_quant.samples[name],
                         notes=[CASAXPS_NOTE])

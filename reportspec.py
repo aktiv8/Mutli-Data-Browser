@@ -376,8 +376,8 @@ def inventory(details, methods_text, calibration, file_rows, docs, figures,
         "no energy calibration recorded")
     put("files", file_rows, "no files loaded", len(file_rows or ()))
     put("metadata", docs, "no files loaded", len(docs or ()))
-    put("results", results, "no CasaXPS fits with sensitivity factors in "
-        "these files", len(results or ()))
+    put("results", results, "no ticked spectra have CasaXPS fits or "
+        "quantification", len(results or ()))
     put("images", has_images, "no pictures or maps in these files",
         len(image_items or ()))
     put("figures", figures and have_mpl,
