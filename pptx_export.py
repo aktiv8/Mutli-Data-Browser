@@ -543,6 +543,56 @@ def _fit_picture(deck, slide, png):
     return pic
 
 
+def _fmt(v, spec=".2f"):
+    return "" if v is None else format(v, spec)
+
+
+def _right_align(deck, shape, first):
+    for row in shape.table.rows:
+        for ci in range(first, len(shape.table.columns)):
+            for p in row.cells[ci].text_frame.paragraphs:
+                p.alignment = deck.ALIGN.RIGHT
+
+
+def _casaxps_slides(deck, s):
+    """One or more table slides per CasaXPS-exported table of a sample
+    (``s.casaxps``, see ``casaquant.py``): the numbers are CasaXPS's own,
+    not recomputed, so the footnote says that instead of a formula."""
+    cq = s.casaxps
+
+    def finish(slide):
+        deck.text(slide, MARGIN, 6.55, BODY_W, 0.55,
+                  [resultspages.CASAXPS_NOTE], size=10, color=GREY,
+                  space_after=0)
+        slide.notes_slide.notes_text_frame.text = resultspages.CASAXPS_NOTE
+
+    def table_slides(title, header, rows, weights):
+        for i in range(0, len(rows), RESULT_ROWS):
+            chunk = rows[i:i + RESULT_ROWS]
+            slide = deck.content_slide(
+                f"Quantification – {s.label}: {title}"
+                + (" (continued)" if i else ""),
+                None if i else s.label)
+            shape = deck.table(slide, MARGIN, TABLE_TOP, BODY_W, weights,
+                               header, chunk, size=11, row_h=0.32)
+            _right_align(deck, shape, len(header) - 1)
+            finish(slide)
+
+    if cq.survey:
+        table_slides("survey", ("Element", "%Conc"),
+                     [(r["element"], _fmt(r["pct"])) for r in cq.survey],
+                     [2.0, 1.0])
+    if cq.regions:
+        table_slides("regions", ("Name", "Position (eV)", "%At Conc"),
+                     [(r["name"], _fmt(r["position"], "g"),
+                       _fmt(r["at_pct"])) for r in cq.regions],
+                     [2.4, 1.4, 1.2])
+    if cq.dparam:
+        table_slides("D parameter", ("Name", "FWHM (eV)"),
+                     [(r["name"], _fmt(r["fwhm"], "g")) for r in cq.dparam],
+                     [2.0, 1.0])
+
+
 def _results_slides(deck, results, skip=()):
     """The Quantification slides: for each sample its composition (a chart,
     then a table, one depth level) or its depth profile (a chart, then at %
@@ -563,12 +613,12 @@ def _results_slides(deck, results, skip=()):
         slide.notes_slide.notes_text_frame.text = said
 
     def right(shape, first):
-        for row in shape.table.rows:
-            for ci in range(first, len(shape.table.columns)):
-                for p in row.cells[ci].text_frame.paragraphs:
-                    p.alignment = deck.ALIGN.RIGHT
+        _right_align(deck, shape, first)
 
     for s in samples:
+        if s.casaxps:
+            _casaxps_slides(deck, s)
+            continue
         if not s.is_profile:
             rows = resultspages.composition_cells(s.levels[0])
             survey_note = (resultspages.SURVEY_FOOTNOTE

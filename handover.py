@@ -7,6 +7,7 @@ experiment in one ZIP.
     <name>/report.pdf          the experiment report
     <name>/methods.txt         the methods text
     <name>/metadata/<file>.csv acquisition metadata, one row per spectrum
+    <name>/metadata/Quant_*.txt CasaXPS's own exported quantification (optional)
     <name>/spectra/vamas/<sample>.vms   one VAMAS file per sample
     <name>/spectra/csv/<sample>.csv     the same spectra as CSV
     <name>/figures/figure_01_<name>.png the saved figures
@@ -158,6 +159,24 @@ def metadata_parts(docs):
         parts.append(Part(f"metadata/{unique_name(base, used)}.csv",
                           f"acquisition metadata of {os.path.basename(p.path or base)}",
                           data=data))
+    return parts
+
+
+_CASAQUANT_NAMES = {"survey": "Quant_survey.txt", "regions": "Quant_regions.txt",
+                   "dparam": "Quant_Dparam.txt"}
+
+
+def casaquant_parts(raw):
+    """The raw CasaXPS-exported quantification files of a folder
+    (``casaquant.CasaQuant.raw``), verbatim, or [] when there are none."""
+    parts = []
+    for kind, name in _CASAQUANT_NAMES.items():
+        text = (raw or {}).get(kind)
+        if text:
+            parts.append(Part(
+                f"metadata/{name}",
+                "CasaXPS's own exported quantification (not recomputed)",
+                data=text.encode("latin-1")))
     return parts
 
 

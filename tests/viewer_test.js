@@ -246,6 +246,28 @@ function near(a, b, msg, tol) {
     });
   }
 
+  // ---- CasaXPS's own exported quantification (casaquant.py) ----
+  if (fx.casaxps) {
+    const cx = fx.casaxps;
+    eq(V.casaxpsSurveyRows(cx.sample_casaxps), cx.survey_rows, 'casaxps survey rows');
+    eq(V.casaxpsRegionsRows(cx.sample_casaxps), cx.regions_rows, 'casaxps regions rows');
+    eq(V.casaxpsDparamRows(cx.sample_casaxps), cx.dparam_rows, 'casaxps dparam rows');
+    const scsv = V.casaxpsCsv(cx.survey_rows).split('\r\n');
+    eq(scsv[0], 'Element,%Conc', 'casaxps CSV header');
+    eq(scsv[1], 'O 1s,1.82', 'casaxps CSV row');
+    const cdata = await V.decode(cx.payload_b64);
+    eq(cdata.samples[0].casaxps, cx.sample_casaxps,
+       'casaxps travels through the payload encode/decode round trip');
+    const cspecs = V.prepare(cdata);
+    check(V.quantGroups(cspecs).length === 0, 'the fixture region has no fit: no fit-derived group');
+    const bundle = V.bundleFiles(cdata, cspecs);
+    const names = bundle.map((f) => f.name);
+    check(names.indexOf('casaxps/A_survey.csv') >= 0, 'bundle includes the casaxps survey CSV');
+    check(names.indexOf('casaxps/A_regions.csv') >= 0, 'bundle includes the casaxps regions CSV');
+    check(names.indexOf('casaxps/A_dparam.csv') >= 0, 'bundle includes the casaxps D-parameter CSV');
+    check(bundle[0].data.indexOf('casaxps/') >= 0, 'README mentions the casaxps folder');
+  }
+
   // ---- the ZIP the page hands over: read back by Python's zipfile ----
   check(V.crc32(V.utf8('123456789')) === 0xCBF43926, 'crc32 of the standard check string');
   eq(V.safeName('a/b:c'), 'a_b_c', 'safeName replaces separators');

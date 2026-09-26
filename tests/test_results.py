@@ -15,6 +15,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 sys.path.insert(0, HERE)
 
+import casaquant  # noqa: E402
 import quant  # noqa: E402
 import reportspec as rs  # noqa: E402
 import resultspages as rp  # noqa: E402
@@ -72,6 +73,33 @@ def level(n, rows, etch=None, depth=None):
 
 def sample(label, levels):
     return rp.Sample(f"f1/{label}", label, levels)
+
+
+def casa_quant_of(**samples):
+    """A ``casaquant.CasaQuant`` from ``{name: {"survey":[(el,pct),...],
+    "regions":[(name,pos,pct),...], "dparam":[(name,fwhm),...]}}``."""
+    cq = casaquant.CasaQuant(folder="")
+    for name, data in samples.items():
+        cq.samples[name] = casaquant.SampleQuant(
+            survey=[{"element": e, "pct": p}
+                   for e, p in data.get("survey", ())],
+            regions=[{"name": n, "position": pos, "at_pct": p}
+                    for n, pos, p in data.get("regions", ())],
+            dparam=[{"name": n, "fwhm": f} for n, f in data.get("dparam", ())])
+    return cq
+
+
+def casaxps_sample(label):
+    """A ``resultspages.Sample`` whose numbers are CasaXPS's own export, as
+    ``resultspages.collect(..., casa_quant=)`` would build one."""
+    return rp.Sample(f"casaxps:{label}", label,
+                     casaxps=casaquant.SampleQuant(
+                         survey=[{"element": "O 1s", "pct": 1.82},
+                                {"element": "C 1s", "pct": 27.46}],
+                         regions=[{"name": "C 1s (Ring)", "position": 284.67,
+                                  "at_pct": 42.39}],
+                         dparam=[{"name": "C KVV", "fwhm": 13.5}]),
+                     notes=[rp.CASAXPS_NOTE])
 
 
 def three_element_level(n, etch=None, depth=None, ti=100.0):
@@ -297,6 +325,68 @@ class TestCollect(unittest.TestCase):
         self.assertEqual(res.samples[0].label, "Renamed")
 
 
+@unittest.skipUnless(HAVE_NP, "numpy not installed")
+class TestCasaxpsOverride(unittest.TestCase):
+    """CasaXPS's own exported quantification (Quant_survey.txt etc., see
+    casaquant.py) is preferred over a fit for any sample it names."""
+
+    def docs(self):
+        from test_metasummary import Doc
+        from test_quant import linear_region
+        return [Doc([linear_region()], "fits.vms")]     # sample "S"
+
+    def test_a_named_sample_gets_no_fit_derived_level(self):
+        cq = casa_quant_of(S=dict(survey=[("O 1s", 1.82), ("C 1s", 27.46)]))
+        res = rp.collect(self.docs(), casa_quant=cq)
+        self.assertEqual(len(res.samples), 1)
+        s = res.samples[0]
+        self.assertEqual(s.label, "S")
+        self.assertEqual(s.levels, [])
+        self.assertIsNotNone(s.casaxps)
+        self.assertEqual(s.casaxps.survey,
+                         [{"element": "O 1s", "pct": 1.82},
+                          {"element": "C 1s", "pct": 27.46}])
+        self.assertIn(rp.CASAXPS_NOTE, s.notes)
+
+    def test_an_unnamed_sample_still_gets_its_fit(self):
+        cq = casa_quant_of(**{"Someone else": dict(survey=[("O 1s", 1.0)])})
+        res = rp.collect(self.docs(), casa_quant=cq)
+        labels = {s.label: s for s in res.samples}
+        self.assertIn("S", labels)
+        self.assertTrue(labels["S"].levels)
+        self.assertIsNone(labels["S"].casaxps)
+        self.assertIn("Someone else", labels)
+        self.assertEqual(labels["Someone else"].levels, [])
+        self.assertIsNotNone(labels["Someone else"].casaxps)
+
+    def test_matches_past_a_sample_name_prefix_in_the_vamas_file(self):
+        """A real CasaXPS-exported VAMAS file can carry "Sample Name: " as
+        part of its own SAMPLE IDENTIFIER field (seen in a real PET
+        example); the quant text files never repeat that prefix, so the
+        match must strip it from the region's side too."""
+        from test_metasummary import Doc
+        from test_quant import linear_region
+        r = linear_region()
+        r.sample = "Sample Name: S"
+        cq = casa_quant_of(S=dict(survey=[("O 1s", 1.82)]))
+        res = rp.collect([Doc([r], "fits.vms")], casa_quant=cq)
+        self.assertEqual(len(res.samples), 1)
+        self.assertEqual(res.samples[0].label, "S")
+        self.assertIsNotNone(res.samples[0].casaxps)
+
+    def test_no_casa_quant_behaves_as_before(self):
+        res = rp.collect(self.docs())
+        self.assertEqual(len(res.samples), 1)
+        self.assertIsNone(res.samples[0].casaxps)
+
+    def test_children_include_casaxps_only_samples(self):
+        cq = casa_quant_of(**{"Extra": dict(survey=[("O 1s", 1.0)])})
+        res = rp.collect(self.docs(), casa_quant=cq)
+        keys = dict(res.children())
+        self.assertIn("casaxps:Extra", keys)
+        self.assertEqual(keys["casaxps:Extra"], "Extra")
+
+
 class TestSpecAndInventory(unittest.TestCase):
     def test_the_section_sits_after_the_summary_and_is_off_for_old_names(self):
         order = rs.order(rs.default_spec())
@@ -392,6 +482,17 @@ class TestPdf(Tmp):
         spec = rs.with_on(rs.default_spec(), "results", False)
         self.assertNotIn("Quantification", "\n".join(self.build(spec)))
 
+    def test_a_casaxps_sample_shows_its_own_tables_not_a_fit(self):
+        results = rp.Results(samples=[casaxps_sample("PtCl2")])
+        text = "\n".join(self.build(results=results))
+        for token in ("PtCl2", "Survey (% concentration)", "O 1s", "1.82",
+                      "C 1s", "27.46", "Regions (% atomic concentration)",
+                      "C 1s (Ring)", "284.67", "42.39", "D parameter",
+                      "C KVV", "13.5", "CasaXPS's own exported result"):
+            self.assertIn(token, text)
+        self.assertNotIn("Area / RSF", text)
+        self.assertNotIn("Fit RMS", text)
+
 
 @unittest.skipUnless(HAVE_PPTX and HAVE_PDF, "python-pptx not installed")
 class TestDeck(Tmp):
@@ -454,6 +555,25 @@ class TestDeck(Tmp):
         self.assertNotIn("Quantification – Film A", titles)
         titles = [self.title(s) for s in self.build(results=None)]
         self.assertFalse(any(t.startswith("Quantification") for t in titles))
+
+    def test_a_casaxps_sample_gets_its_own_table_slides(self):
+        results = rp.Results(samples=[casaxps_sample("PtCl2")])
+        slides = self.build(results=results)
+        titles = [self.title(s) for s in slides]
+        self.assertIn("Quantification – PtCl2: survey", titles)
+        self.assertIn("Quantification – PtCl2: regions", titles)
+        self.assertIn("Quantification – PtCl2: D parameter", titles)
+        survey = slides[titles.index("Quantification – PtCl2: survey")]
+        cells = [sh for sh in survey.shapes if sh.has_table][0].table
+        self.assertEqual(cells.cell(0, 0).text, "Element")
+        self.assertEqual(cells.cell(1, 0).text, "O 1s")
+        self.assertEqual(cells.cell(1, 1).text, "1.82")
+        notes = survey.notes_slide.notes_text_frame.text
+        self.assertIn("CasaXPS's own exported result", notes)
+        regions = slides[titles.index("Quantification – PtCl2: regions")]
+        rcells = [sh for sh in regions.shapes if sh.has_table][0].table
+        self.assertEqual(rcells.cell(1, 0).text, "C 1s (Ring)")
+        self.assertEqual(rcells.cell(1, 2).text, "42.39")
 
 
 if __name__ == "__main__":

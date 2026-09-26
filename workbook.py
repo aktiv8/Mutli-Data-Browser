@@ -16,6 +16,9 @@ files is JSON: opening a workbook never executes anything from it.
     holder.json     holder-photo calibration (stage mm -> photo pixels)
     report.json     optional: what the report contains and in what order
                     (see reportspec); a build that does not know it ignores it
+    casa_quant.json  optional: CasaXPS's own exported quantification of the
+                    loaded folder (see casaquant), raw text and all; a build
+                    that does not know it ignores it
     cache/spectra.json.gz   optional: the parsed spectra, fits and curves as of
                             the save (the HTML browser's data), with the hash
                             of every source file it was made from
@@ -92,6 +95,7 @@ class Workbook:
     annotations: dict = field(default_factory=dict)  # annotations.to_json()
     holder: dict = field(default_factory=dict)      # {"calibration": {...}}
     report: dict = field(default_factory=dict)      # reportspec spec ({} = none)
+    casa_quant: dict = field(default_factory=dict)  # casaquant.to_json() ({} = none)
     cache: dict | None = None    # results to store (write only): see encode_cache
     created: str = ""
     modified: str = ""
@@ -357,6 +361,8 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> list:
             put_json("holder.json", wb.holder)
             if wb.report:                 # optional: older builds ignore it
                 put_json("report.json", wb.report)
+            if wb.casa_quant:              # optional: older builds ignore it
+                put_json("casa_quant.json", wb.casa_quant)
             for f, entry in zip(wb.files, manifest["files"]):
                 if f.members:
                     for (src, _rel), m in zip(f.members, entry["members"]):
@@ -441,6 +447,8 @@ def load(path, extract_dir) -> Workbook:
         wb.holder = hold if isinstance(hold, dict) else {}
         rep = _read_json(zf, "report.json", {})
         wb.report = rep if isinstance(rep, dict) else {}
+        cq = _read_json(zf, "casa_quant.json", {})
+        wb.casa_quant = cq if isinstance(cq, dict) else {}
 
         os.makedirs(extract_dir, exist_ok=True)
         for entry in manifest.get("files", []):

@@ -29,6 +29,7 @@ import os
 import re
 from dataclasses import dataclass, field
 
+import casaquant
 import quant
 import reportspec
 
@@ -68,6 +69,9 @@ class Sample:
     label: str
     levels: list = field(default_factory=list)
     notes: list = field(default_factory=list)     # what a reader should know
+    casaxps: object = None    # casaquant.SampleQuant: CasaXPS's own export,
+                              # preferred over the levels above when present
+                              # (see collect(); levels is then empty)
 
     @property
     def is_profile(self):
@@ -102,27 +106,45 @@ def _num(md, key):
         return None
 
 
-def collect(docs, display=None, key_of=None):
+CASAXPS_NOTE = ("Quantification for this sample is CasaXPS's own exported "
+               "result (Quant_survey.txt / Quant_regions.txt / "
+               "Quant_Dparam.txt), not recomputed from an embedded fit.")
+
+
+def collect(docs, display=None, key_of=None, casa_quant=None):
     """Read the CasaXPS fits of the loaded files (``display`` maps a region to
-    the copy that is drawn, with the user's names and binding-energy shift)."""
+    the copy that is drawn, with the user's names and binding-energy shift).
+
+    ``casa_quant`` (a ``casaquant.CasaQuant``, see that module) is preferred
+    over a fit for any sample it names: no fit-derived level is built for
+    that sample at all, and its ``Sample.casaxps`` carries CasaXPS's own
+    exported numbers instead (three independent flat tables -- see
+    ``casaquant.py`` for why they are not nested one inside another). The
+    match strips a "Sample Name: " prefix from the region's own sample
+    identifier before comparing: a VAMAS file CasaXPS itself exported can
+    carry that same cosmetic prefix in its SAMPLE IDENTIFIER field, while
+    the quant text files never repeat it in the samples they list."""
     key_of = key_of or reportspec.doc_key
     out = Results()
     by_sample, order = {}, []
     approx = set()
+    casa_names = set(casa_quant.samples) if casa_quant else set()
     for p in docs:
         for r in p.regions:
             if getattr(r, "fit", None) is None or not r.decodable:
                 continue
             d = display(r) if display else r
+            label = (d.sample or r.sample
+                    or os.path.basename((p.path or "").rstrip("\\/"))
+                    or "sample")
+            if casaquant.strip_sample_prefix(label) in casa_names:
+                continue                # CasaXPS's own export is preferred
             rows = quant.fit_rows(d)
             if not rows:
                 continue
             k = (key_of(p), r.sample)
             if k not in by_sample:
-                by_sample[k] = Sample(
-                    f"{k[0]}/{k[1]}", d.sample or r.sample
-                    or os.path.basename((p.path or "").rstrip("\\/"))
-                    or "sample")
+                by_sample[k] = Sample(f"{k[0]}/{k[1]}", label)
                 order.append(k)
             sample = by_sample[k]
             lv = r.etch_level
@@ -149,6 +171,11 @@ def collect(docs, display=None, key_of=None):
                 "The background under some of the fits of "
                 f"{sample.label} is not reproduced exactly, so their areas "
                 "are approximate.")
+        out.samples.append(sample)
+    for name in sorted(casa_names):
+        sample = Sample(f"casaxps:{name}", name,
+                        casaxps=casa_quant.samples[name],
+                        notes=[CASAXPS_NOTE])
         out.samples.append(sample)
     return out
 

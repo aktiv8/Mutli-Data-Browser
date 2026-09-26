@@ -96,6 +96,8 @@ import annotations
 import appinfo
 import calibration
 import casafit
+import casaquant
+import casaquant_ui
 import elements
 import handover
 import htmlbrowser
@@ -533,6 +535,8 @@ class Workspace:
         self.panel_views = {}       # group key -> panelview override
         self._trace_limit_now = None    # window the trace slider describes
         self.calib =holder.sanitise(load_calibration())
+        self.casa_quant = None      # casaquant.CasaQuant of the loaded folder
+        self._casa_quant_scanned = set()   # folders already scanned for it
         self._open = {}             # id(node) -> expanded?
         self._render_job = None
         self._axmap = {}
@@ -1482,8 +1486,13 @@ class Workspace:
     def _build_side_tabs(self):
         self.tab_images = ttk.Frame(self.nb)
         self.tab_map = ttk.Frame(self.nb)
+        self.tab_casaquant = ttk.Frame(self.nb)
         self.nb.add(self.tab_images, text="Images")
         self.nb.add(self.tab_map, text="Stage map")
+        self.nb.add(self.tab_casaquant, text="CasaXPS quant")
+        self.casaquant_panel = casaquant_ui.CasaQuantPanel(
+            self.tab_casaquant, self)
+        self.casaquant_panel.pack(fill="both", expand=True)
 
         # images: horizontal thumbnail strip on top, viewer below
         strip = ttk.Frame(self.tab_images)
@@ -1605,8 +1614,29 @@ class Workspace:
         if folder:
             self._open_folder_path(folder)
 
+    def _scan_casa_quant(self, folder):
+        """Look for CasaXPS-exported quantification files (Quant_survey.txt
+        etc., see ``casaquant``) in ``folder`` and merge them into
+        ``self.casa_quant``; a folder is scanned at most once per session. A
+        sample already present (from an earlier folder) is left alone."""
+        key = os.path.normcase(os.path.abspath(folder))
+        if key in self._casa_quant_scanned:
+            return
+        self._casa_quant_scanned.add(key)
+        found = casaquant.load(folder)
+        if found is None:
+            return
+        if self.casa_quant is None:
+            self.casa_quant = found
+        else:
+            for name, sample in found.samples.items():
+                self.casa_quant.samples.setdefault(name, sample)
+            self.casa_quant.notes.extend(found.notes)
+        self._refresh_info()
+
     def _open_folder_path(self, folder):
         self._add_recent(folder)
+        self._scan_casa_quant(folder)
         if looks_like_experiment(folder):       # an Avantage experiment
             problems = []
             for root in experiment_roots(folder):    # several -> several sessions
@@ -1702,6 +1732,8 @@ class Workspace:
         if any(p.path == os.path.abspath(path) or p.path == path
                for p in self.docs):
             return [f"{name}: already loaded."]
+        if not os.path.isdir(path) and not path.lower().endswith(".vgx"):
+            self._scan_casa_quant(os.path.dirname(os.path.abspath(path)))
         try:
             if os.path.isdir(path) or path.lower().endswith(".vgx"):
                 parser = self._load_experiment(path)
@@ -3199,7 +3231,8 @@ class Workspace:
         return json.dumps({"d": self.details, "l": self.logo,
                            "f": self.figures, "s": st, "files": files,
                            "a": self.ann.to_json(), "c": self.calib,
-                           "r": self.report_spec},
+                           "r": self.report_spec,
+                           "cq": casaquant.to_json(self.casa_quant)},
                           sort_keys=True, default=str)
 
     def _wb_dirty(self):
@@ -3245,6 +3278,9 @@ class Workspace:
         self._fid_used = set()
         self.ann = annotations.Annotations()
         self.calib = holder.sanitise(load_calibration())
+        self.casa_quant = None
+        self._casa_quant_scanned = set()
+        self._refresh_info()
 
     def new_workbook(self):
         if not self._confirm_discard():
@@ -3277,7 +3313,7 @@ class Workspace:
             payload = htmlbrowser.build_payload(
                 self.docs, self._display_for_export, self._report_details(),
                 self.methods_text(), self.calibration_statement(), [], None,
-                cameras=False, snapmaps=False)
+                cameras=False, snapmaps=False, casa_quant=self.casa_quant)
         except htmlbrowser.ViewerError:
             return None
         for f, p in zip(payload["files"], self.docs):
@@ -3310,6 +3346,7 @@ class Workspace:
             annotations=self.ann.to_json(),
             holder={"calibration": self.calib} if self.calib else {},
             report=copy.deepcopy(self.report_spec),
+            casa_quant=casaquant.to_json(self.casa_quant),
             created=self.wb_created, extra=dict(self.wb_extra),
             cache=self._results_cache())
         return book, preview, total
@@ -3379,6 +3416,8 @@ class Workspace:
         self.ann = annotations.Annotations.from_json(book.annotations)
         self.calib = (holder.sanitise(book.holder.get("calibration"))
                       or self.calib)
+        self.casa_quant = casaquant.from_json(book.casa_quant)
+        self._refresh_info()
         problems = list(book.warnings)
         for f in book.files:
             problems += self._add_file(f.path, file_id=f.id,
@@ -3672,13 +3711,17 @@ class Workspace:
 
     def _results(self):
         """The quantification the reports lay out (``resultspages``), read
-        from the fits of the loaded files as they are drawn; remembered until
-        the files or the annotations change."""
-        key = (tuple(id(p) for p in self.docs), self._ann_serial)
+        from the fits of the loaded files as they are drawn, or from
+        CasaXPS's own exported files where a folder had them (preferred);
+        remembered until the files, the annotations or the quantification
+        change."""
+        key = (tuple(id(p) for p in self.docs), self._ann_serial,
+              id(self.casa_quant),
+              len(self.casa_quant.samples) if self.casa_quant else 0)
         if self._results_memo is None or self._results_memo[0] != key:
             self._results_memo = (key, resultspages.collect(
                 self.docs, self._display,
-                lambda p: reportspec.doc_key(p)))
+                lambda p: reportspec.doc_key(p), self.casa_quant))
         return self._results_memo[1]
 
     def _build_report(self, path, spec=None, notes=None):
@@ -3729,7 +3772,7 @@ class Workspace:
         return htmlbrowser.build_payload(
             self.docs, self._display_for_export, self._report_details(),
             self.methods_text(), self.calibration_statement(), figures,
-            self.calib)
+            self.calib, casa_quant=self.casa_quant)
 
     def export_html_browser(self):
         if not self._report_ready():
@@ -3832,6 +3875,8 @@ class Workspace:
             notes += sn
         if "metadata" in sections:
             parts += handover.metadata_parts(self.docs)
+            if self.casa_quant:
+                parts += handover.casaquant_parts(self.casa_quant.raw)
         if "figures" in sections and HAVE_MPL:
             figs = self._report_figures()
             pages = [self._figure_pngs(f) for f in figs]
@@ -4388,11 +4433,13 @@ class Workspace:
 
     # -- images tab -----------------------------------------------------
     def _refresh_info(self):
-        """Show the Images / Stage-map notebook only when a loaded file has
-        images or stage positions; otherwise Details gets the full height."""
+        """Show the Images / Stage-map / CasaXPS-quant notebook only when
+        the loaded files (or folder) have something for it; otherwise
+        Details gets the full height."""
         has_img = any(p.images for p in self.docs)
         has_pos = any(p.sample_positions() for p in self.docs)
-        show = has_img or has_pos
+        has_quant = bool(self.casa_quant)
+        show = has_img or has_pos or has_quant
         on = str(self.nb) in [str(x) for x in self.info_pane.panes()]
         if show and not on:
             self.info_pane.add(self.nb, weight=2)
@@ -4400,10 +4447,15 @@ class Workspace:
             self.info_pane.forget(self.nb)
         self.nb.tab(self.tab_images, state="normal" if has_img else "hidden")
         self.nb.tab(self.tab_map, state="normal" if has_pos else "hidden")
+        self.nb.tab(self.tab_casaquant,
+                   state="normal" if has_quant else "hidden")
+        self.casaquant_panel.refresh()
         if has_pos and not has_img:
             self.nb.select(self.tab_map)
         elif has_img:
             self.nb.select(self.tab_images)
+        elif has_quant:
+            self.nb.select(self.tab_casaquant)
 
     def _refresh_images(self):
         if getattr(self, "_thumb_job", None):

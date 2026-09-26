@@ -251,6 +251,45 @@ def _grid(header, rows, widths, look, right_from=1, kinds=None):
     return t
 
 
+def _casaxps_fmt(v, spec=".2f"):
+    return "" if v is None else format(v, spec)
+
+
+def _casaxps_story(head, cq, look, st):
+    """One sample's CasaXPS-exported quantification (``casaquant.py``):
+    independent flat tables, shown exactly as CasaXPS wrote them -- no
+    fit, no recomputed atomic percent."""
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Spacer
+
+    story = [head]
+    if cq.survey:
+        story.append(Paragraph("Survey (% concentration)", st["label"]))
+        t = _grid(("Element", "%Conc"),
+                 [(r["element"], _casaxps_fmt(r["pct"])) for r in cq.survey],
+                 [60, 30], look, right_from=1)
+        t.hAlign = "LEFT"
+        story += [t, Spacer(1, 3 * mm)]
+    if cq.regions:
+        story.append(Paragraph("Regions (% atomic concentration)",
+                               st["label"]))
+        t = _grid(("Name", "Position (eV)", "%At Conc"),
+                 [(r["name"], _casaxps_fmt(r["position"], "g"),
+                   _casaxps_fmt(r["at_pct"])) for r in cq.regions],
+                 [70, 35, 30], look, right_from=1)
+        t.hAlign = "LEFT"
+        story += [t, Spacer(1, 3 * mm)]
+    if cq.dparam:
+        story.append(Paragraph("D parameter", st["label"]))
+        t = _grid(("Name", "FWHM (eV)"),
+                 [(r["name"], _casaxps_fmt(r["fwhm"], "g"))
+                  for r in cq.dparam],
+                 [60, 30], look, right_from=1)
+        t.hAlign = "LEFT"
+        story += [t, Spacer(1, 3 * mm)]
+    return story
+
+
 def results_story(results, skip=(), look=None, sid="results"):
     """The Quantification section: how the numbers are made, then for each
     sample its composition (chart and table, one level) or its depth profile
@@ -271,6 +310,9 @@ def results_story(results, skip=(), look=None, sid="results"):
     for s in samples:
         story.append(CondPageBreak(70 * mm))
         head = _mark(Paragraph(xml_escape(s.label), st["h2"]), sid, s.label)
+        if s.casaxps:
+            story += _casaxps_story(head, s.casaxps, look, st)
+            continue
         if not s.is_profile:
             rows = resultspages.composition_cells(s.levels[0])
             cpng = resultspages.composition_png(s.levels[0], size=(7.0, 3.0),

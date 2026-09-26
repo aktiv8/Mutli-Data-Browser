@@ -127,6 +127,42 @@ class TestRoundTrip(Tmp):
         self.assertEqual(read(path), before)
 
 
+class TestCasaQuantPersistence(Tmp):
+    """casa_quant.json (CasaXPS's own exported quantification, see
+    casaquant.py): optional, ignored by a build that predates it."""
+
+    def casa_quant_json(self):
+        return {
+            "folder": r"D:\Temp\for claude files\PtCl2",
+            "notes": [],
+            "raw": {"survey": "Sample Identifier\t...\n"},
+            "samples": {
+                "PtCl2": {
+                    "survey": [{"element": "O 1s", "pct": 1.82}],
+                    "regions": [{"name": "C 1s", "position": 284.69,
+                                "at_pct": 16.84}],
+                    "dparam": []}}}
+
+    def test_round_trips(self):
+        wb = wbk.Workbook(casa_quant=self.casa_quant_json())
+        path = os.path.join(self.dir, "exp" + wbk.EXT)
+        wbk.save(path, wb)
+        out = wbk.load(path, os.path.join(self.dir, "x"))
+        self.assertEqual(out.casa_quant, self.casa_quant_json())
+
+    def test_absent_when_empty(self):
+        """No casa_quant.json member is written when there is nothing to
+        say, and an old build that has never heard of it loads cleanly."""
+        wb = wbk.Workbook()
+        path = os.path.join(self.dir, "exp" + wbk.EXT)
+        wbk.save(path, wb)
+        with zipfile.ZipFile(path) as zf:
+            self.assertNotIn("casa_quant.json", zf.namelist())
+        out = wbk.load(path, os.path.join(self.dir, "x"))
+        self.assertEqual(out.casa_quant, {})
+        self.assertEqual(out.warnings, [])
+
+
 class TestSafety(Tmp):
     def crafted(self, manifest, members=None):
         path = os.path.join(self.dir, "bad" + wbk.EXT)

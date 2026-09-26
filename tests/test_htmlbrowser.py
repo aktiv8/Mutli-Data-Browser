@@ -21,6 +21,7 @@ ROOT =os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import annotations  # noqa: E402
+import casaquant  # noqa: E402
 import exporters  # noqa: E402
 import holder  # noqa: E402
 import htmlbrowser as hb  # noqa: E402
@@ -346,6 +347,73 @@ def camera_blob(name="S1 Pt #001a  10:00"):
 
 
 @unittest.skipUnless(HAVE_NP and HAVE_PIL, "numpy and Pillow needed")
+def casa_quant_of(**samples):
+    """A ``casaquant.CasaQuant`` from ``{name: {"survey":[(el,pct),...],
+    "regions":[(name,pos,pct),...], "dparam":[(name,fwhm),...]}}``."""
+    cq = casaquant.CasaQuant(folder="")
+    for name, data in samples.items():
+        cq.samples[name] = casaquant.SampleQuant(
+            survey=[{"element": e, "pct": p}
+                   for e, p in data.get("survey", ())],
+            regions=[{"name": n, "position": pos, "at_pct": p}
+                    for n, pos, p in data.get("regions", ())],
+            dparam=[{"name": n, "fwhm": f} for n, f in data.get("dparam", ())])
+    return cq
+
+
+class TestCasaxpsPayload(unittest.TestCase):
+    """CasaXPS's own exported quantification (Quant_survey.txt etc., see
+    casaquant.py) is preferred over the fit-derived breakdown for a sample
+    it names, in the page's Quantification tab; the regions themselves
+    (and any embedded fit) are unaffected."""
+
+    def test_a_named_sample_gets_a_casaxps_block(self):
+        cq = casa_quant_of(A=dict(survey=[("O 1s", 1.82), ("C 1s", 27.46)],
+                                  regions=[("C 1s (Ring)", 284.69, 16.84)],
+                                  dparam=[("C KVV", 13.5)]))
+        d = doc("a.vms", [region("C 1s", "A"), region("O 1s", "B")])
+        p = hb.build_payload([d], casa_quant=cq)
+        by_name = {s["name"]: s for s in p["samples"]}
+        self.assertIn("casaxps", by_name["A"])
+        self.assertNotIn("casaxps", by_name["B"])
+        cx = by_name["A"]["casaxps"]
+        self.assertEqual(cx["survey"], [{"element": "O 1s", "pct": 1.82},
+                                        {"element": "C 1s", "pct": 27.46}])
+        self.assertEqual(cx["regions"], [{"name": "C 1s (Ring)",
+                                         "position": 284.69, "at_pct": 16.84}])
+        self.assertEqual(cx["dparam"], [{"name": "C KVV", "fwhm": 13.5}])
+        # the region itself is still there, untouched
+        self.assertEqual(by_name["A"]["regions"][0]["name"], "C 1s")
+
+    def test_no_casa_quant_means_no_key(self):
+        p = hb.build_payload([doc("a.vms", [region("C 1s", "A")])])
+        self.assertNotIn("casaxps", p["samples"][0])
+
+    def test_matches_past_a_sample_name_prefix(self):
+        cq = casa_quant_of(A=dict(survey=[("O 1s", 1.0)]))
+        d = doc("a.vms", [region("C 1s", "Sample Name: A")])
+        p = hb.build_payload([d], casa_quant=cq)
+        self.assertIn("casaxps", p["samples"][0])
+
+    def test_matches_the_display_name_not_the_raw_one(self):
+        cq = casa_quant_of(Renamed=dict(survey=[("O 1s", 1.0)]))
+        d = doc("a.vms", [region("C 1s", "raw")])
+
+        def display(r):
+            q = copy.copy(r)
+            q.sample = "Renamed"
+            return q
+        p = hb.build_payload([d], display, casa_quant=cq)
+        self.assertIn("casaxps", p["samples"][0])
+
+    def test_a_note_is_added(self):
+        cq = casa_quant_of(A=dict(survey=[("O 1s", 1.0)]))
+        p = hb.build_payload([doc("a.vms", [region("C 1s", "A")])],
+                             casa_quant=cq)
+        self.assertTrue(any("CasaXPS's own exported result" in n
+                            for n in p["build_notes"]))
+
+
 class TestCamerasAndMaps(unittest.TestCase):
     def payload(self, **kw):
         cube = map_cube()
@@ -730,6 +798,31 @@ class TestJavaScript(unittest.TestCase):
                            "candidate_be": [g[0] for g in got]})
         return {"table": table, "cases": cases, "nearby": nearby}
 
+    def casaxps_fixture(self):
+        """CasaXPS's own exported quantification for a sample (see
+        casaquant.py): the payload's `casaxps` block and the expected rows
+        of the pure JS row/CSV builders."""
+        import casaquant
+        cq = casaquant.CasaQuant(folder="")
+        cq.samples["A"] = casaquant.SampleQuant(
+            survey=[{"element": "O 1s", "pct": 1.82},
+                   {"element": "C 1s", "pct": 27.46}],
+            regions=[{"name": "C 1s (Ring)", "position": 284.69,
+                     "at_pct": 16.84}],
+            dparam=[{"name": "C KVV", "fwhm": 13.5}])
+        d = doc("a.vms", [region("C 1s", "A")])
+        payload = hb.build_payload([d], casa_quant=cq)
+        sample_cx = payload["samples"][0]["casaxps"]
+        return {
+            "payload_b64": hb.encode_payload(payload),
+            "sample_casaxps": sample_cx,
+            "survey_rows": [["Element", "%Conc"], ["O 1s", 1.82],
+                            ["C 1s", 27.46]],
+            "regions_rows": [["Name", "Position (eV)", "%At Conc"],
+                             ["C 1s (Ring)", 284.69, 16.84]],
+            "dparam_rows": [["Name", "FWHM (eV)"], ["C KVV", 13.5]],
+        }
+
     def fit_fixture(self, tmp):
         """A fitted spectrum: the payload, the app's own CSV of it (which
         includes the fit columns) and its fit columns as the app names them."""
@@ -800,6 +893,7 @@ class TestJavaScript(unittest.TestCase):
             if HAVE_NP:
                 fx["map"] = self.map_fixture()
             fx["elements"] = self.element_fixture()
+            fx["casaxps"] = self.casaxps_fixture()
             if HAVE_FIT:
                 fx["fit"] = self.fit_fixture(tmp)
             zip_out = os.path.join(tmp, "bundle.zip")

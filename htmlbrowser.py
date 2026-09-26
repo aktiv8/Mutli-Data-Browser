@@ -34,6 +34,7 @@ import zlib
 
 import annotations as an
 import appinfo
+import casaquant
 import holder
 import quant
 import readers.base as rbase
@@ -402,7 +403,7 @@ def _meta(md):
 
 def build_payload(docs, display=None, details=None, methods_text="",
                   calibration="", figures=(), calib=None, generated=None,
-                  cameras=True, snapmaps=True, lines=None):
+                  cameras=True, snapmaps=True, lines=None, casa_quant=None):
     """The data of the browser as a JSON-able dict.
 
     ``figures`` is ``[{"name", "caption", "pages": [png bytes]}]``; ``calib``
@@ -411,7 +412,12 @@ def build_payload(docs, display=None, details=None, methods_text="",
     pictures and the SnapMap pixels off; anything left out or thinned to fit
     the size limits is said in ``build_notes``. ``lines`` is the element-line
     table (default: ``xpslines.load_lines()``); it feeds the page's peak
-    identification and the automatic labels of surveys."""
+    identification and the automatic labels of surveys. ``casa_quant`` (a
+    ``casaquant.CasaQuant``) gives a sample it names its own
+    ``"casaxps"`` block (CasaXPS's own exported quantification -- see
+    ``casaquant.py``); the page's Quantification tab shows that instead of
+    the fit-derived breakdown for that sample, but the sample's regions and
+    any embedded fit (curve overlay, CSV) are unaffected."""
     details = details or {}
     element_lines = xpslines.load_lines() if lines is None else lines
     samples, files, notes = [], [], []
@@ -419,6 +425,7 @@ def build_payload(docs, display=None, details=None, methods_text="",
     n_regions = 0
     fit_budget, fit_dropped = [FIT_BUDGET], 0
     label_map = {}                       # (id(parser), original sample) -> label
+    casa_names = set(casa_quant.samples) if casa_quant else set()
     for fi, p in enumerate(docs):
         ann = getattr(p, "annotations", None)
         fid = getattr(p, "file_id", "")
@@ -440,6 +447,17 @@ def build_payload(docs, display=None, details=None, methods_text="",
                     "regions": []}
                 order.append(r.sample)
                 label_map[(id(p), r.sample)] = d.sample
+                if casa_names:
+                    label = (d.sample or r.sample
+                            or os.path.basename((p.path or "").rstrip("\\/"))
+                            or "sample")
+                    cq = casa_quant.samples.get(
+                        casaquant.strip_sample_prefix(label))
+                    if cq is not None:
+                        entry["casaxps"] = {
+                            "survey": list(cq.survey),
+                            "regions": list(cq.regions),
+                            "dparam": list(cq.dparam)}
             rnote, marks = "", []
             if ann is not None:
                 rnote = ann.region_notes.get(
@@ -481,6 +499,16 @@ def build_payload(docs, display=None, details=None, methods_text="",
         notes.append(f"Fit curves were left out of {fit_dropped} "
                      f"spectr{'um' if fit_dropped == 1 else 'a'} to keep the "
                      "file small; their fit tables are still there.")
+    casaxps_samples = [s.get("name") or "" for s in samples
+                      if "casaxps" in s]
+    if casaxps_samples:
+        notes.append(
+            "Quantification for "
+            + (casaxps_samples[0] if len(casaxps_samples) == 1
+               else f"{len(casaxps_samples)} samples")
+            + " is CasaXPS's own exported result (Quant_survey.txt / "
+              "Quant_regions.txt / Quant_Dparam.txt), not recomputed from "
+              "an embedded fit.")
     for i, s in enumerate(samples):
         s["id"] = f"s{i}"
         for j, r in enumerate(s["regions"]):

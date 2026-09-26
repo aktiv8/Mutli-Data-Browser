@@ -60,6 +60,19 @@ class TestNames(unittest.TestCase):
         self.assertEqual(ho.unique_name("B", used), "B")
 
 
+class TestCasaquantParts(unittest.TestCase):
+    def test_only_the_files_present_are_included(self):
+        parts = ho.casaquant_parts({"survey": "S\t1\n", "dparam": "D\t2\n"})
+        self.assertEqual({p.arc for p in parts},
+                         {"metadata/Quant_survey.txt", "metadata/Quant_Dparam.txt"})
+        survey = next(p for p in parts if p.arc.endswith("survey.txt"))
+        self.assertEqual(survey.read(), "S\t1\n".encode("latin-1"))
+
+    def test_nothing_when_no_raw_files(self):
+        self.assertEqual(ho.casaquant_parts({}), [])
+        self.assertEqual(ho.casaquant_parts(None), [])
+
+
 class TestSpectra(unittest.TestCase):
     def test_one_vamas_and_csv_per_sample(self):
         d = doc("a.vms", [region("C 1s", "A"), region("O 1s", "A", lo=525,

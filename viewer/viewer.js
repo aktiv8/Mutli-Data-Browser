@@ -295,6 +295,33 @@
     }).join('\r\n') + '\r\n';
   };
 
+  /* CasaXPS's own exported quantification (Quant_survey.txt etc., see
+     casaquant.py): a sample it names carries its own `casaxps` block,
+     preferred over the fit-derived table above for that sample. The three
+     tables are independent flat lists, not nested one inside another (a
+     real Quant_regions.txt can list components with no matching element in
+     the same folder's Quant_survey.txt) -- shown exactly as CasaXPS wrote
+     them, nothing recomputed. */
+  V.casaxpsSurveyRows = function (cq) {
+    return [['Element', '%Conc']].concat((cq.survey || []).map(function (r) {
+      return [r.element, r.pct === null || r.pct === undefined ? '' : r.pct];
+    }));
+  };
+  V.casaxpsRegionsRows = function (cq) {
+    return [['Name', 'Position (eV)', '%At Conc']].concat((cq.regions || []).map(function (r) {
+      return [r.name, r.position === null || r.position === undefined ? '' : r.position,
+              r.at_pct === null || r.at_pct === undefined ? '' : r.at_pct];
+    }));
+  };
+  V.casaxpsDparamRows = function (cq) {
+    return [['Name', 'FWHM (eV)']].concat((cq.dparam || []).map(function (r) {
+      return [r.name, r.fwhm === null || r.fwhm === undefined ? '' : r.fwhm];
+    }));
+  };
+  V.casaxpsCsv = function (rows) {
+    return rows.map(function (r) { return r.map(V.csvField).join(','); }).join('\r\n') + '\r\n';
+  };
+
   /* ------------------------------------------------- element identification */
   /* mirrors xpslines.py: `el` is the payload's element table ({lines: [element, line,
      be, ke, rank], common, bonus, hv}); an Auger line has a kinetic energy, so its
@@ -407,14 +434,30 @@
     });
     var groups = V.quantGroups(specs);
     if (groups.length) files.push({ name: 'quantification.csv', data: '﻿' + V.quantCsv(groups, null, false) });
+    var casaxpsFiles = [];
+    (data.samples || []).forEach(function (sm) {
+      if (!sm.casaxps) return;
+      var base = V.safeName(sm.name || 'sample');
+      [['survey', V.casaxpsSurveyRows(sm.casaxps)],
+       ['regions', V.casaxpsRegionsRows(sm.casaxps)],
+       ['dparam', V.casaxpsDparamRows(sm.casaxps)]].forEach(function (t) {
+        if (t[1].length > 1) {
+          casaxpsFiles.push({ name: 'casaxps/' + base + '_' + t[0] + '.csv',
+                             data: '﻿' + V.casaxpsCsv(t[1]) });
+        }
+      });
+    });
+    files = files.concat(casaxpsFiles);
     if ((data.methods || '').trim()) files.push({ name: 'methods.txt', data: data.methods.trim() + '\n' });
     if ((data.calibration || '').trim()) files.push({ name: 'calibration.txt', data: data.calibration.trim() + '\n' });
     var d = data.details || {};
     if ((d.summary || '').trim()) files.push({ name: 'summary.txt', data: d.summary.trim() + '\n' });
-    files.unshift({ name: 'README.txt', data: V.readme(data, specs, csvs.length, groups.length > 0, files.map(function (f) { return f.name; })) });
+    files.unshift({ name: 'README.txt', data: V.readme(data, specs, csvs.length, groups.length > 0,
+                                                        casaxpsFiles.length > 0,
+                                                        files.map(function (f) { return f.name; })) });
     return files.concat(csvs);
   };
-  V.readme = function (data, specs, nCsv, hasQuant, others) {
+  V.readme = function (data, specs, nCsv, hasQuant, hasCasaxps, others) {
     var d = data.details || {}, L = [];
     L.push(d.title || 'Experiment data');
     L.push([d.customer, d.reference, d.operator, d.date].filter(Boolean).join('  ·  '));
@@ -425,6 +468,7 @@
     L.push('                       columns for every spectrum (every depth level side by side), plus the');
     L.push('                       fitted curves where a CasaXPS fit was read. The units are in each header.');
     if (hasQuant) L.push('  quantification.csv   atomic % from the fitted regions (area / RSF, CasaXPS numbers), per sample and level.');
+    if (hasCasaxps) L.push('  casaxps/              CasaXPS\'s own exported quantification for the samples it covers (Quant_survey.txt etc.), not recomputed.');
     if (others.indexOf('methods.txt') >= 0) L.push('  methods.txt          the experimental methods text.');
     if (others.indexOf('calibration.txt') >= 0) L.push('  calibration.txt      how the binding-energy axis was calibrated.');
     if (others.indexOf('summary.txt') >= 0) L.push('  summary.txt          the summary written for this experiment.');
@@ -1551,7 +1595,8 @@
     var d = S.data;
     return TABS.filter(function (t) {
       if (t[0] === 'figures') return d.figures.length > 0;
-      if (t[0] === 'quant') return V.quantGroups(S.specs).length > 0;
+      if (t[0] === 'quant') return V.quantGroups(S.specs).length > 0 ||
+        d.samples.some(function (sm) { return !!sm.casaxps; });
       if (t[0] === 'depth') return profileSamples().length > 0;
       if (t[0] === 'holder') return d.holders.length > 0;
       if (t[0] === 'cameras') return (d.cameras || []).length > 0;
@@ -1589,10 +1634,22 @@
   }
 
   /* ------------------------------------------------------- quantification tab */
+  /* A sample with its own CasaXPS-exported quantification (`sm.casaxps`,
+     see casaquant.py) is preferred over its fit-derived breakdown, so it is
+     left out of the fit-derived table below and rendered separately. */
   function renderQuant() {
-    var box = clear($('tab-quant')), all = V.quantGroups(S.specs);
-    if (!all.length) return;
-    var q = S.q, hasT = all.some(function (g) { return g.entries.some(function (e) { return e.row.area_t !== null && e.row.area_t !== undefined; }); });
+    var box = clear($('tab-quant'));
+    var casaxpsSamples = S.data.samples.filter(function (sm) { return !!sm.casaxps; });
+    var casaxpsIds = {};
+    casaxpsSamples.forEach(function (sm) { casaxpsIds[sm.id] = true; });
+    var all = V.quantGroups(S.specs).filter(function (g) { return !casaxpsIds[g.sid]; });
+    if (!all.length && !casaxpsSamples.length) return;
+    var q = S.q;
+    if (all.length) renderFitQuant(box, all, q);
+    casaxpsSamples.forEach(function (sm) { renderCasaxpsQuant(box, sm); });
+  }
+  function renderFitQuant(box, all, q) {
+    var hasT = all.some(function (g) { return g.entries.some(function (e) { return e.row.area_t !== null && e.row.area_t !== undefined; }); });
     box.appendChild(h('p', { class: 'muted small', text: 'Atomic % = (region area ÷ RSF) as a share of the ticked regions of the same sample. Areas and RSFs are ' +
       'CasaXPS\'s own, read from the fitted VAMAS file; nothing here is refitted. A region without an RSF is left out and says so.' }));
     var tcb = h('input', { type: 'checkbox', id: 'q-trans' });
@@ -1653,6 +1710,46 @@
         box.appendChild(h('p', { class: 'muted small', text: '† survey-scan quantification, not a dedicated high-resolution scan — typically less precise than the rest of this total.' }));
       }
     });
+  }
+  function fmtPct(v) { return v === null || v === undefined ? '' : v.toFixed(2); }
+  function fmtNum(v) { return v === null || v === undefined ? '' : String(+v.toPrecision(6)); }
+  /* `csvRows` is [header, ...rows] (a V.casaxps*Rows() result); `dispRows`
+     the same rows formatted for on-screen display. */
+  function casaxpsTable(box, title, csvRows, dispRows, csvName) {
+    if (csvRows.length <= 1) return;
+    var header = csvRows[0];
+    box.appendChild(h('h3', { text: title }));
+    var head = h('tr');
+    header.forEach(function (c, i) { head.appendChild(h('th', { class: i > 0 ? 'num' : '', text: c })); });
+    var tb = h('tbody');
+    dispRows.forEach(function (r) {
+      var tr = h('tr');
+      r.forEach(function (c, i) { tr.appendChild(h('td', { class: i > 0 ? 'num' : '', text: c })); });
+      tb.appendChild(tr);
+    });
+    box.appendChild(h('div', { class: 'scroll' }, h('table', { class: 'grid quant' }, h('thead', null, head), tb)));
+    var dl = h('button', { type: 'button', text: 'Download ' + csvName });
+    dl.addEventListener('click', function () { saveText(csvName, V.casaxpsCsv(csvRows)); });
+    box.appendChild(h('div', { class: 'controls' }, dl));
+  }
+  /* one sample's CasaXPS-exported quantification (`sm.casaxps`): three
+     independent flat tables, shown exactly as CasaXPS wrote them -- no fit,
+     no recomputed atomic percent (see casaquant.py for why they are not
+     nested one inside another). */
+  function renderCasaxpsQuant(box, sm) {
+    var cq = sm.casaxps, base = V.safeName(sm.name || 'sample');
+    box.appendChild(h('h2', { text: sm.name || '(unnamed)' }));
+    box.appendChild(h('p', { class: 'muted small', text: 'Quantification for this sample is CasaXPS\'s own exported result ' +
+      '(Quant_survey.txt / Quant_regions.txt / Quant_Dparam.txt), not recomputed from an embedded fit.' }));
+    casaxpsTable(box, 'Survey (% concentration)', V.casaxpsSurveyRows(cq),
+      (cq.survey || []).map(function (r) { return [r.element, fmtPct(r.pct)]; }),
+      base + '_survey.csv');
+    casaxpsTable(box, 'Regions (% atomic concentration)', V.casaxpsRegionsRows(cq),
+      (cq.regions || []).map(function (r) { return [r.name, fmtNum(r.position), fmtPct(r.at_pct)]; }),
+      base + '_regions.csv');
+    casaxpsTable(box, 'D parameter', V.casaxpsDparamRows(cq),
+      (cq.dparam || []).map(function (r) { return [r.name, fmtNum(r.fwhm)]; }),
+      base + '_dparam.csv');
   }
 
   /* ---------------------------------------------------- depth profile tab */
