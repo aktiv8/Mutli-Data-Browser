@@ -2,7 +2,7 @@
 and what depends on it: which frame the stored fit positions are in (the
 ``Regions`` / ``Comps`` flags), the correction carried to the display, its
 inheritance within a sample, the round trip through our own VAMAS export, and
-the two-parameter universal Tougaard background.
+the two- and three-parameter universal Tougaard backgrounds.
 
 Run:  python -m unittest discover tests
 """
@@ -236,6 +236,77 @@ class TestTougaard(unittest.TestCase):
         y = (15.0 + 40.0 * np.exp(-0.5 * (((hv - be) - 8966.66) / 0.8) ** 2))
         cv = casafit.curves(fit, be.tolist(), (y * 0.286 * 25).tolist(), hv,
                             0.286, 25)[0]
+        self.assertTrue(cv.background_known)
+        self.assertIsNotNone(cv.envelope)
+        ok = ~np.isnan(np.array(cv.background))
+        self.assertGreater(ok.sum(), 100)
+
+
+# ------------------------------------------------------- 3-parameter Tougaard
+@unittest.skipUnless(HAVE_NP, "numpy not installed")
+class TestTougaard3Param(unittest.TestCase):
+    x = np.linspace(1000.0, 1030.0, 301)
+
+    def peak(self, height=100.0, base=20.0):
+        return base + height * np.exp(-0.5 * ((self.x - 1015.0) / 1.2) ** 2)
+
+    def test_flat_data_give_a_flat_background(self):
+        y = np.full(len(self.x), 37.0)
+        np.testing.assert_allclose(
+            ls.tougaard_3param(self.x, y, 396.0, 551.0, 436.0, 6), 37.0)
+
+    def test_starts_at_the_high_ke_level_and_rises_below_the_peak(self):
+        y = self.peak()
+        bg = ls.tougaard_3param(self.x, y, 396.0, 551.0, 436.0, 6)
+        self.assertAlmostEqual(bg[-1], y[-6:].mean(), 6)
+        self.assertGreater(bg[0], bg[-1])          # low-KE side sits higher
+        self.assertTrue(np.all(bg >= y[-6:].mean() - 1e-9))
+
+    def test_the_rise_is_proportional_to_B(self):
+        y = self.peak()
+        b1 = ls.tougaard_3param(self.x, y, 200.0, 551.0, 436.0, 6)
+        b2 = ls.tougaard_3param(self.x, y, 400.0, 551.0, 436.0, 6)
+        np.testing.assert_allclose(b2 - b2[-1], 2 * (b1 - b1[-1]), atol=1e-9)
+
+    def test_background_routes_every_recognised_name(self):
+        y = self.peak()
+        params = (0.0, 0.0, 396.0, 551.0, 436.0, 3.0)
+        want = ls.tougaard_3param(self.x, y, 396.0, 551.0, 436.0, 6)
+        for name in ("U Poly Tougaard", "U Si Tougaard", "U SiO2 Tougaard",
+                     "U Ge Tougaard", "U Al Tougaard", "U 4 Tougaard",
+                     "u poly tougaard"):
+            got = ls.background(name, y, 6, x=self.x, params=params)
+            np.testing.assert_allclose(got, want, err_msg=name)
+        self.assertIsNone(
+            ls.background("U Poly Tougaard", y, 6, params=params))  # no x
+        self.assertIsNone(
+            ls.background("U Poly Tougaard", y, 6, x=self.x, params=params[:4]))
+        self.assertIsNone(ls.background("U 3 Tougaard", y, 6, x=self.x,
+                                        params=params))     # not this family
+
+    def test_the_real_PET_region_line_is_parsed_and_reconstructed(self):
+        # The literal C 1s CASA region line from a real CasaXPS "U Poly
+        # Tougaard" fit (D:\Temp\for claude files\PET\Fitted PET Beamson and
+        # Briggs.vms): B/C/D = 396, 551, 436 match Tougaard's published
+        # Polymers row exactly.
+        lines = [
+            "Casa Info Follows", "1", "Calib M = 281.88 A = 284.8 BE ADD",
+            "0", "1",
+            "CASA region (*C 1s*) (*U Poly Tougaard*) 1189.1201 1204.748 "
+            "0.278 5 0 19.612218 396 551 436 3 (*C 1s*) 12.011 0 0.278",
+            "1",
+            "CASA comp (*C-C*) (*GL(30)*) Area 5000 1e-020 23910.791 -1 "
+            "1 MFWHM 1.0 0.36 9 -1 1 Position 1201.93 1195.0 1205.0 -1 1 "
+            "RSF 1 MASS 12.011 INDEX -1 (*C 1s*)"]
+        fit = casafit.parse(lines)
+        reg = fit.regions[0]
+        self.assertEqual(reg.params[2:5], (396.0, 551.0, 436.0))
+        hv = 1486.6
+        ke = np.arange(1189.0, 1205.0, 0.05)
+        be = (hv - ke)[::-1] - fit.calib_shift          # raw BE, descending
+        y = (60.0 + 200.0 * np.exp(-0.5 * (((hv - be) - 1201.93) / 0.6) ** 2))
+        cv = casafit.curves(fit, be.tolist(), (y * 0.1 * 5).tolist(), hv,
+                            0.1, 5)[0]
         self.assertTrue(cv.background_known)
         self.assertIsNotNone(cv.envelope)
         ok = ~np.isnan(np.array(cv.background))

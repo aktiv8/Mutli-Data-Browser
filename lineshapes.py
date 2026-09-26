@@ -372,14 +372,63 @@ def tougaard_u2(x, y, b, c, avg=1):
     return base + bg * dx
 
 
+def tougaard_3param(x, y, b, c, d, avg=1):
+    """The three-parameter universal Tougaard background of ``y`` on the
+    ascending-KE grid ``x``: same construction as :func:`tougaard_u2` (the
+    level at the high-KE end plus the inelastic tail of everything above each
+    point) but with the three-parameter cross section
+    ``K(T) = B T / ((C - T^2)^2 + D T^2)`` (Tougaard, *Surf. Interface Anal.*
+    25, 137 (1997); CasaXPS's own "Peak Fitting in XPS" names this the
+    ``U 4 Tougaard`` cross section, with ``U Poly``/``U Si``/``U SiO2``/
+    ``U Ge``/``U Al`` as its built-in material presets). Unlike
+    :func:`tougaard_u2`, CasaXPS stores ``B``, ``C`` and ``D`` here with their
+    natural sign (no minus on ``C``). Checked against a real CasaXPS
+    ``U Poly Tougaard`` fit (``D:\\Temp\\for claude files\\PET``): the file's
+    own ``params[2:5]`` for both its C 1s and O 1s regions are ``396, 551,
+    436`` -- an exact match to Tougaard's published Polymers row -- and
+    reconstructing background + the file's own components against its own raw
+    data with these values gives residuals in the same few-percent range as
+    this module's pre-existing ``LA``-shape reconstruction noise, not a
+    background-shape mismatch. CasaXPS's region line for this cross-section
+    family carries two further numbers ahead of ``B`` (``params[0]``,
+    ``params[1]``) that are **not reconstructed here**: CasaXPS's docs
+    describe both a per-cross-section T0 energy-loss cutoff and, separately,
+    generic per-region St/End Offset percentages, either of which could
+    explain them, and treating ``params[1]`` as a literal T0 cutoff on the
+    real file above collapses the entire C 1s background to flat (19.6 eV
+    exceeds the whole 15 eV fit window) -- evidence against that reading
+    without enough real files to confirm the right one, so, as with
+    :func:`tougaard_u2`'s own unused slots, they are left alone rather than
+    guessed."""
+    np = _np()
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = len(y)
+    if n < 3:
+        return y.copy()
+    k = max(1, min(int(avg), n // 2 or 1))
+    base = float(y[-k:].mean())
+    dx = float(np.abs(np.diff(x)).mean())
+    yb = y - base
+    bg = np.empty(n)
+    for i in range(n):
+        t = x[i + 1:] - x[i]
+        bg[i] = float(np.sum(b * t / ((c - t * t) ** 2 + d * t * t) * yb[i + 1:]))
+    return base + bg * dx
+
+
 _TOUGAARD_U2 = re.compile(r"^u\s*2\s*tougaard")
+_TOUGAARD_3P = re.compile(r"^u\s*(poly|sio2|si|ge|al|4)\s*tougaard\b")
 
 
 def background(kind, y, avg=1, x=None, params=()):
     """Background under ``y`` for a CasaXPS type name ('Shirley', 'Linear',
-    'None', 'U 2 Tougaard' ...); None for a type this module cannot
-    reproduce. ``x`` (ascending KE) and ``params`` (the region line's six
-    numbers after the averaging width) are needed for Tougaard."""
+    'None', 'U 2 Tougaard', 'U Poly Tougaard', 'U Si Tougaard', 'U SiO2
+    Tougaard', 'U Ge Tougaard', 'U Al Tougaard', 'U 4 Tougaard' ...); None for
+    a type this module cannot reproduce (e.g. plain 'Tougaard', 'W Tougaard',
+    'E Tougaard', a Spline background). ``x`` (ascending KE) and ``params``
+    (the region line's six numbers after the averaging width) are needed for
+    every Tougaard variant."""
     t = str(kind or "").strip().lower()
     if t.startswith("shirley"):
         return shirley(y, avg)
@@ -387,6 +436,10 @@ def background(kind, y, avg=1, x=None, params=()):
         if x is None or len(params) < 4 or not params[2]:
             return None
         return tougaard_u2(x, y, params[2], abs(params[3]) or 1643.0, avg)
+    if _TOUGAARD_3P.match(t):
+        if x is None or len(params) < 5 or not params[2] or not params[3]:
+            return None
+        return tougaard_3param(x, y, params[2], params[3], params[4], avg)
     if t.startswith("linear"):
         return linear_bg(y, avg)
     if t in ("none", "", "offset"):
