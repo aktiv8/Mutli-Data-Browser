@@ -814,5 +814,93 @@ class TestDSShape(unittest.TestCase):
         self.assertGreaterEqual(n, 1)
 
 
+PET_DIR = os.environ.get("XPS_PET_DIR", r"D:\Temp\for claude files\PET")
+
+
+def _pet_file():
+    path = os.path.join(PET_DIR, "Fitted PET Beamson and Briggs.vms")
+    return path if os.path.isfile(path) else None
+
+
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib.figure import Figure
+    import plots
+    HAVE_MPL = True
+except Exception:
+    HAVE_MPL = False
+
+
+@unittest.skipUnless(HAVE_NP and _pet_file(),
+                     "PET sample not present")
+class TestPETFile(unittest.TestCase):
+    """PET's C 1s/O 1s regions (every component but one is the symmetric
+    ``LA(50)`` shorthand, the other is ``LA(0.8,1.5,243)``) are the real-file
+    evidence behind the ``_COMPONENT_VISIBLE_FLOOR`` note in ``plots.py`` and
+    the two rejected-fix notes in ``lineshapes.py``'s module docstring: no
+    component is silently dropped by ``casafit.curves()`` (all five C 1s and
+    all five O 1s components reconstruct with a real, nonzero peak), and the
+    residual/overshoot numbers below are the measured baseline this module's
+    math produces on this file -- a canary against a future change to
+    ``casafit.py``/``lineshapes.py`` silently moving them, independent of the
+    ``plots.py`` display clip."""
+
+    def _curves(self, region_name):
+        doc = readers.load_file(_pet_file())
+        r = next(r for r in doc.regions if r.name == region_name)
+        return r, casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                                 r.dwell, r.extra.get("n_scans", 1))[0]
+
+    def test_no_component_is_dropped_or_zero(self):
+        for region_name, n in (("C 1s", 5), ("O 1s", 5)):
+            _r, cv = self._curves(region_name)
+            self.assertEqual(len(cv.components), n, region_name)
+            for c, vals in cv.components:
+                finite = [v for v in vals if v == v]
+                self.assertTrue(finite, f"{region_name} {c.name}: all-NaN")
+                self.assertGreater(max(finite), 0.0,
+                                   f"{region_name} {c.name}: zero peak")
+
+    def test_known_residual_and_overshoot_baseline(self):
+        # measured during the investigation behind this test file; a big
+        # jump here means casafit.py/lineshapes.py changed how the envelope
+        # itself is reconstructed, not just how it is drawn
+        want = {"C 1s": (4.07, 7.59), "O 1s": (7.82, 9.46)}
+        for region_name, (want_rms, want_ov) in want.items():
+            r, cv = self._curves(region_name)
+            self.assertAlmostEqual(cv.residual_rms * 100, want_rms, delta=0.5,
+                                   msg=region_name)
+            self.assertAlmostEqual(_max_overshoot_pct(cv, r.counts), want_ov,
+                                   delta=0.5, msg=region_name)
+
+    @unittest.skipUnless(HAVE_MPL, "matplotlib not installed")
+    def test_ring_tail_is_not_drawn_past_its_own_visible_floor(self):
+        """C 1s (Ring) contributes 51.7 counts ~2.8 eV past its own peak,
+        where the region itself ends at 1204.748 KE -- almost identical to
+        the real background-subtracted signal there (~17 counts), which is
+        what made the LA lineshape look like it "extends beyond the low
+        binding energy side of the peak". The drawn line must stop noticeably
+        before the region's own edge; the underlying envelope/area (checked
+        above) must not change at all."""
+        r, cv = self._curves("C 1s")
+        ax = Figure().add_subplot()
+        plots.draw_fit(ax, r.energy, {"curves": [cv], "colours": ["#aa0000"],
+                                      "show": {"components": True}}, 1.0,
+                       "grey", "red")
+        ring_line = next(ln for ln, (c, _v) in zip(ax.lines, cv.components)
+                         if c.name == "C 1s (Ring)")
+        ydata = ring_line.get_ydata()
+        ke = [r.photon_energy - b for b in r.energy]
+        finite_kes = [ke[i] for i, y in enumerate(ydata) if y == y]
+        self.assertTrue(finite_kes)
+        last_visible_ke = max(finite_kes)   # the highest-KE point still drawn
+        region_end_ke = cv.fit_region.end_ke + r.fit.shift_of_regions()
+        self.assertLess(region_end_ke - last_visible_ke, 1.5,
+                        "expected the Ring line to stop meaningfully before "
+                        "the region's own edge")
+        self.assertGreater(region_end_ke - last_visible_ke, 0.1)
+
+
 if __name__ == "__main__":
     unittest.main()

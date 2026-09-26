@@ -428,6 +428,23 @@ def place_marker_labels(ax, artists, hot=(), radius=9):
         placed.append(chosen)
 
 
+# A component's own LA/LF tail never reaches zero (see lineshapes.py's module
+# docstring): a tall, narrow component can still be a visible fraction of its
+# OWN peak height many FWHM from its position, drawn across the whole width
+# of its CasaXPS fit region and swamping any smaller neighbouring component
+# sharing that region (confirmed on a real file, PET's C 1s "Ring"/"Sat" and
+# O 1s "Sat" components: Surf. Interface Anal. calibration notes in
+# lineshapes.py). This is a *display* choice only -- the curve fed to
+# quantification, the HTML browser and CSV/VAMAS export (casafit.Curves.
+# components, quant.fit_rows, exporters.fit_columns) is untouched, so areas
+# and every existing residual/overshoot number stay exactly as computed.
+# Thresholding each component against its OWN peak (not the panel's, or the
+# region's) means a small component's own visible extent is barely touched --
+# it only ever clips a component's own far tail once that tail has decayed
+# to somewhere negligible on the page.
+_COMPONENT_VISIBLE_FLOOR = 0.01
+
+
 def draw_fit(ax, x, fit, scale, muted, accent):
     """Overlay a reconstructed CasaXPS fit on a single-spectrum panel.
 
@@ -435,6 +452,12 @@ def draw_fit(ax, x, fit, scale, muted, accent):
     "background"}, "colours": [...], "state_colour": {key: colour}}``; ``x``
     are the panel's x values (one per data point) and ``scale`` multiplies
     every curve (normalisation).
+
+    A component's own drawn fill/line stops once it falls below
+    ``_COMPONENT_VISIBLE_FLOOR`` of its own peak height on this panel (see the
+    module-level note above) -- the envelope line (``cv.envelope``, summed
+    from the untouched curves) is not affected, so it still shows the real,
+    unclipped reconstruction.
 
     Components are named the same way CasaXPS shows them (a group's own tag,
     unless that is just the region's label, in which case the first
@@ -492,7 +515,10 @@ def draw_fit(ax, x, fit, scale, muted, accent):
                 col = names[key][0]
                 y = [v * scale for v in vals]
                 lo = base if base is not None else [0.0] * len(y)
-                top = [(b + v) if (v == v and b == b) else float("nan")
+                peak = max((abs(v) for v in vals if v == v), default=0.0)
+                floor = _COMPONENT_VISIBLE_FLOOR * peak
+                top = [(b + v) if (v == v and b == b
+                                    and abs(v) >= floor) else float("nan")
                        for b, v in zip(lo, y)]
                 ok = [t == t for t in top]
                 ax.fill_between(x, lo, top, where=ok, color=col, alpha=0.35,

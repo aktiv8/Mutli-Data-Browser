@@ -63,6 +63,49 @@ or, pushed further, quadrupled the average residual across the corpus while
 still not matching the width fix's improvement. Do not retune ``GAUSS_K``
 without new evidence beyond what produced this conclusion.
 
+**``GAUSS_K["LA"]`` cannot round out a symmetric ``LA(m)`` component's own
+apex, at any value.** A real file (PET's ``D:\Temp\for claude files\PET\Fitted
+PET Beamson and Briggs.vms``, every C 1s/O 1s component but one is the
+symmetric ``LA(50)`` shorthand, i.e. ``a = b = 1``) looks visibly more
+Lorentzian near its own peak than a real CasaXPS screenshot of the same fit
+suggests it should. Sweeping ``GAUSS_K["LA"]`` from today's 0.20 up to 4.0
+(20x) on an isolated ``LA(50)`` component changes its own apex shape by only
+about one part in a hundred (``width at 90% of peak / width at 50%``: 0.333 at
+``K = 0.20``, saturating at 0.337 by ``K = 1.0`` and no further at ``K = 4.0``
+-- for comparison, ``GL(30)``'s own ratio is 0.370, ``GL(0)``'s [pure
+Gaussian] is 0.389, and a pure Lorentzian is exactly 0.333). Convolving a
+power-law Lorentzian with a Gaussian tightens its very top only slightly no
+matter how wide the Gaussian is made, because the Lorentzian's own curvature
+at ``t = 0`` already dominates -- this is a property of the Voigt-style
+convolution this module uses, not a mistuned constant, so no value of
+``GAUSS_K`` will make a symmetric ``LA(m)`` component look meaningfully less
+Lorentzian near its apex. Reproducing a rounder apex (if CasaXPS's own kernel
+really is rounder there) would need a structurally different mixing formula --
+closer to ``GL``'s ``lor**mix * gau**(1-mix)`` product than a convolution --
+which is a bigger, unvalidated change with no published reference for the
+``LA`` family's true kernel; left for a future session with new real-file
+evidence, not attempted here.
+
+**A finite tail cutoff (generalising ``LF``'s ``w`` to plain ``LA``) does not
+help either, and makes most real files worse.** The obvious-looking fix for a
+tall, narrow component's tail visibly outrunning the real data (also seen on
+the PET file: ``C 1s (Ring)``, ``LA(0.8,1.5,243)``, contributes 51.7 counts
+~2.8 eV past its own peak where the real background-subtracted signal is only
+~17) is to taper the raw shape to zero at some multiple of its width. Tried
+and rejected: ``component_curve`` always rescales a component so its
+*analytic* integral equals CasaXPS's stored area (this is what
+``test_a_narrow_window_does_not_inflate_the_peak`` protects), so cutting the
+tail removes area that the rescaling then has to put back into the peak,
+making the peak itself taller. Swept against every real ``LA``/``LF`` file
+this codebase has (titanium, vanadium, copper, HOPG, ``DS Variations``, PET --
+18 fitted regions): every taper width tried (from 15 down to 3 times the
+component's own FWHM) made more real regions' overshoot worse than it made
+PET's better -- e.g. at a 3-FWHM cutoff, PET's own C 1s overshoot went from
+7.6% to 26% (the inflated Ring peak now overshoots its neighbours instead).
+The tail's visible extent is fixed in ``plots.draw_fit`` instead (a display
+choice, not a change to the shape or its stored area -- see
+``_COMPONENT_VISIBLE_FLOOR`` there).
+
 **Tail suffix.** CasaXPS also lets a ``GL``/``SGL`` shape string carry a
 trailing ``T(k)`` tail modifier (``GL(30)T(1.5)``), used for asymmetric
 metallic peaks. ``parse_shape`` recognises and strips this suffix so the base
