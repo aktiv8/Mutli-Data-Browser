@@ -106,6 +106,116 @@ class TestShapeString(unittest.TestCase):
         self.assertFalse(ls.is_exact("KFUnknown(0)"))
 
 
+class TestRsfCrossReference(unittest.TestCase):
+    """_components_from_peaks / _rsf_of: matching a fit peak against a
+    "Results TableN" entry by Position/Area/FWHM, not by name (see the
+    module docstring -- real files rename peaks, drift slightly after a
+    Results Table was computed, or drop it altogether)."""
+
+    HV = 1486.6
+
+    def _rsf(self, peaks, results_row, sheet_name, region_name="R"):
+        comps = kf._components_from_peaks(
+            peaks, self.HV, 1.0, region_name, results_row, sheet_name)
+        return {c.name: c.rsf for c in comps}
+
+    def test_exact_match_is_used(self):
+        # a real case, Al2O3.kfit's O1s O-Al
+        results_row = {"Peak": {"Peak_0": {
+            "Position": 709.83, "Area": 15868.91, "FWHM": 1.0,
+            "RSF": 2.88, "Sheetname": "O1s"}}}
+        peaks = {"O1s O-Al": {"Position": 709.83, "Area": 15868.91,
+                              "FWHM": 1.0, "Fitting Model": "GL (Area)"}}
+        self.assertEqual(self._rsf(peaks, results_row, "O1s"),
+                         {"O1s O-Al": 2.88})
+
+    def test_a_peak_renamed_since_the_table_was_computed_still_matches(self):
+        # Al2O3.kfit's real case: "Al2p3/2 Al2O3" in Fitting.Peaks reads
+        # "Al2p3/2 Al-O" in the Results Table -- same Position/Area/FWHM
+        results_row = {"Peak": {"Peak_0": {
+            "Position": 74.8, "Area": 111265.21, "FWHM": 1.36,
+            "RSF": 0.37, "Sheetname": "Al2p"}}}
+        peaks = {"Al2p3/2 Al2O3": {"Position": 74.8, "Area": 111265.21,
+                                   "FWHM": 1.36,
+                                   "Fitting Model": "SGL (Area)"}}
+        self.assertEqual(self._rsf(peaks, results_row, "Al2p"),
+                         {"Al2p3/2 Al2O3": 0.37})
+
+    def test_a_small_drift_since_the_table_was_computed_still_matches(self):
+        # STO_Tilt.kfit's real case: 0.67% area drift, same position/FWHM
+        results_row = {"Peak": {"Peak_0": {
+            "Position": 132.49, "Area": 117111.24, "FWHM": 0.98,
+            "RSF": 4.25, "Sheetname": "Sr3d"}}}
+        peaks = {"Sr3d5/2 p1": {"Position": 132.49, "Area": 117904.72,
+                                "FWHM": 0.98, "Fitting Model": "GL (Area)"}}
+        self.assertEqual(self._rsf(peaks, results_row, "Sr3d"),
+                         {"Sr3d5/2 p1": 4.25})
+
+    def test_a_large_drift_is_treated_as_a_stale_table_not_trusted(self):
+        # STO.kfit's Y2O3 C1s real case: ~3.5% area drift
+        results_row = {"Peak": {"Peak_0": {
+            "Position": 284.8, "Area": 1364.52, "FWHM": 1.51,
+            "RSF": 1.0, "Sheetname": "C1s"}}}
+        peaks = {"C1s C-C": {"Position": 284.82, "Area": 1411.83,
+                             "FWHM": 1.53, "Fitting Model": "GL (Area)"}}
+        self.assertEqual(self._rsf(peaks, results_row, "C1s"),
+                         {"C1s C-C": 0.0})
+
+    def test_a_doublet_partner_missing_from_the_table_stays_unrsfed(self):
+        # Y2O3_Kfitting.kfit's real case: only the independent 5/2 peak of
+        # each doublet has its own Results Table row
+        results_row = {"Peak": {"Peak_0": {
+            "Position": 156.61, "Area": 24168.0, "FWHM": 1.17,
+            "RSF": 3.98, "Sheetname": "Y3d"}}}
+        peaks = {
+            "Y3d5/2 Y2O3": {"Position": 156.61, "Area": 24168.0,
+                           "FWHM": 1.17, "Fitting Model": "GL (Area)"},
+            "Y3d3/2_p2": {"Position": 158.67, "Area": 16122.0,
+                         "FWHM": 1.17, "Fitting Model": "GL (Area)"},
+        }
+        self.assertEqual(self._rsf(peaks, results_row, "Y3d"),
+                         {"Y3d5/2 Y2O3": 3.98, "Y3d3/2_p2": 0.0})
+
+    def test_the_nearer_candidate_wins_when_two_are_in_tolerance(self):
+        results_row = {"Peak": {
+            "Peak_0": {"Position": 285.00, "Area": 1000.0, "FWHM": 1.0,
+                      "RSF": 1.0, "Sheetname": "C1s"},
+            "Peak_1": {"Position": 285.02, "Area": 1000.0, "FWHM": 1.0,
+                      "RSF": 9.0, "Sheetname": "C1s"}}}
+        peaks = {"C1s C-C": {"Position": 285.005, "Area": 1000.0,
+                             "FWHM": 1.0, "Fitting Model": "GL (Area)"}}
+        self.assertEqual(self._rsf(peaks, results_row, "C1s"),
+                         {"C1s C-C": 1.0})
+
+    def test_a_results_row_is_claimed_by_only_one_component(self):
+        results_row = {"Peak": {"Peak_0": {
+            "Position": 285.0, "Area": 1000.0, "FWHM": 1.0,
+            "RSF": 1.0, "Sheetname": "C1s"}}}
+        peaks = {
+            "first": {"Position": 285.0, "Area": 1000.0, "FWHM": 1.0,
+                     "Fitting Model": "GL (Area)"},
+            "second": {"Position": 285.02, "Area": 1000.0, "FWHM": 1.0,
+                      "Fitting Model": "GL (Area)"},
+        }
+        rsf = self._rsf(peaks, results_row, "C1s")
+        self.assertEqual(sorted(rsf.values()), [0.0, 1.0])
+
+    def test_a_row_naming_a_different_sheet_is_ignored(self):
+        results_row = {"Peak": {"Peak_0": {
+            "Position": 285.0, "Area": 1000.0, "FWHM": 1.0,
+            "RSF": 1.0, "Sheetname": "O1s"}}}
+        peaks = {"C1s C-C": {"Position": 285.0, "Area": 1000.0,
+                             "FWHM": 1.0, "Fitting Model": "GL (Area)"}}
+        self.assertEqual(self._rsf(peaks, results_row, "C1s"),
+                         {"C1s C-C": 0.0})
+
+    def test_no_results_row_leaves_rsf_at_zero(self):
+        peaks = {"C1s C-C": {"Position": 285.0, "Area": 1000.0,
+                             "FWHM": 1.0, "Fitting Model": "GL (Area)"}}
+        comps = kf._components_from_peaks(peaks, self.HV, 1.0, "R")
+        self.assertEqual(comps[0].rsf, 0.0)
+
+
 @unittest.skipUnless(HAVE_H5PY, "h5py not installed")
 class TestRealFiles(unittest.TestCase):
     """Every sample .kfit file loads cleanly; every reconstructed fit's
@@ -152,6 +262,24 @@ class TestRealFiles(unittest.TestCase):
                         f"{cv.residual_rms:.3f}")
         if n == 0:
             self.skipTest("no fitted region found in the available corpus")
+
+    def test_al2o3_gets_its_real_rsf_cross_referenced(self):
+        # Al2O3.kfit: Results Table0 is fully in step with the live fit for
+        # both its sheets, including a peak renamed since (Al2p3/2) -- see
+        # TestRsfCrossReference for the isolated cases this covers.
+        path = _real(REAL_FILES[1])
+        if not path:
+            self.skipTest("KherveFitting sample corpus not present")
+        doc = readers.load_file(path)
+        rsf = {}
+        for r in doc.regions:
+            if r.fit:
+                for c in r.fit.components:
+                    rsf[c.name] = c.rsf
+        self.assertEqual(rsf.get("O1s O-Al"), 2.88)
+        self.assertEqual(rsf.get("O1s CO, OH"), 2.88)
+        self.assertEqual(rsf.get("Al2p3/2 Al2O3"), 0.37)
+        self.assertEqual(rsf.get("Al2p1/2_Al2O3"), 0.19)
 
     def test_files_with_no_photon_energy_still_load_and_say_why(self):
         path = _real(REAL_FILES[0])   # SP2 Carbon.kfit: known to have none

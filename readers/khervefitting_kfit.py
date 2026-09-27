@@ -20,10 +20,33 @@ shape KherveFitting's standalone Peaks Library JSON files use, plus a
 per-sheet ``Background`` dict with ``Bkg Type``/``Bkg Low``/``Bkg High``)
 and per-sheet ``ExperimentalInfo`` (photon energy, pass energy, dwell,
 scans, anode label, dates -- explicit numeric fields, not just vendor
-strings to guess from). ``Results TableN`` (one per sample row, RSF/at %/
-uncertainty) is not read by this module yet -- see the module docstring's
-own note below; a region imports with no RSF, same honest "no RSF" handling
-``quant.normalise`` already gives a CasaXPS region without one.
+strings to guess from).
+
+**"Results TableN"** (one per sample row -- ``N`` matching the row a sheet's
+own name suffix gives it, see "Sample rows" below -- of every fitted peak
+*across all that row's sheets*, keyed by an arbitrary ``Peak_0``, ``Peak_1``,
+...) is where KherveFitting keeps each peak's own RSF (also ``at. %``,
+``wt. %``, ``TXFN``, ``ECF``, ``Instrument`` -- not read by this module: area
+and at % are recomputed independently by ``quant.py`` from the RSF and the
+reconstructed fit, the same as for a CasaXPS region, and no uncertainty
+field exists in this table to read). Checked on all 10 sample files: **only
+row 0's table is ever populated** (rows 1+ exist as empty ``{"Peak": {}}``
+dicts even in multi-row files, e.g. STO_Tilt.kfit's 10 tables) and, more
+importantly, **the table is frequently stale relative to the live fit** --
+an earlier fit state (SP2 Carbon.kfit: 6 stale entries for a sheet whose
+``Fitting.Peaks`` is now empty), a peak renamed since (Al2O3.kfit's
+``Al2p3/2 Al2O3`` reads ``Al2p3/2 Al-O`` in its Results Table row, same
+Position/Area/FWHM), or simply refit further since it was last computed
+(STO.kfit's Ti2p: same Position, Area drifted 6%). A doublet's constrained
+partner is also frequently left out of the table altogether -- quantified
+once, on its independent peak (Y2O3_Kfitting.kfit's ``Y3d3/2`` components
+have no row of their own). So a peak's RSF is cross-referenced by
+Position/Area/FWHM agreement, not by name (``_rsf_of``, tolerances
+``_RSF_POS_TOL``/``_RSF_AREA_REL_TOL``/``_RSF_FWHM_REL_TOL`` -- chosen
+against the real corpus above to accept genuine same-peak drift and reject
+staleness), and a peak with no confidently-matching row keeps ``rsf=0.0``,
+the same honest "no RSF" ``quant.normalise`` already gives a CasaXPS region
+without one.
 
 **Sample rows.** KherveFitting can bundle several samples' repeats of one
 sheet in a single file by appending the sample-row number directly to the
@@ -50,11 +73,11 @@ also has) is imported with ``shape=""``, which ``lineshapes.parse_shape``
 reads as an honestly-flagged placeholder, same as an unrecognised CasaXPS
 shape.
 
-**Not attempted in this version** (deliberately, not an oversight): the
-``Results TableN`` RSF/at %/uncertainty cross-reference, KherveFitting's own
-``BEcorrection``/``BEcorrections`` charge-referencing values (a component's
-``Position`` is imported as-is), and the depth/tilt ``SampleAxis``. Revisit
-once this first version has been used on more real files.
+**Not attempted in this version** (deliberately, not an oversight):
+KherveFitting's own ``BEcorrection``/``BEcorrections`` charge-referencing
+values (a component's ``Position`` is imported as-is), and the depth/tilt
+``SampleAxis``. Revisit once this first version has been used on more real
+files.
 
 ``import_peak_library`` (D4) reads a standalone Peaks Library ``.json`` file
 on its own -- the same ``Core levels[<name>].Fitting.Peaks`` shape as a
@@ -145,12 +168,63 @@ def _shape_string(peak):
     return ""
 
 
-def _components_from_peaks(peaks, hv, k, region_name):
+# RSF cross-reference tolerances (see _rsf_of's docstring for how these were
+# chosen against real files): a peak's Position/Area/FWHM in "Results
+# TableN" must still agree this closely with its live Fitting.Peaks entry
+# for the RSF to be trusted as still describing the same peak.
+_RSF_POS_TOL = 0.03          # eV
+_RSF_AREA_REL_TOL = 0.02     # 2% of the fitted area
+_RSF_FWHM_REL_TOL = 0.05     # 5% of the fitted FWHM
+
+
+def _rsf_of(pos, area, fwhm, candidates, used):
+    """The RSF of whichever unused entry of ``candidates`` (one sheet's
+    "Results TableN" peaks) matches (``pos``, ``area``, ``fwhm``) closely
+    enough to trust, else 0.0 -- see the module docstring's "Results Table"
+    section: matched by these numbers, not by name (a peak can be renamed
+    after its RSF was last computed) and only within tolerance (the table
+    is frequently stale -- an earlier fit state, sometimes emptied
+    altogether -- and a doublet's constrained partner is often left out of
+    it, quantified once on its independent peak). ``used`` (a set of
+    ``candidates`` indices already claimed by an earlier component in this
+    sheet) is updated in place so two fit peaks never claim the same row."""
+    best_i, best_err = None, None
+    for i, cand in enumerate(candidates):
+        if i in used:
+            continue
+        cpos, carea = _num(cand.get("Position")), _num(cand.get("Area"))
+        cfwhm, crsf = _num(cand.get("FWHM")), _num(cand.get("RSF"))
+        if None in (cpos, carea, cfwhm, crsf):
+            continue
+        if abs(cpos - pos) > _RSF_POS_TOL:
+            continue
+        if area and abs(carea - area) / abs(area) > _RSF_AREA_REL_TOL:
+            continue
+        if fwhm and abs(cfwhm - fwhm) / abs(fwhm) > _RSF_FWHM_REL_TOL:
+            continue
+        err = abs(cpos - pos)
+        if best_err is None or err < best_err:
+            best_i, best_err = i, err
+    if best_i is None:
+        return 0.0
+    used.add(best_i)
+    return _num(candidates[best_i].get("RSF"), 0.0)
+
+
+def _components_from_peaks(peaks, hv, k, region_name, results_row=None,
+                           sheet_name=None):
     """``[FitComponent]`` from a ``Fitting.Peaks`` dict (shared by a
     ``.kfit`` sheet and a standalone Peaks Library file): ``k`` divides
     ``Area`` down from whatever raw scale it was stored in (1.0 -- no
     division -- for a Peaks Library file, which has no dwell/scans of its
-    own to have been multiplied up by)."""
+    own to have been multiplied up by). ``results_row`` (a ``.kfit``
+    project's own "Results TableN" for this sample row, or None -- a
+    standalone Peaks Library file has no such table) supplies each
+    component's RSF via :func:`_rsf_of`, restricted to the entries naming
+    this ``sheet_name``."""
+    candidates = [p for p in ((results_row or {}).get("Peak") or {}).values()
+                 if isinstance(p, dict) and p.get("Sheetname") == sheet_name]
+    used = set()
     components = []
     for pname, p in peaks.items():
         if not isinstance(p, dict):
@@ -160,6 +234,7 @@ def _components_from_peaks(peaks, hv, k, region_name):
         area = _num(p.get("Area"))
         if pos is None or fwhm is None or area is None:
             continue
+        rsf = _rsf_of(pos, area, fwhm, candidates, used) if candidates else 0.0
         area = area / k
         # an unreconstructed model (e.g. a skewed Voigt) gets a fixed,
         # well-formed placeholder shape name lineshapes.py cannot parse
@@ -173,7 +248,7 @@ def _components_from_peaks(peaks, hv, k, region_name):
         shape = _shape_string(p)
         components.append(casafit.FitComponent(
             name=str(pname), shape=shape or "KFUnknown(0)", area=area,
-            fwhm=fwhm, pos_ke=hv - pos, rsf=0.0, region=region_name,
+            fwhm=fwhm, pos_ke=hv - pos, rsf=rsf, region=region_name,
             line="" if shape else str(p.get("Fitting Model") or "")))
     return components
 
@@ -197,6 +272,11 @@ class KherveFittingKfitFile(SpectrumFile):
             project = self._project_json(f)
             core_levels_json = (project or {}).get("Core levels") or {}
             sample_names = (project or {}).get("SampleNames") or {}
+            results_tables = {}
+            for key, val in (project or {}).items():
+                m = re.match(r"^Results Table(\d+)$", key)
+                if m and isinstance(val, dict):
+                    results_tables[int(m.group(1))] = val
             n_rows = len({r for _n, r in (
                 _split_sheet_name(cls_group[k].attrs.get("name") or k)
                 for k in cls_group.keys())})
@@ -229,7 +309,8 @@ class KherveFittingKfitFile(SpectrumFile):
                 if tx is not None and r.photon_energy:
                     r.tf_ke = [r.photon_energy - b for b in r.energy]
                     r.tf_values = [float(v) for v in tx[()]]
-                r.fit = self._build_fit(grp, r, sheet_json)
+                results_row = results_tables.get(r.extra.pop("_row"))
+                r.fit = self._build_fit(grp, r, sheet_json, results_row)
                 self.regions.append(r)
         self.instrument = {k: v for k, v in self.instrument.items() if v}
         return self._finish()
@@ -282,11 +363,14 @@ class KherveFittingKfitFile(SpectrumFile):
         if wf:
             self.instrument.setdefault("Work function (eV)", f"{wf:g}")
         r.extra["_h5_key"] = grp.name.rsplit("/", 1)[-1]
+        r.extra["_row"] = row
         return r, sheet_json
 
     @staticmethod
-    def _build_fit(grp, region, sheet_json):
-        """A ``casafit.Fit`` for this sheet, or None when it has no peaks."""
+    def _build_fit(grp, region, sheet_json, results_row=None):
+        """A ``casafit.Fit`` for this sheet, or None when it has no peaks.
+        ``results_row`` is this sample row's own "Results TableN" (see
+        ``_components_from_peaks``/``_rsf_of``), or None."""
         fitting = sheet_json.get("Fitting") or {}
         peaks = fitting.get("Peaks") or {}
         if not peaks or not region.photon_energy:
@@ -317,7 +401,9 @@ class KherveFittingKfitFile(SpectrumFile):
         # dropped the reconstruction's residual from 15.6% to 0.4%.
         dwell, scans = region.dwell_and_scans()
         k = (dwell * scans) if dwell else 1.0
-        components = _components_from_peaks(peaks, hv, k, region.name)
+        raw_name = grp.attrs.get("name") or grp.name.rsplit("/", 1)[-1]
+        components = _components_from_peaks(peaks, hv, k, region.name,
+                                            results_row, raw_name)
         if not components:
             return None
         return casafit.Fit(regions=[reg], components=components)
