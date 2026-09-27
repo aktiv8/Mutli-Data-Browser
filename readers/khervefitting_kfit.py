@@ -57,6 +57,58 @@ strips that suffix so the regions still group by core level; ``sample``
 prefers the file's own ``SampleNames`` label for the row, else a generic
 "Row N" when the file has more than one row.
 
+**CasaXPS-imported sheets.** A `.kfit` project can be a CasaXPS-fitted VAMAS
+import, refit inside KherveFitting rather than fitted natively there (real
+example: `PtCl2_quantified.kfit`, paired with its original `.vms`, whose
+every sheet's `ExperimentalInfo['Block Comment']` carries a literal embedded
+`Casa Info Follows` block). Such a sheet's `ExperimentalInfo` is a completely
+different, much larger schema (~40 VAMAS-derived keys: `Species & Transition`,
+`Sample ID`, `Collection Time`, `Number of scans`/`Num Scans`, `X Step`,
+`Date`+`Time`, ...) than a native KherveFitting session's own handful of keys
+(`Source Energy`, `Pass Energy`, `Dwell Time`, `Periods`, `Date Created`).
+Two real, confirmed consequences:
+
+- `_split_sheet_name`'s row-suffix heuristic misreads two real patterns in
+  this schema that never appeared in a native file: CasaXPS's own "second
+  region of the same element" naming (`Cl2p2`/`Cl2p21` are really
+  `'Cl2p 2'`/its row-1 repeat, not KherveFitting's own row 2/21) and a
+  region name it doesn't recognise as element-like at all (`PtNO1`, whose
+  row-1 counterpart `PtNO11` then never merges with it). `_region_identity`
+  fixes both by preferring `ExperimentalInfo['Species & Transition']`
+  (checked identical between a sheet and its row-1 counterpart on the real
+  file, e.g. both `Pt4f`/`Pt4f1` read `'Pt4f'`; never suffix-contaminated)
+  for the canonical name and `ExperimentalInfo['Sample ID']` (`'PtCl2'` vs.
+  `'PtCl2 area2'`, reliably distinct per row, no exceptions checked) for the
+  row, in first-seen order -- falling straight through to
+  `_split_sheet_name` entirely unchanged when `Species & Transition` or
+  `Sample ID` is absent (every native-schema file). `Sample ID` also makes a
+  better `sample` label than the generic `"Row N"` fallback when
+  `SampleNames` is absent, since it is real data already in hand.
+- `region.step`/`region.date` end up blank for a whole file like this
+  (`_load_sheet` only read the native `BE Step`/`Date Created` keys): safe
+  to add a fallback to `X Step`/`Date`+`Time` (`_combined_date`), since
+  neither field feeds any numeric reconstruction anywhere in this module or
+  `casafit.py`.
+- `region.dwell`/`extra["n_scans"]` get the **same** missing-key treatment
+  on `PtCl2_quantified.kfit` (`Collection Time`/`Number of scans` instead of
+  `Dwell Time`/`Periods`) but are **deliberately not** given a fallback,
+  checked two ways first: numerically, rebuilding this file's five real
+  fitted regions with today's actual `k=1.0` fallback (since `region.dwell`
+  stays `None`) gives 0.4-5.1% residuals, as good as Al2O3.kfit's own
+  already-validated fit; rebuilding with
+  `k = Collection Time x Number of scans` (mirroring the existing native
+  `Dwell Time x Periods` logic) makes every one of those five regions
+  5-20x worse (up to 233%), and `Collection Time` alone worse still (up to
+  507%). Architecturally, `region.dwell` is load-bearing everywhere
+  `casafit.curves()` is later called again (display, HTML export,
+  `quant.py`, `resultspages.py`), not just at import inside `_build_fit` --
+  there is no separate "display-only dwell" in this pipeline, so a
+  metadata-only backfill would silently corrupt every one of those later
+  calls too. This file's own `Area` values came from CasaXPS (already
+  counts/s x eV, the scale this whole pipeline wants), unlike a native
+  KherveFitting fit's raw-accumulated-counts `Area` (see Al2O3.kfit above),
+  which is why `k=1.0` -- no division at all -- is already correct here.
+
 **Peak shapes reconstructed** (checked against 88 real fitted peaks across
 the 10 sample files): ``GL (Area)``, ``SGL (Area)`` and ``LA (Area, sigma,
 gamma)`` map onto this module's own ``lineshapes.py`` shape strings
@@ -186,6 +238,55 @@ def _num(v, default=None):
         return float(v)
     except (TypeError, ValueError):
         return default
+
+
+def _region_identity(raw_name, sheet_json, sample_id_row):
+    """``(canonical name, sample-row index, sample label override)`` for one
+    sheet -- see the module docstring's "CasaXPS-imported sheets" section.
+
+    A sheet whose data was originally a CasaXPS-fitted VAMAS import carries
+    two ``ExperimentalInfo`` fields a native KherveFitting session's own
+    ``ExperimentalInfo`` never has: ``"Species & Transition"``, always the
+    clean, suffix-free original region label (checked identical between a
+    sheet and its row-1 counterpart on a real file, e.g. both ``Pt4f`` and
+    ``Pt4f1`` read ``"Pt4f"``, both ``Cl2p2`` and ``Cl2p21`` read
+    ``"Cl2p 2"``), and ``"Sample ID"``, reliably distinct per sample row
+    (``"PtCl2"`` vs. ``"PtCl2 area2"``, no exceptions on that file). Using
+    these instead of guessing from the sheet's own key/HDF5-attrs ``name``
+    fixes two real misparses ``_split_sheet_name``'s heuristic cannot tell
+    apart from a genuine row suffix: ``Cl2p2``/``Pt4f2`` (CasaXPS's own
+    "second region of the same element" label, not a KherveFitting sample
+    row -- misread as row 2, and row 21 once the row-1 ``1`` stacks on top)
+    and ``PtNO1``/``PtNO11`` (``PtNO1`` isn't recognised as element-like at
+    all, so the row-1 counterpart is never merged with it).
+
+    So this path only fires when ``Species & Transition`` is present (a
+    native sheet has neither field, so falls straight through to
+    ``_split_sheet_name`` unchanged -- zero behaviour change for every file
+    that doesn't have this schema); rows are assigned to distinct
+    ``Sample ID`` values in first-seen order via ``sample_id_row`` (a dict
+    shared across one file's sheets, mutated in place, the same pattern
+    ``_rsf_of``'s own ``used`` set already uses)."""
+    info = (sheet_json or {}).get("ExperimentalInfo") or {}
+    species = str(info.get("Species & Transition") or "").strip()
+    sample_id = str(info.get("Sample ID") or "").strip()
+    if not species or not sample_id:
+        canon, row = _split_sheet_name(raw_name)
+        return canon, row, None
+    if sample_id not in sample_id_row:
+        sample_id_row[sample_id] = len(sample_id_row)
+    return canon_region_name(species), sample_id_row[sample_id], sample_id
+
+
+def _combined_date(info):
+    """``"<Date> <Time>"`` from a VAMAS-import-derived ``ExperimentalInfo``
+    (separate ``Date``/``Time`` fields, no single ``Date Created`` the way a
+    native KherveFitting session records it), or "" when there is no date."""
+    d = str(info.get("Date") or "").strip()
+    if not d:
+        return ""
+    t = str(info.get("Time") or "").strip()
+    return f"{d} {t}".strip()
 
 
 def _becorrection_of(row, becorrections, file_level):
@@ -378,17 +479,27 @@ class KherveFittingKfitFile(SpectrumFile):
                             pass
             becorrection_file = _num((project or {}).get("BEcorrection"))
             sample_axis = (project or {}).get("SampleAxis")
-            n_rows = len({r for _n, r in (
-                _split_sheet_name(cls_group[k].attrs.get("name") or k)
-                for k in cls_group.keys())})
+            # Identity (canon name, row, sample label override) is resolved
+            # once per sheet, in file order, since _region_identity assigns
+            # row numbers to distinct Sample IDs in first-seen order -- it
+            # must not be called twice per sheet (that would double-count).
+            sample_id_row = {}
+            identities = {}         # hdf5 key -> (raw_name, canon, row, hint)
+            for key in sorted(cls_group.keys()):
+                raw_name = cls_group[key].attrs.get("name") or key
+                canon, row, hint = _region_identity(
+                    raw_name, core_levels_json.get(raw_name), sample_id_row)
+                identities[key] = (raw_name, canon, row, hint)
+            n_rows = len({row for _rn, _c, row, _h in identities.values()})
             pending = []            # (Region, sheet_json) -- fit built after
                                     # every sheet's own hv is known
             for idx, key in enumerate(sorted(cls_group.keys())):
                 grp = cls_group[key]
-                raw_name = grp.attrs.get("name") or key
+                raw_name, canon, row, hint = identities[key]
                 built = self._load_sheet(grp, raw_name, idx,
                                          core_levels_json.get(raw_name) or {},
-                                         sample_names, n_rows)
+                                         sample_names, n_rows, canon, row,
+                                         hint)
                 if built:
                     pending.append(built)
             # XPS instruments essentially never change anode mid-session, so
@@ -437,12 +548,14 @@ class KherveFittingKfitFile(SpectrumFile):
             return {}
 
     def _load_sheet(self, grp, raw_name, idx, sheet_json, sample_names,
-                    n_rows):
+                    n_rows, canon, row, sample_hint):
         """A ``(Region, sheet_json)`` pair, or None for a degenerate/absent
         sheet. The region's fit is *not* built yet -- ``load()`` fills in a
         session-wide photon energy first (see there) and builds every
         sheet's fit in a second pass, once every sheet's own ``hv`` is
-        settled."""
+        settled. ``canon``/``row``/``sample_hint`` come from
+        ``_region_identity``, resolved once for the whole file before this
+        is called (see ``load()``)."""
         be = grp.get("B.E.")
         counts = grp.get("Raw Data")
         if be is None or counts is None:
@@ -451,11 +564,26 @@ class KherveFittingKfitFile(SpectrumFile):
         vals = [float(v) for v in counts[()]]
         if len(energy) < 3 or len(energy) != len(vals):
             return None
-        canon, row = _split_sheet_name(raw_name)
         info = sheet_json.get("ExperimentalInfo") or {}
         hv = _num(info.get("Source Energy"))
-        sample = sample_names.get(str(row)) or (
+        # sample_hint (a real "Sample ID" string, e.g. "PtCl2 area2") is a
+        # better fallback than "Row N" when SampleNames is absent, and comes
+        # from real data already in hand rather than a generic placeholder.
+        sample = sample_names.get(str(row)) or sample_hint or (
             f"Row {row}" if n_rows > 1 else "")
+        step = _num(info.get("BE Step"))
+        if step is None:
+            step = _num(info.get("X Step"))
+        date = str(info.get("Date Created") or "") or _combined_date(info)
+        # Dwell/scans are deliberately NOT given the same "X Step"-style
+        # fallback to a VAMAS-import key ("Collection Time"/"Number of
+        # scans") -- see the module docstring's "CasaXPS-imported sheets"
+        # section: region.dwell is load-bearing everywhere casafit.curves()
+        # is later called (not just here), and a real file with this schema
+        # (PtCl2_quantified.kfit) numerically proves treating "Collection
+        # Time" as a true per-sweep dwell makes every one of its real fits
+        # 5-20x worse, because its Area already came from CasaXPS in
+        # counts/s scale and needs no dwell x scans division at all.
         r = Region(
             name=canon, index=idx, offset=idx, technique="XPS",
             energy=energy, counts=vals, energy_label="Binding Energy",
@@ -463,8 +591,7 @@ class KherveFittingKfitFile(SpectrumFile):
             decodable=True, sample=sample, photon_energy=hv,
             pass_energy=_num(info.get("Pass Energy")),
             dwell=_num(info.get("Dwell Time")),
-            step=_num(info.get("BE Step")), anode=info.get("Source Label", ""),
-            date=str(info.get("Date Created") or ""))
+            step=step, anode=info.get("Source Label", ""), date=date)
         if info.get("Periods"):
             r.extra["n_scans"] = int(_num(info["Periods"], 1))
         wf = _num(info.get("Work Function"))

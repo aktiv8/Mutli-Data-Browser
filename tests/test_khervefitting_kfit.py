@@ -27,6 +27,9 @@ CORPUS = os.environ.get("XPS_KFIT_DIR", os.path.join(
     "D:\\", "Temp", "for claude files", "temp", "KherveFitting Files",
     "Data-Examples"))
 
+PTCL2_PATH = os.environ.get("XPS_KFIT_PTCL2", os.path.join(
+    "D:\\", "Temp", "KF Test", "PtCl2_quantified.kfit"))
+
 REAL_FILES = [
     os.path.join("1s B-C ... Mg", "06 - C - Carbon", "SP2 Carbon.kfit"),
     os.path.join("2p Al ... Zn", "13 - Al _Aluminium", "Al2O3.kfit"),
@@ -75,6 +78,81 @@ class TestSplitSheetName(unittest.TestCase):
         # a real example from Metal_Bi.kfit: no element/orbital pattern to
         # recognise, trailing digits are not a sample-row suffix here
         self.assertEqual(kf._split_sheet_name("N00575~04"), ("N00575~04", 0))
+
+
+class TestRegionIdentity(unittest.TestCase):
+    """_region_identity: a CasaXPS-imported sheet's ExperimentalInfo gives a
+    clean name/row via 'Species & Transition'/'Sample ID' where
+    _split_sheet_name's heuristic alone cannot tell a genuine sample-row
+    suffix apart from CasaXPS's own "second region of this element" naming
+    (real cases from PtCl2_quantified.kfit -- see TestPtCl2RealFile)."""
+
+    def _sheet(self, species, sample_id):
+        return {"ExperimentalInfo": {"Species & Transition": species,
+                                     "Sample ID": sample_id}}
+
+    def test_no_experimentalinfo_falls_back_to_split_sheet_name(self):
+        self.assertEqual(
+            kf._region_identity("Fe2p1", {}, {}), ("Fe 2p", 1, None))
+        self.assertEqual(
+            kf._region_identity("Fe2p1", None, {}), ("Fe 2p", 1, None))
+
+    def test_missing_species_or_sample_id_falls_back_too(self):
+        self.assertEqual(kf._region_identity(
+            "Fe2p1", {"ExperimentalInfo": {"Sample ID": "S1"}}, {}),
+            ("Fe 2p", 1, None))
+        self.assertEqual(kf._region_identity(
+            "Fe2p1", {"ExperimentalInfo": {"Species & Transition": "Fe2p"}},
+            {}), ("Fe 2p", 1, None))
+
+    def test_a_casaxps_second_region_is_not_read_as_a_row_suffix(self):
+        # real case: "Cl2p2" is CasaXPS's own "Cl2p 2" (a second, distinct
+        # region), not KherveFitting sample row 2
+        rows = {}
+        self.assertEqual(
+            kf._region_identity("Cl2p2", self._sheet("Cl2p 2", "PtCl2"),
+                               rows),
+            ("Cl2p 2", 0, "PtCl2"))
+
+    def test_rows_are_assigned_by_first_seen_sample_id(self):
+        rows = {}
+        self.assertEqual(
+            kf._region_identity("Pt4f", self._sheet("Pt4f", "PtCl2"), rows),
+            ("Pt 4f", 0, "PtCl2"))
+        self.assertEqual(
+            kf._region_identity("Pt4f1", self._sheet("Pt4f", "PtCl2 area2"),
+                               rows),
+            ("Pt 4f", 1, "PtCl2 area2"))
+        # a later sheet of the already-seen row 0 sample gets row 0 again
+        self.assertEqual(
+            kf._region_identity("Cl2p", self._sheet("Cl2p", "PtCl2"), rows),
+            ("Cl 2p", 0, "PtCl2"))
+
+    def test_a_region_not_element_like_still_merges_across_rows(self):
+        # real case: "PtNO1" isn't recognised as element-like by
+        # _split_sheet_name at all, so its row-1 counterpart never merges
+        # with it on that path -- Species & Transition sidesteps the issue
+        rows = {}
+        a = kf._region_identity("PtNO1", self._sheet("PtNO1", "PtCl2"), rows)
+        b = kf._region_identity("PtNO11",
+                                self._sheet("PtNO1", "PtCl2 area2"), rows)
+        self.assertEqual((a[0], b[0]), ("PtNO1", "PtNO1"))
+        self.assertEqual((a[1], b[1]), (0, 1))
+
+
+class TestCombinedDate(unittest.TestCase):
+    def test_date_and_time_are_joined(self):
+        self.assertEqual(
+            kf._combined_date({"Date": "2017/5/16", "Time": "17:13:53"}),
+            "2017/5/16 17:13:53")
+
+    def test_no_date_gives_an_empty_string(self):
+        self.assertEqual(kf._combined_date({}), "")
+        self.assertEqual(kf._combined_date({"Time": "17:13:53"}), "")
+
+    def test_date_with_no_time_is_not_padded(self):
+        self.assertEqual(kf._combined_date({"Date": "2017/5/16"}),
+                         "2017/5/16")
 
 
 class TestShapeString(unittest.TestCase):
@@ -527,6 +605,94 @@ class TestPeakLibraryRealFiles(unittest.TestCase):
                     self.assertEqual(len(cvs), 1, path)
                     self.assertLess(cvs[0].residual_rms, 1e-6, path)
         self.assertGreater(n, 0)
+
+
+@unittest.skipUnless(HAVE_H5PY, "h5py not installed")
+class TestPtCl2RealFile(unittest.TestCase):
+    """PtCl2_quantified.kfit: a real CasaXPS-fitted VAMAS import, refit in
+    KherveFitting -- the first real file with the VAMAS-import
+    ExperimentalInfo schema (Species & Transition/Sample ID/Collection
+    Time/...), exercising _region_identity and the deliberate decision not
+    to touch dwell/scans for that schema (see the module docstring)."""
+
+    def _doc(self):
+        if not os.path.isfile(PTCL2_PATH):
+            self.skipTest("PtCl2_quantified.kfit not present")
+        return readers.load_file(PTCL2_PATH)
+
+    def test_two_samples_not_four(self):
+        doc = self._doc()
+        samples = {r.sample for r in doc.regions}
+        self.assertEqual(samples, {"PtCl2", "PtCl2 area2"})
+
+    def test_casaxps_second_regions_stay_distinct_from_the_plain_ones(self):
+        doc = self._doc()
+        names = {r.name for r in doc.regions}
+        self.assertIn("Cl 2p", names)
+        self.assertIn("Cl2p 2", names)
+        self.assertIn("Pt 4f", names)
+        self.assertIn("Pt4f 2", names)
+        # each real, distinct region appears for both real sample rows
+        for name in ("Cl 2p", "Cl2p 2", "Pt 4f", "Pt4f 2"):
+            samples = {r.sample for r in doc.regions if r.name == name}
+            self.assertEqual(samples, {"PtCl2", "PtCl2 area2"}, name)
+
+    def test_ptno1_merges_across_both_rows(self):
+        doc = self._doc()
+        ptno = [r for r in doc.regions if r.name == "PtNO1"]
+        self.assertEqual(len(ptno), 2)
+        self.assertEqual({r.sample for r in ptno},
+                         {"PtCl2", "PtCl2 area2"})
+
+    def test_step_and_date_are_filled_in_from_the_vamas_schema(self):
+        doc = self._doc()
+        r = next(r for r in doc.regions
+                if r.name == "Cl 2p" and r.sample == "PtCl2")
+        self.assertAlmostEqual(r.step, 0.1)
+        self.assertTrue(r.date)
+
+    def test_dwell_is_left_unset_not_backfilled_from_collection_time(self):
+        doc = self._doc()
+        for r in doc.regions:
+            self.assertIsNone(r.dwell, r.name)
+
+    def test_fitted_regions_reconstruct_with_the_unscaled_k(self):
+        doc = self._doc()
+        n = 0
+        for r in doc.regions:
+            if r.fit is None:
+                continue
+            cvs = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                                 r.dwell, r.extra.get("n_scans", 1))
+            for cv in cvs:
+                if cv.residual_rms is None:
+                    continue
+                n += 1
+                self.assertLess(cv.residual_rms, 0.10,
+                               f"{r.name} [{r.sample}]: {cv.residual_rms:.3f}")
+        self.assertEqual(n, 5)   # Cl2p, Pt4d, Pt4f (row 0), Pt4p, Pt4f (row 1)
+
+    def test_the_unicode_greek_la_model_variant_is_recognised(self):
+        import lineshapes
+        doc = self._doc()
+        pt4f = next(r for r in doc.regions
+                   if r.name == "Pt 4f" and r.sample == "PtCl2")
+        self.assertIsNotNone(pt4f.fit)
+        shapes = {c.shape.split("(")[0] for c in pt4f.fit.components}
+        self.assertIn("LA", shapes)
+        for c in pt4f.fit.components:
+            if c.shape.startswith("LA"):
+                self.assertNotEqual(c.shape, "KFUnknown(0)")
+                self.assertFalse(lineshapes.is_exact(c.shape))
+
+    def test_no_rsf_becorrection_or_sample_axis_data_in_this_file(self):
+        doc = self._doc()
+        for r in doc.regions:
+            if r.fit:
+                for c in r.fit.components:
+                    self.assertEqual(c.rsf, 0.0, r.name)
+            self.assertNotIn("kf_becorrection", r.extra, r.name)
+            self.assertNotIn("kf_sample_axis", r.extra, r.name)
 
 
 if __name__ == "__main__":
