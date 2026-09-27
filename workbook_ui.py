@@ -10,6 +10,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+import about_ui
 import appinfo
 import panelview
 import plotstyle
@@ -779,6 +780,9 @@ class ImageOptionsDialog(tk.Toplevel):
         self.on_ok(style, w, h, dpi)
 
 
+NIST_XPS_URL = "https://srdata.nist.gov/xps/"
+
+
 class IdentifyDialog(tk.Toplevel):
     """Label the peaks of a survey with element lines or, where the region's
     core level has a literature-derived chemical-state reference, a specific
@@ -790,7 +794,14 @@ class IdentifyDialog(tk.Toplevel):
     states are not offered by auto-label: they are specific enough that a
     human should confirm each one). Markers are kept with the workbook.
     Uses ``app.identify_*`` methods and ``app._click_cb``; not modal, so the
-    plot stays usable."""
+    plot stays usable.
+
+    A link to the free public NIST XPS Database (srdata.nist.gov/xps) is
+    offered as a convenience for cross-checking beyond this app's own two
+    curated tiers -- its own data is not bundled here (it is a federally
+    copyrighted Standard Reference Data product, 15 U.S.C. 290e, "All rights
+    reserved", unlike the individually-cited literature papers the
+    chemical-state library draws from; see chemstates.py's own docstring)."""
 
     STATE_MARK = "⚙ "     # gear glyph: marks a chemical-state candidate
 
@@ -842,41 +853,51 @@ class IdentifyDialog(tk.Toplevel):
         self.source_label = ttk.Label(body, style="Muted.TLabel",
                                       wraplength=470, justify="left")
         self.source_label.grid(row=4, column=0, sticky="w", pady=(2, 0))
+        self.nist_link = tk.Label(
+            body, text="Look up on the NIST XPS Database ↗",
+            cursor="hand2", takefocus=1)
+        self.nist_link.grid(row=5, column=0, sticky="w", pady=(2, 0))
+        for ev in ("<Button-1>", "<Return>", "<space>"):
+            self.nist_link.bind(ev, self._open_nist_link)
         row = ttk.Frame(body)
-        row.grid(row=5, column=0, sticky="w", pady=(4, 8))
+        row.grid(row=6, column=0, sticky="w", pady=(4, 8))
         ttk.Button(row, text="Add marker", command=self._add).pack(
             side="left")
         ttk.Button(row, text="Auto-label all peaks",
                    command=self._auto).pack(side="left", padx=(6, 0))
         ttk.Label(body, text="Markers on this spectrum").grid(
-            row=6, column=0, sticky="w")
+            row=7, column=0, sticky="w")
         self.mark_list = tk.Listbox(body, height=6, exportselection=False,
                                     activestyle="none")
-        self.mark_list.grid(row=7, column=0, sticky="ew")
+        self.mark_list.grid(row=8, column=0, sticky="ew")
         row2 = ttk.Frame(body)
-        row2.grid(row=8, column=0, sticky="w", pady=(4, 0))
+        row2.grid(row=9, column=0, sticky="w", pady=(4, 0))
         ttk.Button(row2, text="Remove selected",
                    command=self._remove).pack(side="left")
         ttk.Button(row2, text="Clear all", command=self._clear).pack(
             side="left", padx=(6, 0))
         ttk.Button(body, text="Close", command=self.destroy).grid(
-            row=9, column=0, sticky="e", pady=(10, 0))
+            row=10, column=0, sticky="e", pady=(10, 0))
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<Destroy>", lambda e: self._detach()
                   if e.widget is self else None)
-        _finish(self, app, 520, 660)
+        _finish(self, app, 520, 680)
         for lb in (self.cand_list, self.mark_list):
             lb.configure(bg=app.palette["entry"], fg=app.palette["fg"],
                          selectbackground=app.palette["select_bg"],
                          selectforeground=app.palette["select_fg"],
                          highlightthickness=0, relief="flat")
+        self.nist_link.configure(bg=app.palette["bg"], fg=app.palette["accent"])
         app._click_cb = self._on_click
         self._refresh_markers()
 
     def _detach(self):
         if self.app._click_cb == self._on_click:
             self.app._click_cb = None
+
+    def _open_nist_link(self, event=None):
+        about_ui.open_link(NIST_XPS_URL)
 
     def _region(self):
         return self.regions[self.reg_cb.current()]

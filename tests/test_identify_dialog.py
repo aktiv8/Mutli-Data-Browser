@@ -57,7 +57,7 @@ class TestIdentifyDialog(unittest.TestCase):
             root=self.root,
             palette={"bg": "#fff", "fg": "#000", "panel": "#eee",
                      "entry": "#fff", "select_bg": "#ccc",
-                     "select_fg": "#000"},
+                     "select_fg": "#000", "accent": "#06c"},
             themes=SimpleNamespace(recolor_tk=lambda w: None),
             element_lines=lambda: xpslines.load_lines(),
             calibration_label=lambda r: r.name,
@@ -78,6 +78,14 @@ class TestIdentifyDialog(unittest.TestCase):
             self.root, self.fake_app(), regions or [self.region()])
         self.addCleanup(dlg.destroy)
         return dlg
+
+    def test_nist_link_opens_the_database_and_does_not_ship_its_data(self):
+        dlg = self.dialog()
+        with mock.patch.object(workbook_ui.about_ui, "open_link",
+                              return_value=True) as opened:
+            dlg._open_nist_link()
+        opened.assert_called_once_with(workbook_ui.NIST_XPS_URL)
+        self.assertTrue(workbook_ui.NIST_XPS_URL.startswith("https://"))
 
     def test_a_click_lists_both_lines_and_states(self):
         dlg = self.dialog()
