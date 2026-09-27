@@ -993,5 +993,119 @@ class TestPETFile(unittest.TestCase):
         self.assertGreater(region_end_ke - last_visible_ke, 0.1)
 
 
+def _trapz(y, x):
+    """Version-independent trapezoid rule (numpy dropped ``trapz`` in some
+    releases in favour of ``trapezoid``)."""
+    y = np.asarray(y, dtype=float)
+    x = np.asarray(x, dtype=float)
+    return float((0.5 * (y[1:] + y[:-1]) * np.diff(x)).sum())
+
+
+@unittest.skipUnless(HAVE_NP, "numpy not installed")
+class TestGeliusShape(unittest.TestCase):
+    """The Gelius asymmetric GL/SGL reconstruction (``A(a,b,n)GL(m)`` /
+    ``A(a,b,n)SGL(m)``). No real CasaXPS-fitted file using this shape has
+    been found in any available corpus (checked: the Brazil Training Course
+    set, both Kratos/Avantage reference sets, the HarwellXPS VAMAS export,
+    the MXene/PET files and ``xpsview``) -- these are self-consistency
+    checks only, against the formula in CasaXPS's own "Peak Fitting in XPS"
+    (Casa Software Ltd, 2006, p.20). See the lineshapes.py module docstring
+    for the caveats this reconstruction carries."""
+
+    def test_parse_shape(self):
+        sp = ls.parse_shape("A(0.15,0.7,20)SGL(12)")
+        self.assertEqual(sp["kind"], "A")
+        self.assertAlmostEqual(sp["a"], 0.15)
+        self.assertAlmostEqual(sp["b"], 0.7)
+        self.assertAlmostEqual(sp["m"], 20.0)            # n: Gaussian-conv code
+        self.assertEqual(sp["base"], "SGL")
+        self.assertAlmostEqual(sp["mix"], 12.0)
+
+    def test_gl_base_defaults_when_no_suffix_is_present(self):
+        sp = ls.parse_shape("A(0.2,0.4,0)")
+        self.assertEqual(sp["base"], "GL")
+        self.assertAlmostEqual(sp["mix"], 30.0)
+
+    def test_not_exact(self):
+        self.assertFalse(ls.is_exact("A(0.15,0.7,20)GL(30)"))
+
+    def test_tail_is_one_sided_and_zero_at_the_centre(self):
+        pos, fwhm = 10.0, 2.0
+        x = np.array([pos - 3.0, pos, pos + 3.0])
+        tail = ls._gelius_tail(x, pos, fwhm, 0.15, 0.7)
+        self.assertGreater(tail[0], 0.0)     # low-KE / high-BE side: adds
+        self.assertEqual(tail[1], 0.0)       # exactly zero at the centre
+        self.assertEqual(tail[2], 0.0)       # high-KE / low-BE side: none
+
+    def test_reconstruction_is_asymmetric_unlike_the_old_placeholder(self):
+        """Before this shape was implemented, an unrecognised "A" kind fell
+        into the generic placeholder branch (a = b = 1 default), giving a
+        perfectly symmetric Lorentzian. The real reconstruction must not be
+        symmetric about its own peak."""
+        ke = np.linspace(-20, 20, 4001)
+        curve = ls.component_curve(ke, "A(0.3,0.8,15)SGL(20)", 0.0, 2.0,
+                                   1000.0)
+        i = int(np.argmax(curve))
+        j_lo, j_hi = max(0, i - 300), min(len(curve) - 1, i + 300)
+        self.assertGreater(curve[j_lo], curve[j_hi] * 1.05,
+                           "expected the low-KE side to be visibly heavier")
+
+    def test_area_is_close_to_stored_for_the_one_known_real_a_value(self):
+        """For the one real "a" value seen anywhere (the whitepaper's own
+        worked poly(propylene) example, a = 0.15), the tail's asymptotic
+        plateau is negligible (see the module docstring) and the wide-window
+        area normalisation should still reproduce the stored area closely."""
+        ke = np.linspace(-200, 200, 8001)
+        area = 500.0
+        curve = ls.component_curve(ke, "A(0.15,0.7,25)SGL(15)", 0.0, 1.5,
+                                   area)
+        self.assertAlmostEqual(_trapz(curve, ke), area, delta=area * 0.05)
+
+    def test_degenerate_inputs_do_not_blow_up(self):
+        ke = np.linspace(-10, 10, 101)
+        curve = ls.component_curve(ke, "A(0,0,0)GL(30)", 0.0, 0.0, 100.0)
+        self.assertTrue(np.all(np.isfinite(curve)))
+
+
+@unittest.skipUnless(HAVE_NP, "numpy not installed")
+class TestTLAShape(unittest.TestCase):
+    """The TLA reconstruction. Substantially less certain than every other
+    shape in this module: no CasaXPS document defining it could be found
+    (only a passing example value, ``TLA(1,2.86,28)``, on a third-party
+    page, with no formula), so this is built from KherveFitting's own
+    reconstruction alone, itself citing an unlocatable "CasaXPS Cookbook
+    (2026)". No real CasaXPS-fitted file using this shape exists in any
+    available corpus either. See the lineshapes.py module docstring."""
+
+    def test_parse_shape(self):
+        sp = ls.parse_shape("TLA(1,2.86,28)")
+        self.assertEqual(sp["kind"], "TLA")
+        self.assertAlmostEqual(sp["a"], 1.0)             # alpha
+        self.assertAlmostEqual(sp["b"], 2.86)            # mu
+        self.assertAlmostEqual(sp["m"], 28.0)            # n: Gaussian-conv code
+
+    def test_not_exact(self):
+        self.assertFalse(ls.is_exact("TLA(1,2.86,28)"))
+
+    def test_reconstruction_is_asymmetric_unlike_the_old_placeholder(self):
+        ke = np.linspace(-20, 20, 4001)
+        curve = ls.component_curve(ke, "TLA(1,2.86,28)", 0.0, 2.0, 1000.0)
+        i = int(np.argmax(curve))
+        j_lo, j_hi = max(0, i - 300), min(len(curve) - 1, i + 300)
+        self.assertGreater(curve[j_lo], curve[j_hi] * 1.05,
+                           "expected the low-KE side to be visibly heavier")
+
+    def test_area_is_close_to_the_stored_area(self):
+        ke = np.linspace(-200, 200, 8001)
+        area = 500.0
+        curve = ls.component_curve(ke, "TLA(1,2.86,28)", 0.0, 1.5, area)
+        self.assertAlmostEqual(_trapz(curve, ke), area, delta=area * 0.05)
+
+    def test_degenerate_inputs_do_not_blow_up(self):
+        ke = np.linspace(-10, 10, 101)
+        curve = ls.component_curve(ke, "TLA(0,0,0)", 0.0, 0.0, 100.0)
+        self.assertTrue(np.all(np.isfinite(curve)))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -166,6 +166,82 @@ comparison cannot tell the two forms apart without a file whose ``w`` is small
 enough to produce a visible cutoff inside its own window. Not adopted; do not
 retune the taper's functional form again without one.
 
+**A(a,b,n)GL(m) / A(a,b,n)SGL(m): the Gelius asymmetric shape.** Sourced
+from CasaXPS's own "Peak Fitting in XPS" (Casa Software Ltd, 2006, p.20 --
+read directly, not via a third party): a symmetric ``GL(m)``/``SGL(m)`` base
+plus a one-sided tail on the low-KE (high binding energy) side,
+``A(x) = base(x) + w(a,b)*[AW(x) - G0(x)]`` for ``x`` below the position,
+plain ``base(x)`` above it, where ``w(a,b) = b*(0.7 + 0.3/(a+0.01))``,
+``AW(x) = exp(-(u/(fwhm + a*u))**2)`` with ``u = 2*sqrt(ln2)*|x-pos|``, and
+``G0`` the plain Gaussian of the same ``fwhm`` (``AW`` at ``a = 0``). This
+independent reading matches KherveFitting's own ``A_GL``/``A_SGL``
+(``Peak_Functions.py``, retrieved 2026-09-27), which cites the same primary
+source and, once its own BE-ascending axis is un-mirrored back to this
+module's ascending-KE grid, is algebraically identical -- good agreement
+between an independent derivation and a third party's, from the same source.
+
+**The tail term does not always decay to zero.** ``AW(x) - G0(x)`` approaches
+a nonzero plateau ``w*exp(-1/a**2)`` as ``x`` moves far from the peak
+(confirmed both analytically and numerically), rather than the power-law
+decay every other reconstructed shape here has -- CasaXPS's own whitepaper
+warns of exactly this ("intensity from the nominal ... region ... can cause
+... to move beyond the region defining the background ... not suitable for
+quantification without intensity calibration"). For small ``a`` (the one
+real value seen anywhere, in the whitepaper's own worked poly(propylene)
+example, ``A(0.15,0.7,20)SGL(12)``, is ``0.15``) the plateau is negligible
+(``exp(-1/0.15**2)`` ~ 1e-19) and ``component_curve``'s wide-grid area
+normalisation is unaffected; a fit using a much larger ``a`` would make that
+normalisation window-dependent and unreliable. Not guarded against here --
+no real file with a large ``a`` has been seen to know whether CasaXPS's own
+usage ever goes there.
+
+**The Gaussian convolution width (the shape string's ``n``, 0-499) is
+uncalibrated.** The primary source's own formula has no ``n`` in it at all
+(a separate line says only that the shape is "convoluted with a Gaussian
+with width characterized by an integer 0 <= n <= 499", the same phrasing
+used for ``DS``); lacking a real ``A``/``SGL``-Gelius-fitted file anywhere in
+the available corpora (checked: the Brazil Training Course, both Avantage/
+Kratos reference sets, the CasaXPS VAMAS corpus and the MXene/PET files all
+have zero components using this shape), ``GAUSS_K["A"]`` and
+``GAUSS_P["A"]`` are left at the same neutral ``(25/n)**1`` reference point
+DS/LA already use (``K = 1.0, P = 1.0`` -- i.e. ``gw = fwhm`` at ``n = 25``),
+not a calibrated value. Retune when a real fitted file becomes available,
+the same way DS's own calibration was redone once real ``(a, n)`` coverage
+appeared.
+
+**TLA: substantially less certain than the Gelius shape above.** No CasaXPS
+document defining ``TLA`` could be found anywhere (only a passing example
+value, ``TLA(1,2.86,28)``, on a third-party support page, with no formula).
+The only source for this shape is KherveFitting's own reconstruction
+(``Peak_Functions.py``, ``TLA``/``_tla_unit_profile``/``_tla_width_scale``),
+which itself cites an unlocatable "CasaXPS Cookbook (2026), Line shapes
+section" -- unlike the Gelius shape above, this cannot be cross-checked
+against a primary CasaXPS source, so it carries the same "third party might
+be wrong" risk the ``LA(m)`` shorthand bug earlier in this file was a
+cautionary tale about, without the real files that eventually caught that
+one. Implemented anyway (flagged, at the user's explicit direction) as: a
+Lorentzian raised to a power ``alpha`` (``sp["a"]``), modulated by an
+arctangent tail factor ``pi/2 - atan(2u) + pi/mu`` (``mu = sp["b"]``, larger
+``mu`` = weaker asymmetry) on this module's own ascending-KE grid, its width
+rescaled so the stated ``fwhm`` is the shape's own measured FWHM (no
+closed-form relation exists, so ``_tla_width_scale`` measures it numerically
+off a wide grid, mirroring KherveFitting's own approach) -- then Gaussian-
+convolved by the existing ``component_curve``/``gauss_conv`` machinery using
+the shape string's third number as an ``n`` code, the same ``(25/n)``
+convention as DS/``A`` above (``GAUSS_K["TLA"] = GAUSS_P["TLA"] = 1.0``,
+equally uncalibrated). **The shape string's parameter order
+(``TLA(alpha, mu, n)``) is inferred, not confirmed**: KherveFitting's own
+function signature groups ``(mu, wg, alpha)`` for its *fitting grid columns*
+only, which says nothing about the on-disk string's left-to-right order.
+KherveFitting's own ``wg`` is documented as a literal eV Gaussian width, but
+the one real example available (``TLA(1,2.86,28)``) has ``28`` for its third
+number -- implausibly large as an eV width for a typical XPS peak, but
+ordinary as a ``0-499`` code, which is why this module reads it that way
+instead (consistent with ``DS``/``A`` above) rather than as a literal eV
+value. Retune or reorder when a primary source or a real fitted file
+surfaces; until then treat any ``TLA``-reconstructed component as
+illustrative, not quantitatively reliable.
+
 **Tail suffix.** CasaXPS also lets a ``GL``/``SGL`` shape string carry a
 trailing ``T(k)`` tail modifier (``GL(30)T(1.5)``), used for asymmetric
 metallic peaks. ``parse_shape`` recognises and strips this suffix so the base
@@ -249,13 +325,15 @@ from __future__ import annotations
 import math
 import re
 
-GAUSS_K = {"LF": 0.60, "LA": 0.41, "DS": 1.8445}  # Gaussian FWHM / component FWHM
-GAUSS_P = {"DS": 0.5737, "LA": 0.60}  # exponent on (25/m); every other shape is 1 (below)
+GAUSS_K = {"LF": 0.60, "LA": 0.41, "DS": 1.8445, "A": 1.0, "TLA": 1.0}
+GAUSS_P = {"DS": 0.5737, "LA": 0.60, "A": 1.0, "TLA": 1.0}  # exponent on
+                                    # (25/m); every other shape is 1 (below)
 _LN2_4 = 2.772588722239781               # 4 ln 2
 
 
 _TAIL_SUFFIX_RE = re.compile(r"^(.*\))\s*T\(\s*[^()]*\s*\)\s*$", re.IGNORECASE)
 _SHAPE_RE = re.compile(r"^\s*([A-Za-z]+)\s*\(([^()]*)\)\s*(.*)$")
+_A_BASE_RE = re.compile(r"(?i)^(SGL|GL)\(([^()]*)\)")
 
 
 def parse_shape(text) -> dict:
@@ -312,6 +390,22 @@ def parse_shape(text) -> dict:
         out.update(a=ps[0] if ps else 0.0, m=ps[1] if len(ps) > 1 else 0.0)
     elif kind in ("GL", "SGL"):
         out["mix"] = ps[0] if ps else 30.0
+    elif kind == "A":
+        # A(a,b,n)GL(m) / A(a,b,n)SGL(m): the Gelius asymmetric shape (see
+        # module docstring). a, b control the tail; n (kept in "m", like DS's
+        # own Gaussian-conv code) is the Gaussian convolution width; the
+        # trailing GL(m)/SGL(m) is the symmetric base and its own mix.
+        out.update(a=ps[0] if ps else 0.2, b=ps[1] if len(ps) > 1 else 0.4,
+                   m=ps[2] if len(ps) > 2 else 0.0)
+        bm = _A_BASE_RE.match(suffix)
+        out["base"] = bm.group(1).upper() if bm else "GL"
+        out["mix"] = float(bm.group(2)) if bm and bm.group(2) else 30.0
+    elif kind == "TLA":
+        # TLA(alpha, mu, n): see the module docstring for how uncertain this
+        # parameter order is. a = alpha (Lorentzian power), b = mu (tail
+        # strength), m = n (Gaussian-conv code, same convention as DS/A).
+        out.update(a=ps[0] if ps else 1.0, b=ps[1] if len(ps) > 1 else 20.0,
+                   m=ps[2] if len(ps) > 2 else 0.0)
     return out
 
 
@@ -360,25 +454,85 @@ def _shared_width(fwhm, a, b):
     return 2.0 * fwhm / denom if denom > 0 else fwhm
 
 
+def _gl_sgl_values(x, kind, mix, pos, fwhm):
+    """The plain symmetric GL(mix) product or SGL(mix) sum, no broadening.
+    Shared by the standalone GL/SGL shapes and, as the base term, by the
+    Gelius asymmetric shape (``kind == "A"``) below."""
+    np = _np()
+    t = (x - pos) / fwhm
+    lor = 1.0 / (1.0 + 4.0 * t * t)
+    m = min(max(mix, 0.0), 100.0) / 100.0
+    gau = np.exp(-_LN2_4 * t * t)
+    if kind == "GL":
+        return (lor ** m) * (gau ** (1.0 - m))
+    return m * lor + (1.0 - m) * gau
+
+
+def _gelius_tail(x, pos, fwhm, a, b):
+    """The Gelius asymmetric shape's one-sided tail term,
+    ``w(a,b)*[AW(x) - G0(x)]`` on the low-KE (high binding energy) side,
+    zero elsewhere (see the module docstring: CasaXPS "Peak Fitting in
+    XPS", 2006, p.20)."""
+    np = _np()
+    t = x - pos
+    w = b * (0.7 + 0.3 / (a + 0.01))
+    u = 2.0 * math.sqrt(math.log(2.0)) * np.where(t < 0, -t, 0.0)
+    aw = np.exp(-(u / (fwhm + a * u)) ** 2)
+    g0 = np.exp(-(u / fwhm) ** 2)
+    return np.where(t < 0, w * (aw - g0), 0.0)
+
+
+def _tla_width_scale(alpha, mu):
+    """FWHM (in Lorentzian-width units) of the unconvolved CasaXPS ``TLA``
+    base shape, found numerically since it has no closed form (mirrors
+    KherveFitting's own ``_tla_width_scale``; see the module docstring for
+    how uncertain this reconstruction is)."""
+    np = _np()
+    t = np.linspace(-40.0, 40.0, 8001)
+    lor = (1.0 / (1.0 + 4.0 * t * t)) ** alpha
+    tail = math.pi / 2.0 - np.arctan(2.0 * t) + math.pi / mu
+    y = lor * tail
+    above = np.nonzero(y >= float(y.max()) / 2.0)[0]
+    if len(above) >= 2:
+        return float(t[above[-1]] - t[above[0]])
+    return 1.0
+
+
+def _tla_values(x, pos, fwhm, alpha, mu):
+    """The CasaXPS ``TLA`` raw shape (before Gaussian convolution, applied
+    afterwards by ``component_curve`` like every other reconstructed shape
+    here): a Lorentzian raised to ``alpha``, modulated by an arctangent tail
+    factor. See the module docstring -- this shape is substantially less
+    certain than the others in this module."""
+    np = _np()
+    alpha = max(float(alpha), 0.05)
+    mu = max(float(mu), 1e-3)
+    f_lor = fwhm / _tla_width_scale(alpha, mu)
+    u = (x - pos) / f_lor
+    lor = (1.0 / (1.0 + 4.0 * u * u)) ** alpha
+    tail = math.pi / 2.0 - np.arctan(2.0 * u) + math.pi / mu
+    return lor * tail
+
+
 def _raw_values(x, sp, pos, fwhm):
-    """The lineshape before any LA/LF Gaussian broadening (GL/SGL have none):
-    the GL product, the SGL sum, or the raw asymmetric Lorentzian (with its
-    LF finite-tail taper) on grid ``x``. Used both for the values a caller
-    asked for and, on a separate wide grid, for area normalisation."""
+    """The lineshape before any Gaussian broadening (GL/SGL have none): the
+    GL product, the SGL sum, the Gelius asymmetric shape, the TLA shape, or
+    the raw asymmetric Lorentzian (with its LF finite-tail taper) on grid
+    ``x``. Used both for the values a caller asked for and, on a separate
+    wide grid, for area normalisation."""
     np = _np()
     if sp["kind"] in ("GL", "SGL"):
-        t = (x - pos) / fwhm
-        lor = 1.0 / (1.0 + 4.0 * t * t)
-        mix = min(max(sp["mix"], 0.0), 100.0) / 100.0
-        gau = np.exp(-_LN2_4 * t * t)
-        if sp["kind"] == "GL":
-            return (lor ** mix) * (gau ** (1.0 - mix))
-        return mix * lor + (1.0 - mix) * gau
+        return _gl_sgl_values(x, sp["kind"], sp["mix"], pos, fwhm)
     if sp["kind"] == "DS":
         t = 2.0 * (x - pos) / fwhm
         a = sp["a"]
         return np.cos(np.pi * a / 2.0 + (1.0 - a) * np.arctan(t)) \
             / (1.0 + 4.0 * t * t) ** ((1.0 - a) / 2.0)
+    if sp["kind"] == "A":
+        base = _gl_sgl_values(x, sp["base"], sp["mix"], pos, fwhm)
+        return base + _gelius_tail(x, pos, fwhm, sp["a"], sp["b"])
+    if sp["kind"] == "TLA":
+        return _tla_values(x, pos, fwhm, sp["a"], sp["b"])
     F = _shared_width(fwhm, sp["a"], sp["b"])
     t = (x - pos) / F
     lor = 1.0 / (1.0 + 4.0 * t * t)
