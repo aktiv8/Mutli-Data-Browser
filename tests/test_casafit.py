@@ -174,7 +174,12 @@ class TestShapes(unittest.TestCase):
         p = ls.parse_shape("LA(1.1,1.9,7)")
         self.assertEqual((p["kind"], p["a"], p["b"], p["m"]),
                          ("LA", 1.1, 1.9, 7.0))
-        self.assertEqual(ls.parse_shape("LA(50)")["m"], 50.0)
+        # The 2-argument shorthand maps m (0-100) onto the explicit form's own
+        # n via CasaXPS's own Eq. (6) (Fairley et al., JVST A 41(1) 2023): the
+        # two run in opposite directions, LA(50) is n=700.5, not n=50.
+        self.assertEqual(ls.parse_shape("LA(50)")["m"], 700.5)
+        self.assertEqual(ls.parse_shape("LA(0)")["m"], 1401.0)
+        self.assertEqual(ls.parse_shape("LA(100)")["m"], 0.0)
         p = ls.parse_shape("LF(1.1,1.2,75,200)")
         self.assertEqual((p["w"], p["m"]), (75.0, 200.0))
         self.assertEqual(ls.parse_shape("nonsense")["kind"], "GL")
@@ -702,19 +707,24 @@ def _max_overshoot_pct(cv, counts):
 @unittest.skipUnless(HAVE_NP, "numpy not installed")
 class TestLAAsymmetryAccuracy(unittest.TestCase):
     """Canary for the LA/LF asymmetric-kernel limitation documented in
-    ``lineshapes.py``: even with the shared-width fix (``_shared_width``),
-    the reconstructed peak height for a strongly asymmetric exponent pair
-    (e.g. ``LA(1.2,5,8)``, CasaXPS's sharp metallic-tail cutoff) can still
-    run somewhat ahead of the raw data, which ``residual_rms`` (a
-    whole-curve average) does not show -- confirmed on the real titanium and
-    vanadium examples. This does NOT assert the gap is zero (the shared
-    Gaussian-broadening scale, ``GAUSS_K``, is still an open question -- see
-    the module docstring) -- only that it does not get worse than what real
-    files currently show, so a future change to ``component_curve`` is
-    caught even though it passes ``residual_rms``. Skipped entirely when
-    neither reference directory is on this machine."""
+    ``lineshapes.py``: even with the shared-width fix (``_shared_width``) and
+    the ``GAUSS_K["LA"]``/``GAUSS_P["LA"]`` retune (both there and here dated
+    2026-09-27, following the discovery that the 2-argument ``LA(m)``
+    shorthand needs CasaXPS's own Eq. (6) conversion to ``n``, not ``m``
+    used raw), the reconstructed peak height for a strongly asymmetric
+    exponent pair (e.g. ``LA(1.2,5,8)``, CasaXPS's sharp metallic-tail
+    cutoff) can still run somewhat ahead of the raw data, which
+    ``residual_rms`` (a whole-curve average) does not show -- confirmed on
+    the real titanium and vanadium examples. This does NOT assert the gap is
+    zero -- only that it does not get worse than what real files currently
+    show, so a future change to ``component_curve`` is caught even though it
+    passes ``residual_rms``. Skipped entirely when neither reference
+    directory is on this machine."""
 
-    CEILING = 12.0   # % of peak height; titanium's ~8.8% is the worst seen
+    CEILING = 12.0   # % of peak height; PET's O 1s (~9.4%) is the worst seen
+                     # across the full 25-region corpus -- titanium's old
+                     # ~8.7% worst case fell to ~6.3% with the retuned
+                     # GAUSS_K/GAUSS_P (see lineshapes.py, 2026-09-27)
 
     def _regions(self):
         for d in (REAL_DIR, GK_DIR):
@@ -812,6 +822,87 @@ class TestDSShape(unittest.TestCase):
                 self.assertLess(pct, self.OVERSHOOT_CEILING,
                                 f"{name} {cv.region}: {pct:.1f}% of peak")
         self.assertGreaterEqual(n, 1)
+
+
+def _pmma_file():
+    path = os.path.join(DS_DIR, "synthetic PMMA.vms")
+    return path if os.path.isfile(path) else None
+
+
+def _pmma3_file():
+    path = os.path.join(DS_DIR, "synthetic PMMA. 3 param LAvms.vms")
+    return path if os.path.isfile(path) else None
+
+
+@unittest.skipUnless(HAVE_NP and _pmma_file() and _pmma3_file(),
+                     "synthetic PMMA LA(m) sweep not present")
+class TestLASweepShape(unittest.TestCase):
+    """Canary for the ``GAUSS_K["LA"]``/``GAUSS_P["LA"]`` retune documented in
+    ``lineshapes.py`` (2026-09-27): two CasaXPS exports sweep the ``LA``
+    shape's broadening parameter against one shared raw C 1s peak, once
+    through the 2-argument ``LA(m)`` shorthand (``m = 0..100``) and once
+    through the explicit ``LA(1,1,m)`` form (``m = 1000..0``), with every
+    fit's three components' FWHM deliberately linked equal so FWHM is the
+    only free width parameter left to compensate for a "wrong" m. Since the
+    same raw peak underlies every block, the standard pseudo-Voigt
+    combination of the reported (linked) FWHM and this module's own Gaussian
+    broadening should imply close to the same total width at every m -- once
+    the shorthand's m is correctly converted to the explicit form's own n
+    (CasaXPS's Eq. 6, see the module docstring). This does not compare
+    absolute residual/area to the raw data (unusable on this file -- its
+    components' stored Area is ~100-450x too small for the actual peak
+    height, an unrelated data-quality artifact)."""
+
+    SPREAD_CEILING = 10.0   # % coefficient of variation; ~7.9% measured
+
+    @staticmethod
+    def _voigt_fwhm(fl, fg):
+        return 0.5346 * fl + (0.2166 * fl ** 2 + fg ** 2) ** 0.5
+
+    def _n_and_fwhm(self, path):
+        doc = readers.load_file(path)
+        rows = []
+        for r in doc.regions:
+            fit = r.fit
+            if fit is None or not fit.components:
+                continue
+            n = ls.parse_shape(fit.components[0].shape)["m"]
+            if not n:
+                continue   # m=0 forces no broadening; not informative here
+            rows.append((n, fit.components[0].fwhm))
+        return rows
+
+    def test_effective_width_stays_close_to_constant_across_the_m_sweep(self):
+        rows = self._n_and_fwhm(_pmma_file()) + self._n_and_fwhm(_pmma3_file())
+        self.assertGreaterEqual(len(rows), 15)
+        widths = [self._voigt_fwhm(
+            fl, fl * ls.GAUSS_K["LA"] * (25.0 / n) ** ls.GAUSS_P["LA"])
+            for n, fl in rows]
+        mean = sum(widths) / len(widths)
+        spread = (sum((w - mean) ** 2 for w in widths) / len(widths)) ** 0.5
+        cv_pct = 100.0 * spread / mean
+        self.assertLess(cv_pct, self.SPREAD_CEILING,
+                        f"effective width spread {cv_pct:.2f}% across the "
+                        "m sweep -- see lineshapes.py's GAUSS_K[\"LA\"]/"
+                        "GAUSS_P[\"LA\"] calibration notes")
+
+    def test_shorthand_m_lands_on_the_same_n_trend_as_the_explicit_form(self):
+        # LA(m) shorthand and LA(1,1,m) explicit are the same physical
+        # quantity once Eq. (6) is applied to the shorthand: within each
+        # file, CasaXPS's own re-fit FWHM (the only free width parameter,
+        # since it is linked equal across all three components) should drop
+        # off almost monotonically as n drops -- this is what compensates for
+        # a "wrong" fixed m at each step. If the shorthand's m were fed in
+        # raw (the old bug), file 1's n values would run in the wrong order
+        # entirely and this would fail outright.
+        for path, allowed_inversions in ((_pmma_file(), 1), (_pmma3_file(), 0)):
+            rows = sorted(self._n_and_fwhm(path), reverse=True)
+            fwhms = [fl for _n, fl in rows]
+            inversions = sum(1 for a, b in zip(fwhms, fwhms[1:])
+                             if b > a + 0.01)
+            self.assertLessEqual(inversions, allowed_inversions,
+                                 f"{path}: FWHM vs n is not (near) "
+                                 f"monotone: {rows}")
 
 
 PET_DIR = os.environ.get("XPS_PET_DIR", r"D:\Temp\for claude files\PET")

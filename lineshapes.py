@@ -49,42 +49,76 @@ from 18.3 % to 8.7 %, this file's vanadium example from 9.85 % to 4.70 %, and
 one percentage point). ``TestLAAsymmetryAccuracy`` in ``tests/test_casafit.py``
 is a canary against this getting worse.
 
-A related lead was investigated and **not** adopted: two independent sources
-(the papers above, and Fairley et al.'s supplementary information for
-"Practical guide to understanding goodness-of-fit metrics ... using nylon as
-an example," *J. Vac. Sci. Technol. A* 41(1) 2023) show CasaXPS's Gaussian-
-character parameter (the ``m`` here) runs the *opposite* direction to
-``GAUSS_K``'s formula below (larger ``m`` should mean *more* Gaussian
-broadening, not less) -- but no exact conversion to an eV width is published,
-and a corrected-direction model calibrated against the same real-file corpus
-never beat the width fix above: it either left the worst cases unchanged
-(negligible broadening at the small raw ``m`` values titanium/vanadium use)
-or, pushed further, quadrupled the average residual across the corpus while
-still not matching the width fix's improvement. Do not retune ``GAUSS_K``
-without new evidence beyond what produced this conclusion.
+**The 2-argument ``LA(m)`` shorthand is not ``LA(1,1,m)``.** Every finding
+above this paragraph, and two rejected leads that used to be recorded here
+(a "corrected direction" retune, and a claim that no ``GAUSS_K`` can round out
+a symmetric ``LA(m)`` component's own apex), were all tested by feeding the
+shorthand's ``m`` (0-100) straight into the same formula the explicit
+``LA(a,b,m)`` form uses -- which is wrong. CasaXPS's own definition (Fairley
+et al., "Practical guide to understanding goodness-of-fit metrics ... using
+nylon as an example," *J. Vac. Sci. Technol. A* 41(1) 2023, supplementary
+information, Eq. 4-6) is ``LA(x: alpha,beta,n) = N * INTEGRAL(lg(tau;
+alpha,beta) * g(x-tau; f_G(n)) dtau)`` (a generalised Lorentzian convolved
+with a Gaussian whose width is controlled by ``n``) and, separately,
+``LA(x,m) = LA(x: 1,1, 1401 - (m/100)*1401)``: the shorthand's ``m`` and the
+explicit form's ``n`` run in **opposite directions** (``LA(0)`` -> ``n =
+1401``, ``LA(100)`` -> ``n = 0``), not the same variable. ``parse_shape`` used
+to set ``m = ps[0]`` for the shorthand directly; it now applies this
+conversion, so every real ``LA(m)``-shorthand file (PET's ``LA(50)`` among
+them) is now evaluated at its true ``n = 1401 - 14.01*m``, and the explicit
+3-argument form is unaffected (it was already using ``n`` correctly).
 
-**``GAUSS_K["LA"]`` cannot round out a symmetric ``LA(m)`` component's own
-apex, at any value.** A real file (PET's ``D:\Temp\for claude files\PET\Fitted
-PET Beamson and Briggs.vms``, every C 1s/O 1s component but one is the
-symmetric ``LA(50)`` shorthand, i.e. ``a = b = 1``) looks visibly more
-Lorentzian near its own peak than a real CasaXPS screenshot of the same fit
-suggests it should. Sweeping ``GAUSS_K["LA"]`` from today's 0.20 up to 4.0
-(20x) on an isolated ``LA(50)`` component changes its own apex shape by only
-about one part in a hundred (``width at 90% of peak / width at 50%``: 0.333 at
-``K = 0.20``, saturating at 0.337 by ``K = 1.0`` and no further at ``K = 4.0``
--- for comparison, ``GL(30)``'s own ratio is 0.370, ``GL(0)``'s [pure
-Gaussian] is 0.389, and a pure Lorentzian is exactly 0.333). Convolving a
-power-law Lorentzian with a Gaussian tightens its very top only slightly no
-matter how wide the Gaussian is made, because the Lorentzian's own curvature
-at ``t = 0`` already dominates -- this is a property of the Voigt-style
-convolution this module uses, not a mistuned constant, so no value of
-``GAUSS_K`` will make a symmetric ``LA(m)`` component look meaningfully less
-Lorentzian near its apex. Reproducing a rounder apex (if CasaXPS's own kernel
-really is rounder there) would need a structurally different mixing formula --
-closer to ``GL``'s ``lor**mix * gau**(1-mix)`` product than a convolution --
-which is a bigger, unvalidated change with no published reference for the
-``LA`` family's true kernel; left for a future session with new real-file
-evidence, not attempted here.
+This was found the same way the ``DS`` calibration below was: two new
+synthetic files built specifically to sweep ``m`` in a controlled way against
+one shared raw peak, with the components' FWHM deliberately linked equal so
+it is the only free parameter left to compensate for a "wrong" ``m`` --
+``D:\Temp\for claude files\synthetic PMMA.vms`` (``LA(m)`` shorthand, ``m =
+0..100``, 11 CasaXPS refits) and ``D:\Temp\for claude files\synthetic PMMA.
+3 param LAvms.vms`` (explicit ``LA(1,1,m)``, ``m = 1000..0``), both refitting
+the same raw data. Comparing the reconstructed envelope to the raw data
+directly does not work on this pair (their components' stored ``Area`` is
+~100-450x too small for the data's actual peak height -- an unrelated
+data-quality artifact of the file, not a shape question); instead, since FWHM
+is the fit's only free width parameter, how the reported (linked) FWHM must
+drift as ``m`` sweeps -- via the standard pseudo-Voigt width approximation,
+``FWHM_V = 0.5346*FWHM_L + sqrt(0.2166*FWHM_L**2 + FWHM_G**2)`` -- is a clean
+signature of the true broadening-vs-``m`` relationship: the correct ``(K, P)``
+should make the implied total width stay constant across the whole sweep,
+since it is the same underlying peak throughout. Feeding both files' raw
+``m`` into one formula gave opposite-signed answers (this is what surfaced
+the shorthand/explicit scale bug above); on the corrected, unified ``n``
+scale, a joint fit -- minimising that width-consistency spread (today's
+formula: 8.9 % coefficient of variation across the 21-point sweep) while
+never letting any real ``LA``/``LF``-fitted region in the existing corpus get
+more than ~0.25 percentage points worse than it already was -- converges on
+``GAUSS_K["LA"] = 0.41``, ``GAUSS_P["LA"] = 0.60`` (replacing ``0.20`` and an
+implicit exponent of 1; used the same way ``GAUSS_P["DS"]`` already is,
+below), bringing the sweep's spread down to ~7.9 %. **The real corpus this
+was checked against is bigger than the "six real fits" this constant was
+first calibrated on**, and bigger than what the earlier "not adopted"
+attempts above were checked against: 25 ``LA``/``LF``-fitted regions across 7
+files (titanium `fitting example` and the `Metal Depth Profile` instructors'
+file -- the latter has both a clean 2-component metal region and an
+8-component mixed metal+oxide region in one file, the busiest region in the
+corpus and the one that ruled out a more aggressive retune tried first --
+copper, vanadium (both the plain and `For Instructors` exports), two MXene
+files, PET). Measured effect: titanium `fitting example`'s worst-case
+overshoot (the number the old ``TestLAAsymmetryAccuracy`` ceiling comment was
+built around) falls from 8.70 % to 6.27 %; every other region in the corpus
+moves by at most ~0.24 percentage points either way; PET's shorthand
+``LA(50)`` component (now correctly ``n = 700.5``, not ``50``) moves its
+C 1s/O 1s overshoot by ~0.02 pp. The worst case across the whole corpus stays
+PET's O 1s, 9.46 % to 9.43 % (very slightly better). Do not retune
+``GAUSS_K``/``GAUSS_P`` again without new evidence beyond what produced this
+result -- but do re-run this comparison (this file's own module docstring
+here, and ``TestLAAsymmetryAccuracy``/``TestPETFile``/``TestLASweepShape``)
+before touching either constant, since the previous two "not adopted"
+conclusions in this file were reached on a mis-scaled ``m`` and turned out to
+be wrong, and a first attempt at this same retune (``K=0.90, P=0.80``, fit
+only against a 5-file subset of the corpus) passed every test available at
+the time but pushed the `Metal Depth Profile` file's 8-component region's
+overshoot from 8.8 % to 16.3 % -- always check the *busiest*, most
+overlapping real region available, not just the cleanest ones.
 
 **A finite tail cutoff (generalising ``LF``'s ``w`` to plain ``LA``) does not
 help either, and makes most real files worse.** The obvious-looking fix for a
@@ -215,8 +249,8 @@ from __future__ import annotations
 import math
 import re
 
-GAUSS_K = {"LF": 0.60, "LA": 0.20, "DS": 1.8445}  # Gaussian FWHM / component FWHM
-GAUSS_P = {"DS": 0.5737}  # exponent on (25/m); every other shape is 1 (below)
+GAUSS_K = {"LF": 0.60, "LA": 0.41, "DS": 1.8445}  # Gaussian FWHM / component FWHM
+GAUSS_P = {"DS": 0.5737, "LA": 0.60}  # exponent on (25/m); every other shape is 1 (below)
 _LN2_4 = 2.772588722239781               # 4 ln 2
 
 
@@ -268,7 +302,12 @@ def parse_shape(text) -> dict:
         if len(ps) >= 3:
             out.update(a=ps[0], b=ps[1], m=ps[2])
         else:
-            out.update(m=ps[0] if ps else 0.0)
+            # The 2-argument shorthand's m (0-100) is NOT the explicit form's
+            # own m/n -- CasaXPS defines LA(m) = LA(1,1, 1401 - (m/100)*1401)
+            # (Fairley et al., JVST A 41(1) 2023 supplementary, Eq. 6): the two
+            # run in opposite directions (LA(0) -> n=1401, LA(100) -> n=0).
+            raw = ps[0] if ps else 0.0
+            out.update(m=1401.0 - 14.01 * raw)
     elif kind == "DS":
         out.update(a=ps[0] if ps else 0.0, m=ps[1] if len(ps) > 1 else 0.0)
     elif kind in ("GL", "SGL"):
