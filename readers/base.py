@@ -553,6 +553,8 @@ class SpectrumFile:
             md["BE calibration (KherveFitting)"] = (
                 f"{kfc:+.3f} eV (already applied by the source file to its "
                 "stored positions -- not applied again here)")
+        if r.extra.get("kf_sample_axis"):
+            md["Sample axis (KherveFitting)"] = r.extra["kf_sample_axis"]
         for k, v in (r.extra.get("preserved_metadata") or {}).items():
             if not md.get(k):              # restored from a VAMAS comment
                 md[k] = v

@@ -95,9 +95,28 @@ read-only metadata (region_metadata's "BE calibration (KherveFitting)" row,
 ``Region.extra["kf_becorrection"]``), the file's own audit trail, not an
 instruction to shift anything again.
 
-**Not attempted in this version** (deliberately, not an oversight): the
-depth/tilt ``SampleAxis``. Revisit once this first version has been used on
-more real files.
+**SampleAxis** is a project-wide, user-defined per-sample-row scale --
+despite the name suggesting a depth or tilt series specifically, its own
+``name`` field is free text a user sets ("Time" by default; STO_Tilt.kfit,
+named for a tilt series, still has it as "Time"), so this module treats it
+as an opaque labelled value rather than assuming it is depth or angle in
+any particular unit. Checked on all 10 sample files: **not one has this
+switched on with real values** -- STO_Tilt.kfit is the only file with a
+``SampleAxis`` dict at all, and it is ``"enabled": 0`` with empty
+``anchors``/``values``. So this module reads only the parts of the schema
+that file's own empty example still shows (``enabled``, ``name``,
+``format``/``decimals`` -- display hints only -- and ``values``, assumed
+row-keyed the same string-digit way ``BEcorrections``/``SampleNames`` are
+in the same file, since no populated example exists to confirm it) and
+surfaces a row's own value as read-only metadata only
+(``_sample_axis_value``, ``Region.extra["kf_sample_axis"]`` ->
+region_metadata's "Sample axis (KherveFitting)" row) -- not into
+``Region.etch_level``/``etch_time`` or any of this app's own depth-profile
+machinery (``viewdata.py``, ``sputter.py``), which assumes a physical depth
+or etch time this feature does not confirm it carries. ``anchors`` (unclear
+meaning with no example to check) is not read at all. Revisit once a real
+file with this switched on and populated is available to check the
+``values`` keying and ``anchors``' purpose against.
 
 ``import_peak_library`` (D4) reads a standalone Peaks Library ``.json`` file
 on its own -- the same ``Core levels[<name>].Fitting.Peaks`` shape as a
@@ -183,6 +202,40 @@ def _becorrection_of(row, becorrections, file_level):
     if val is None:
         val = file_level
     return val if val else None
+
+
+def _sample_axis_value(sample_axis, row):
+    """``"<name>: <formatted value>"`` for sample row ``row``'s own entry of
+    the project's ``SampleAxis`` (a user-defined per-row scale -- named
+    "Time" by default, but the name is free text a user could set to
+    "Depth (nm)" or "Tilt angle" for a depth or tilt series, hence this
+    module's own name for the feature), or None when the file has none, it
+    is switched off, or this row has no value of its own recorded -- see
+    the module docstring's "SampleAxis" section: not one of the 10 real
+    sample files has this switched on with real values (the one file that
+    has the dict at all, STO_Tilt.kfit -- named for a tilt series -- has it
+    disabled and empty), so only the parts of the schema directly observed
+    (``enabled``/``name``/``decimals``/``values``, ``values`` assumed
+    row-keyed the same string-digit way ``BEcorrections``/``SampleNames``
+    are in the same file, since no populated example exists to confirm it)
+    are read; ``anchors`` (unclear meaning with no example to check) is
+    not."""
+    if not isinstance(sample_axis, dict) or not sample_axis.get("enabled"):
+        return None
+    values = sample_axis.get("values")
+    if not isinstance(values, dict):
+        return None
+    val = values.get(str(row))
+    if val is None:
+        return None
+    name = str(sample_axis.get("name") or "").strip() or "Sample axis"
+    num = _num(val)
+    if num is None:
+        text = str(val)
+    else:
+        nd = int(_num(sample_axis.get("decimals"), 2) or 2)
+        text = f"{num:.{nd}f}"
+    return f"{name}: {text}"
 
 
 def _shape_string(peak):
@@ -324,6 +377,7 @@ class KherveFittingKfitFile(SpectrumFile):
                         except (TypeError, ValueError):
                             pass
             becorrection_file = _num((project or {}).get("BEcorrection"))
+            sample_axis = (project or {}).get("SampleAxis")
             n_rows = len({r for _n, r in (
                 _split_sheet_name(cls_group[k].attrs.get("name") or k)
                 for k in cls_group.keys())})
@@ -361,6 +415,9 @@ class KherveFittingKfitFile(SpectrumFile):
                 bec = _becorrection_of(row, becorrections, becorrection_file)
                 if bec:
                     r.extra["kf_becorrection"] = bec
+                sax = _sample_axis_value(sample_axis, row)
+                if sax:
+                    r.extra["kf_sample_axis"] = sax
                 r.fit = self._build_fit(grp, r, sheet_json, results_row)
                 self.regions.append(r)
         self.instrument = {k: v for k, v in self.instrument.items() if v}

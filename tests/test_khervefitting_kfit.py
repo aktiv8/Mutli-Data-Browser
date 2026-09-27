@@ -242,6 +242,45 @@ class TestBEcorrection(unittest.TestCase):
         self.assertIsNone(kf._becorrection_of(0, {}, None))
 
 
+class TestSampleAxis(unittest.TestCase):
+    """_sample_axis_value: no real sample file has SampleAxis switched on
+    with real values (see the module docstring), so this is checked only
+    against the schema its one real (disabled, empty) example still shows,
+    plus a hand-built enabled/populated case."""
+
+    def test_disabled_gives_none(self):
+        # STO_Tilt.kfit's real (only) example
+        self.assertIsNone(kf._sample_axis_value(
+            {"enabled": 0, "name": "Time", "format": "auto",
+            "decimals": 2, "anchors": {}, "values": {}}, 0))
+
+    def test_no_sample_axis_at_all_gives_none(self):
+        # every other real sample file
+        self.assertIsNone(kf._sample_axis_value(None, 0))
+
+    def test_enabled_with_a_numeric_value_is_formatted_by_decimals(self):
+        sa = {"enabled": 1, "name": "Depth (nm)", "decimals": 1,
+             "values": {"0": 12.345, "1": 25.0}}
+        self.assertEqual(kf._sample_axis_value(sa, 0), "Depth (nm): 12.3")
+        self.assertEqual(kf._sample_axis_value(sa, 1), "Depth (nm): 25.0")
+
+    def test_a_row_with_no_value_of_its_own_gives_none(self):
+        sa = {"enabled": 1, "name": "Depth (nm)", "values": {"0": 12.0}}
+        self.assertIsNone(kf._sample_axis_value(sa, 1))
+
+    def test_enabled_but_no_values_dict_gives_none(self):
+        self.assertIsNone(kf._sample_axis_value(
+            {"enabled": 1, "name": "Depth (nm)"}, 0))
+
+    def test_a_non_numeric_value_is_shown_as_text(self):
+        sa = {"enabled": 1, "name": "Note", "values": {"0": "surface"}}
+        self.assertEqual(kf._sample_axis_value(sa, 0), "Note: surface")
+
+    def test_a_blank_name_falls_back_to_a_generic_label(self):
+        sa = {"enabled": 1, "name": "", "values": {"0": 1.0}}
+        self.assertEqual(kf._sample_axis_value(sa, 0), "Sample axis: 1.00")
+
+
 @unittest.skipUnless(HAVE_H5PY, "h5py not installed")
 class TestRealFiles(unittest.TestCase):
     """Every sample .kfit file loads cleanly; every reconstructed fit's
@@ -337,6 +376,23 @@ class TestRealFiles(unittest.TestCase):
             self.assertNotIn("kf_becorrection", r.extra, r.name)
             self.assertNotIn("BE calibration (KherveFitting)",
                              doc.region_metadata(r), r.name)
+
+    def test_a_disabled_sample_axis_produces_no_metadata(self):
+        # STO_Tilt.kfit is the only real sample file with a SampleAxis dict
+        # at all, and it is disabled and empty -- see the module docstring
+        n = 0
+        for rel in REAL_FILES:
+            path = _real(rel)
+            if not path:
+                continue
+            n += 1
+            doc = readers.load_file(path)
+            for r in doc.regions:
+                self.assertNotIn("kf_sample_axis", r.extra, f"{rel} {r.name}")
+                self.assertNotIn("Sample axis (KherveFitting)",
+                                 doc.region_metadata(r), f"{rel} {r.name}")
+        if n == 0:
+            self.skipTest("KherveFitting sample corpus not present")
 
     def test_al2o3_gets_its_real_rsf_cross_referenced(self):
         # Al2O3.kfit: Results Table0 is fully in step with the live fit for
