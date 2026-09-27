@@ -1,4 +1,4 @@
-X-ray photoelectron spectroscopy (XPS) measurements were made on a Kratos Axis Ultra (or Supra) spectrometer using a monochromated Al Kα X-ray source (1486.6 eV) and a hemispherical analyser operated in hybrid (or slot) lens mode. Survey and high-resolution core-level spectra were acquired at the pass energies noted above, using the constant analyser energy (CAE) mode.
+X-ray photoelectron spectroscopy (XPS) measurements were made on a Kratos Axis Ultra (or Supra) spectrometer using a monochromated Al Kα X-ray source (1486.6 eV) and a hemispherical analyser operated in hybrid mode of operation using the slot aperature. Survey and high-resolution core-level spectra were acquired at the pass energies of 160 eV and 40 eV respoectively, using the constant analyser energy (CAE) mode.
 
 A low-energy electron charge neutraliser was used throughout the acquisition to compensate for surface charging on the insulating sample.
 

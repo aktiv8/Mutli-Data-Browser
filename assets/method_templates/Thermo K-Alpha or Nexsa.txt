@@ -1,4 +1,4 @@
-X-ray photoelectron spectroscopy (XPS) measurements were made on a Thermo Scientific K-Alpha (or Nexsa) spectrometer using a monochromated Al Kα X-ray source (1486.6 eV). Survey spectra were acquired at a pass energy of 200 eV and high-resolution core-level spectra at a pass energy of 50 eV, using the constant analyser energy (CAE) mode, with an analysis area of approximately 400 µm in diameter.
+X-ray photoelectron spectroscopy (XPS) measurements were made on a Thermo Scientific K-Alpha (or Nexsa) spectrometer using a monochromated Al Kα X-ray source (1486.6 eV). Survey spectra were acquired at a pass energy of 150 eV and high-resolution core-level spectra at a pass energy of 50 eV, using the constant analyser energy (CAE) mode. The analysis area is defined by the spot mode, which in this was was the 400 µm Spot Mode, which is an eliptical area of ca. 600 x 400 µm s measured on the internal phosphor.
 
 A low-energy dual-beam charge neutraliser (combined electron and low-energy Ar+ ion flood gun) was used throughout the acquisition to compensate for differential surface charging on the insulating sample.
 
