@@ -106,6 +106,32 @@ The tail's visible extent is fixed in ``plots.draw_fit`` instead (a display
 choice, not a change to the shape or its stored area -- see
 ``_COMPONENT_VISIBLE_FLOOR`` there).
 
+**A third-party independent reconstruction (Kiwi AI, retrieved 2026-09-27,
+``D:\Temp\for claude files\lineshapes with cliping.txt``) was reviewed against
+this module.** Its kernels match the same published forms already used here
+(no new information). Its treatment of CasaXPS's fit-region window hard-clips
+each shape and **renormalizes by the clipped area** -- the same family of idea
+as the rejected tail cutoff above, and wrong for the same reason (confirmed
+again here, not just inferred): our own display-only clip in
+``casafit.curves`` (NaN outside the region, no renormalization) is what real
+files need. Its ``LF`` finite tail, though, uses a **logistic sigmoid** damping
+function rather than this module's polynomial ``(1 - r^2)^2`` window -- a
+genuinely different, previously untried idea, checked here: swapping in a
+same-convention sigmoid (cutoff centred at the same ``r = |x-pos|/fwhm/w = 1``)
+and re-running ``casafit.curves`` on every real ``LF``-fitted component
+available (5, across ``Titanium Metal Depth Profile - INSTRUCTORS.vms`` and
+``D:\Temp\for claude files\PtCl2\PtCl2_quantified.vms``) moved
+``residual_rms``/overshoot by under half a percentage point either way
+(``residual_rms`` very slightly worse on all 5, overshoot very slightly better
+on 3 of 5) -- noise, not an improvement. Expected: every real ``w`` seen there
+(45-75) puts the taper's own cutoff radius (57-274 eV) far outside any of
+these files' fit-region windows (a few to a few tens of eV), so in every real
+file available ``LF`` is numerically indistinguishable from plain ``LA`` (bar
+the ``m``/Gaussian-width term) regardless of which taper shape is used -- this
+comparison cannot tell the two forms apart without a file whose ``w`` is small
+enough to produce a visible cutoff inside its own window. Not adopted; do not
+retune the taper's functional form again without one.
+
 **Tail suffix.** CasaXPS also lets a ``GL``/``SGL`` shape string carry a
 trailing ``T(k)`` tail modifier (``GL(30)T(1.5)``), used for asymmetric
 metallic peaks. ``parse_shape`` recognises and strips this suffix so the base
