@@ -21,6 +21,7 @@ sum of the component areas is used instead and the row says so (``basis``).
 """
 
 import casafit
+import rsf as rsf_lib
 
 SOURCE_SURVEY = "survey"
 SOURCE_HIGH_RES = "high-res"
@@ -50,7 +51,9 @@ def fit_rows(r, curves=False):
     """One row per distinct fit region of ``r`` (a Region with ``fit``), or [].
 
     Keys: region, background, rsf, area, area_t (with the transmission function
-    divided out, None when the file has none), basis ("data" or "components"),
+    divided out, None when the file has none), photon_energy (needed by
+    ``normalise``'s RSF fallback, which never otherwise sees the ``Region``),
+    basis ("data" or "components"),
     source ("survey" or "high-res", from ``r.is_survey`` -- CasaXPS can
     quantify a wide survey region as readily as a fitted high-resolution one,
     but the two should not be treated as equally precise when mixed in one
@@ -112,7 +115,7 @@ def fit_rows(r, curves=False):
         row = {
             "region": cv.region, "background": cv.background_type,
             "rsf": getattr(reg, "rsf", None), "area": area, "area_t": area_t,
-            "basis": basis,
+            "photon_energy": hv, "basis": basis,
             "source": SOURCE_SURVEY if r.is_survey else SOURCE_HIGH_RES,
             "be_lo": None if hi is None else hv - (hi + rshift),
             "be_hi": None if lo is None else hv - (lo + rshift),
@@ -150,26 +153,73 @@ def _curves_of(cv):
             "comps": [cut(v) for _c, v in cv.components]}
 
 
-def normalise(rows, include=None, transmission=False):
+def normalise(rows, include=None, transmission=False, rsf_table=None,
+             rsf_library="scofield"):
     """Atomic percent of each row: (area / RSF) over the sum of the included
     rows. ``include`` is an optional list of booleans (default: all);
     ``transmission`` divides the transmission function out where the row has
     one. Returns one dict per row: ``corrected``, ``at_pct`` (None when the row
-    is left out) and ``why`` (the reason, "" when it counts)."""
+    is left out), ``why`` (the reason, "" when it counts), and ``rsf_source``/
+    ``rsf_anode``/``rsf_value`` (all None for the ordinary case below --
+    stated only when a substitute RSF is used, never silently identical to a
+    real recorded one).
+
+    A row's own recorded RSF (``row["rsf"]``) is used first, exactly as
+    always. Only when that is missing/falsy are two further tiers tried, in
+    order, before giving up with ``why = "no RSF"``:
+
+    1. **Each component's own RSF** (``rsf_source = "component"``): a
+       KherveFitting-derived fit can carry a different, individually
+       cross-referenced RSF per component (a doublet's two members are
+       physically distinct lines, unlike CasaXPS's convention of one RSF for
+       the whole region) -- ``sum(area_i / rsf_i)`` over the components that
+       have one, in place of ``area / rsf``. Numerically a no-op for a
+       region whose components all share the region's own (falsy) RSF, so
+       this changes nothing for a plain CasaXPS file.
+    2. **A reference-table lookup** (``rsf_table``, a list from
+       ``rsf.load_rsf()``; ``rsf_library`` picks which one, default
+       "scofield") -- **off by default** (``rsf_table=None``), the same
+       "nothing is guessed" stance this module already takes on a missing
+       RSF: only tried when a caller explicitly supplies a table. Looked up
+       by the row's own region name and photon energy via ``rsf.rsf_of``;
+       when found, ``rsf_source``/``rsf_anode``/``rsf_value`` record exactly
+       which library/anode/number was substituted."""
     out = []
     for i, row in enumerate(rows):
-        res = {"corrected": None, "at_pct": None, "why": ""}
+        res = {"corrected": None, "at_pct": None, "why": "",
+               "rsf_source": None, "rsf_anode": None, "rsf_value": None}
         area = row.get("area_t") if transmission and \
             row.get("area_t") is not None else row.get("area")
-        rsf = row.get("rsf")
+        own_rsf = row.get("rsf")
         if include is not None and not include[i]:
             res["why"] = "not included"
-        elif not rsf or rsf <= 0:
-            res["why"] = "no RSF"
-        elif area is None or area <= 0:
-            res["why"] = "no area"
+        elif own_rsf and own_rsf > 0:
+            if area is None or area <= 0:
+                res["why"] = "no area"
+            else:
+                res["corrected"] = area / own_rsf
         else:
-            res["corrected"] = area / rsf
+            comp_total = sum(
+                c["area"] / c["rsf"] for c in (row.get("components") or [])
+                if c.get("rsf") and c["rsf"] > 0 and c.get("area") is not None)
+            if comp_total > 0:
+                res["corrected"] = comp_total
+                res["rsf_source"] = "component"
+            elif rsf_table:
+                value = rsf_lib.rsf_of(row.get("region"), rsf_table,
+                                       rsf_library, row.get("photon_energy"))
+                if not value:
+                    res["why"] = "no RSF"
+                elif area is None or area <= 0:
+                    res["why"] = "no area"
+                else:
+                    res["corrected"] = area / value
+                    res["rsf_source"] = rsf_library
+                    res["rsf_anode"] = rsf_lib.anode_for(
+                        row.get("photon_energy"))
+                    res["rsf_value"] = value
+            else:
+                res["why"] = "no RSF"
         out.append(res)
     total = sum(x["corrected"] for x in out if x["corrected"] is not None)
     for x in out:
@@ -197,24 +247,40 @@ def states(row, at_pct=None):
 
 CSV_HEADER = ("Sample", "Level", "Spectrum", "Region", "Background", "RSF",
               "Area (counts/s.eV)", "Area / RSF", "at %", "State",
-              "State at %", "Note", "Source")
+              "State at %", "Note", "Source", "RSF Source")
 
 
 def _g(v):
     return "" if v is None else f"{v:.6g}"
 
 
-def csv_rows(groups, include=None, transmission=False):
+def _rsf_source_text(x):
+    """"" for a row's own recorded RSF (the ordinary case); otherwise says
+    what substituted it, for the same honesty ``resultspages.py``'s report
+    tables give (never silently identical to a real recorded RSF)."""
+    src = x.get("rsf_source")
+    if not src:
+        return ""
+    if src == "component":
+        return "components' own RSF"
+    label = rsf_lib.LIBRARY_SHORT.get(src, src)
+    return f"{label}, {x['rsf_anode']} Kα ({_g(x['rsf_value'])})"
+
+
+def csv_rows(groups, include=None, transmission=False, rsf_table=None,
+            rsf_library="scofield"):
     """The quantification table as rows of cells, header first. ``groups`` is
     ``[{"sample", "level", "entries": [{"spectrum", "row"}]}]``: each group (one
     sample at one depth level) is normalised on its own. ``include`` is an
-    optional list (per group) of lists of booleans. A region row is followed by
-    one row per chemical state. The HTML browser writes the same table."""
+    optional list (per group) of lists of booleans. ``rsf_table``/
+    ``rsf_library`` are ``normalise``'s own RSF-fallback args (off by
+    default). A region row is followed by one row per chemical state. The
+    HTML browser writes the same table."""
     out = [list(CSV_HEADER)]
     for gi, g in enumerate(groups):
         rows = [e["row"] for e in g["entries"]]
         res = normalise(rows, None if include is None else include[gi],
-                        transmission)
+                        transmission, rsf_table, rsf_library)
         lv = "" if g.get("level") is None else str(g["level"])
         for e, x in zip(g["entries"], res):
             row = e["row"]
@@ -223,19 +289,22 @@ def csv_rows(groups, include=None, transmission=False):
             out.append([g["sample"], lv, e["spectrum"], row["region"],
                         row.get("background", ""), _g(row.get("rsf")),
                         _g(area), _g(x["corrected"]), _g(x["at_pct"]), "", "",
-                        x["why"], row.get("source", "")])
+                        x["why"], row.get("source", ""), _rsf_source_text(x)])
             if x["at_pct"] is not None:
                 for st in states(row, x["at_pct"]):
                     out.append([g["sample"], lv, e["spectrum"], row["region"],
                                 "", "", "", "", "", st["name"],
-                                _g(st["at_pct"]), "", ""])
+                                _g(st["at_pct"]), "", "", ""])
     return out
 
 
-def profile(groups, mode="element", include=None, transmission=False):
+def profile(groups, mode="element", include=None, transmission=False,
+           rsf_table=None, rsf_library="scofield"):
     """A depth profile from the fit rows of one sample: ``groups`` is one
     ``{"level", "entries": [{"spectrum", "row"}]}`` per depth level (in depth
     order); each level is normalised on its own, as in ``csv_rows``.
+    ``rsf_table``/``rsf_library`` are ``normalise``'s own RSF-fallback args
+    (off by default).
 
     ``mode``: "element" (atomic % of each region), "state" (atomic % of each
     chemical state) or "share" (a state's percent of its own region). Returns
@@ -247,7 +316,7 @@ def profile(groups, mode="element", include=None, transmission=False):
     for gi, g in enumerate(groups):
         rows = [e["row"] for e in g["entries"]]
         res = normalise(rows, None if include is None else include[gi],
-                        transmission)
+                        transmission, rsf_table, rsf_library)
         seen = set()
         for e, x in zip(g["entries"], res):
             if x["at_pct"] is None:

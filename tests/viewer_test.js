@@ -184,6 +184,59 @@ function near(a, b, msg, tol) {
     const n = V.quantNormalise([{ area: 1, rsf: 1 }, { area: 3, rsf: 1 }], null, false);
     near(n[0].at, 25, 'atomic percent'); near(n[1].at, 75, 'atomic percent');
     eq(V.quantNormalise([{ area: 5, rsf: 0 }], null, false)[0].why, 'no RSF', 'no RSF is said');
+
+    // ---- RSF fallback tiers (mirrors quant.py's own tiers, test_quant.py) ----
+    {
+      // tier: a component's own RSF, summed, when the region has none --
+      // Al2O3.kfit's real Al 2p shape (region rsf 0, components 0.37/0.19)
+      const r = V.quantNormalise([{ area: 999, rsf: 0, components: [
+        { area: 111265.21, rsf: 0.37 }, { area: 54535.04, rsf: 0.19 }] }], null, false)[0];
+      near(r.corrected, 111265.21 / 0.37 + 54535.04 / 0.19, 'component-tier corrected');
+      eq(r.rsfSource, 'component', 'component-tier rsfSource');
+
+      // tier: no usable component RSF falls through to "no RSF"
+      eq(V.quantNormalise([{ area: 10, rsf: 0, components: [{ area: 5, rsf: 0 }] }],
+        null, false)[0].why, 'no RSF', 'no usable component RSF is still no RSF');
+
+      // tier: the reference table, off by default, on when supplied
+      const table = [{ 0: 'scofield', 1: 'Al', 2: 'Pt 4f', 3: 15.45 }].map((o) => [o[0], o[1], o[2], o[3]]);
+      const ptRow = { area: 100, rsf: 0, region: 'Pt 4f', photon_energy: 1486.6, components: [] };
+      eq(V.quantNormalise([ptRow], null, false)[0].why, 'no RSF', 'table fallback is off by default');
+      const t = V.quantNormalise([ptRow], null, false, table, 'scofield')[0];
+      near(t.corrected, 100 / 15.45, 'table-tier corrected');
+      eq([t.rsfSource, t.rsfAnode, t.rsfValue], ['scofield', 'Al', 15.45], 'table-tier provenance');
+
+      // a component-level fix always wins over the table (the file's own data)
+      const compRow = { area: 10, rsf: 0, region: 'Pt 4f', photon_energy: 1486.6,
+                       components: [{ area: 5, rsf: 2 }] };
+      eq(V.quantNormalise([compRow], null, false, table, 'scofield')[0].rsfSource, 'component',
+        'component tier beats the table fallback');
+    }
+
+    // ---- anodeFor / rsfOf (mirrors rsf.py) ----
+    eq(V.anodeFor(null), 'Al', 'anodeFor defaults to Al');
+    eq(V.anodeFor(1486.6), 'Al', 'anodeFor Al Kalpha');
+    eq(V.anodeFor(1253.6), 'Mg', 'anodeFor Mg Kalpha');
+    {
+      const table = [['scofield', 'Al', 'Pt 4f', 15.45], ['scofield', 'Mg', 'Pt 4f', 15.86]];
+      near(V.rsfOf('Pt 4f', table, 'scofield', 1486.6), 15.45, 'rsfOf Al');
+      near(V.rsfOf('Pt 4f', table, 'scofield', 1253.6), 15.86, 'rsfOf Mg');
+      eq(V.rsfOf('Zz 9z', table, 'scofield', 1486.6), null, 'rsfOf no match');
+    }
+
+    // ---- elementOf / preferredDefaults (mirrors resultspages.py) ----
+    eq(V.elementOf('Cl 2p'), 'Cl', 'elementOf a real region');
+    eq(V.elementOf('WideScan'), '', 'elementOf a non-region string');
+    {
+      // the user's own real case: Pt 4f is preferred over Pt 4d
+      const entries = [{ key: 'a', row: { region: 'Pt 4f' } }, { key: 'b', row: { region: 'Pt 4d' } }];
+      eq(V.preferredDefaults(entries, {}), { b: false }, 'Pt 4d defaults to unticked, Pt 4f untouched');
+      // Ti has no preference entry: nothing is seeded
+      const ti = [{ key: 'a', row: { region: 'Ti 2p' } }, { key: 'b', row: { region: 'Ti 1s' } }];
+      eq(V.preferredDefaults(ti, {}), {}, 'an element with no preference entry is untouched');
+      // an already-excluded entry is not treated as a surviving competitor
+      eq(V.preferredDefaults(entries, { a: false }), {}, 'nothing left to prefer when Pt 4f is already unticked');
+    }
     eq(V.quantStates({ components: [{ gk: 'i1', state: 'A', area: 3 }, { gk: 'i1', state: 'A', area: 1 }, { gk: 'nB', state: 'B', area: -2 }] }, 40)
       .map((s) => s.name + ':' + s.at), ['A:40', 'B:0'], 'states share the row, negative areas count as zero');
   }

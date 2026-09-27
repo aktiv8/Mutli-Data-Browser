@@ -195,6 +195,99 @@ class TestNormalise(unittest.TestCase):
         self.assertEqual(quant.normalise([]), [])
 
 
+class TestRsfFallback(unittest.TestCase):
+    """The region-vs-component RSF bugfix (a KherveFitting .kfit region can
+    have no RSF of its own while its components each carry a real,
+    individually cross-referenced one -- Al2O3.kfit's real Al 2p shape,
+    components rsf 0.37/0.19) and the opt-in Scofield/Kratos reference-table
+    fallback tier."""
+
+    RSF_TABLE = [
+        {"library": "scofield", "anode": "Al", "line": "Pt 4f", "rsf": 15.45},
+        {"library": "scofield", "anode": "Mg", "line": "Pt 4f", "rsf": 15.86},
+        {"library": "kratos_f1s", "anode": "Al", "line": "Pt 4f", "rsf": 5.58},
+    ]
+
+    def test_component_rsf_is_used_when_the_region_has_none(self):
+        # Al2O3.kfit's real Al 2p shape: region rsf 0.0, components 0.37/0.19
+        row = {"area": 999.0, "rsf": 0.0, "components": [
+            {"area": 111265.21, "rsf": 0.37},
+            {"area": 54535.04, "rsf": 0.19}]}
+        out = quant.normalise([row])
+        expect = 111265.21 / 0.37 + 54535.04 / 0.19
+        self.assertAlmostEqual(out[0]["corrected"], expect)
+        self.assertEqual(out[0]["rsf_source"], "component")
+        self.assertEqual(out[0]["at_pct"], 100.0)
+
+    def test_components_with_no_rsf_are_skipped_not_zero_filled(self):
+        row = {"area": 10.0, "rsf": 0.0, "components": [
+            {"area": 5.0, "rsf": 2.0}, {"area": 3.0, "rsf": 0.0}]}
+        out = quant.normalise([row])
+        self.assertAlmostEqual(out[0]["corrected"], 2.5)
+        self.assertEqual(out[0]["rsf_source"], "component")
+
+    def test_no_usable_component_rsf_falls_through_to_no_rsf(self):
+        row = {"area": 10.0, "rsf": 0.0, "components": [
+            {"area": 5.0, "rsf": 0.0}]}
+        out = quant.normalise([row])
+        self.assertEqual(out[0]["why"], "no RSF")
+        self.assertIsNone(out[0]["rsf_source"])
+
+    def test_table_fallback_is_off_by_default(self):
+        row = {"area": 10.0, "rsf": 0.0, "region": "Pt 4f",
+              "photon_energy": 1486.6, "components": []}
+        out = quant.normalise([row])
+        self.assertEqual(out[0]["why"], "no RSF")
+
+    def test_table_fallback_when_requested(self):
+        row = {"area": 100.0, "rsf": 0.0, "region": "Pt 4f",
+              "photon_energy": 1486.6, "components": []}
+        out = quant.normalise([row], rsf_table=self.RSF_TABLE)
+        self.assertAlmostEqual(out[0]["corrected"], 100.0 / 15.45)
+        self.assertEqual(out[0]["rsf_source"], "scofield")
+        self.assertEqual(out[0]["rsf_anode"], "Al")
+        self.assertEqual(out[0]["rsf_value"], 15.45)
+
+    def test_table_fallback_picks_the_right_library_and_anode(self):
+        mg_row = {"area": 100.0, "rsf": 0.0, "region": "Pt 4f",
+                 "photon_energy": 1253.6, "components": []}
+        out = quant.normalise([mg_row], rsf_table=self.RSF_TABLE,
+                              rsf_library="scofield")
+        self.assertEqual(out[0]["rsf_anode"], "Mg")
+        self.assertAlmostEqual(out[0]["corrected"], 100.0 / 15.86)
+        al_row = {"area": 100.0, "rsf": 0.0, "region": "Pt 4f",
+                 "photon_energy": 1486.6, "components": []}
+        out = quant.normalise([al_row], rsf_table=self.RSF_TABLE,
+                              rsf_library="kratos_f1s")
+        self.assertEqual(out[0]["rsf_source"], "kratos_f1s")
+
+    def test_component_rsf_beats_table_fallback(self):
+        # a component-level fix always wins over the opt-in table, since
+        # it is the file's own data, not a substitute
+        row = {"area": 10.0, "rsf": 0.0, "region": "Pt 4f",
+              "photon_energy": 1486.6,
+              "components": [{"area": 5.0, "rsf": 2.0}]}
+        out = quant.normalise([row], rsf_table=self.RSF_TABLE)
+        self.assertEqual(out[0]["rsf_source"], "component")
+
+    def test_table_with_no_match_falls_through_to_no_rsf(self):
+        row = {"area": 10.0, "rsf": 0.0, "region": "Zz 9z",
+              "photon_energy": 1486.6, "components": []}
+        out = quant.normalise([row], rsf_table=self.RSF_TABLE)
+        self.assertEqual(out[0]["why"], "no RSF")
+
+    def test_csv_rsf_source_column(self):
+        groups = [{"sample": "S", "level": None, "entries": [
+            {"spectrum": "Pt 4f", "row": {
+                "region": "Pt 4f", "background": "Shirley", "rsf": 0.0,
+                "area": 100.0, "area_t": None, "basis": "data",
+                "photon_energy": 1486.6, "components": []}}]}]
+        rows = quant.csv_rows(groups, rsf_table=self.RSF_TABLE)
+        r = [row for row in rows[1:] if row[3] == "Pt 4f"][0]
+        self.assertIn("Scofield", r[-1])
+        self.assertIn("Al", r[-1])
+
+
 class TestStates(unittest.TestCase):
     def test_index_groups_and_standalone_components(self):
         row = {"components": [
@@ -362,10 +455,13 @@ class TestCsvRows(unittest.TestCase):
                 area_t=None, basis="data", source=quant.SOURCE_HIGH_RES,
                 components=[])}]}]
         rows = quant.csv_rows(groups)
-        self.assertEqual(rows[0][-1], "Source")
+        self.assertEqual(rows[0][-2], "Source")
+        self.assertEqual(rows[0][-1], "RSF Source")
         by_region = {r[3]: r for r in rows[1:]}
-        self.assertEqual(by_region["Cl 2p"][-1], "survey")
-        self.assertEqual(by_region["C 1s"][-1], "high-res")
+        self.assertEqual(by_region["Cl 2p"][-2], "survey")
+        self.assertEqual(by_region["C 1s"][-2], "high-res")
+        self.assertEqual(by_region["Cl 2p"][-1], "")   # both rows have their
+        self.assertEqual(by_region["C 1s"][-1], "")    # own real RSF
 
 
 @unittest.skipUnless(HAVE_NP and os.path.isfile(REAL),

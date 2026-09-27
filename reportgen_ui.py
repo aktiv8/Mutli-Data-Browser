@@ -53,6 +53,7 @@ class ReportGeneratorDialog(tk.Toplevel):
         self.mosaic = tk.StringVar(
             value=reportspec.option(self.spec, "mosaic"))
         self.page = tk.StringVar(value=reportspec.option(self.spec, "page"))
+        self.rsf = tk.StringVar(value=reportspec.option(self.spec, "rsf"))
         self.preset = tk.StringVar()
         self._build()
         self.populate()
@@ -336,6 +337,17 @@ class ReportGeneratorDialog(tk.Toplevel):
                             command=lambda: self.set_option(
                                 "page", self.page.get())).pack(
                 anchor="w", padx=(12, 0), pady=2)
+        ttk.Label(tab, text="RSF for a region with none recorded").pack(
+            anchor="w", pady=(14, 0))
+        for value, text in (("off", "Leave it out and say why (default)"),
+                            ("scofield", "Scofield (CasaXPS casaXPS-"
+                             "scofield.lib)"),
+                            ("kratos_f1s", "Kratos Axis F1s (CasaXPS "
+                             "casaXPS_KratosAxis-F1s.lib)")):
+            ttk.Radiobutton(tab, text=text, value=value, variable=self.rsf,
+                            command=lambda: self.set_option(
+                                "rsf", self.rsf.get())).pack(
+                anchor="w", padx=(12, 0), pady=2)
 
     # -- the tree ----------------------------------------------------------------
     def populate(self):
@@ -478,6 +490,7 @@ class ReportGeneratorDialog(tk.Toplevel):
             self.dividers.set(reportspec.option(presets[name], "dividers"))
             self.mosaic.set(reportspec.option(presets[name], "mosaic"))
             self.page.set(reportspec.option(presets[name], "page"))
+            self.rsf.set(reportspec.option(presets[name], "rsf"))
             # a preset says what goes in; the look of the cover stays yours
             self._set(reportspec.with_cover_of(presets[name], self.spec))
 

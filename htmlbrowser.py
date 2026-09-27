@@ -38,6 +38,7 @@ import casaquant
 import holder
 import quant
 import readers.base as rbase
+import rsf as rsf_lib
 import snapshot
 import themes
 import viewdata
@@ -347,7 +348,8 @@ def _fit_block(d, budget):
                        "env": _round_curve(cur["env"]),
                        "comps": [_round_curve(c) for c in cur["comps"]]}
         row["curve"] = cur
-        for k in ("area", "area_t", "be_lo", "be_hi", "rms", "chi2_red"):
+        for k in ("area", "area_t", "be_lo", "be_hi", "rms", "chi2_red",
+                  "photon_energy"):
             if row.get(k) is not None:
                 row[k] = round_sig(row[k], 7)
         for c in row["components"]:
@@ -366,6 +368,14 @@ def element_table(lines):
                        e.get("rank", 1)] for e in lines],
             "common": sorted(xpslines.COMMON),
             "bonus": xpslines.COMMON_BONUS, "hv": xpslines.DEFAULT_HV}
+
+
+def rsf_table(entries):
+    """The RSF reference table for the page's own quantification fallback
+    (what ``rsf.py``'s ``rsf_of``/``anode_for`` use): entries as ``[library,
+    anode, line, rsf]`` -- the same shape ``element_table`` gives the line
+    table in, so the page never needs its own copy of the curated numbers."""
+    return [[e["library"], e["anode"], e["line"], e["rsf"]] for e in entries]
 
 
 def auto_labels(d, lines):
@@ -403,7 +413,8 @@ def _meta(md):
 
 def build_payload(docs, display=None, details=None, methods_text="",
                   calibration="", figures=(), calib=None, generated=None,
-                  cameras=True, snapmaps=True, lines=None, casa_quant=None):
+                  cameras=True, snapmaps=True, lines=None, casa_quant=None,
+                  rsf_entries=None):
     """The data of the browser as a JSON-able dict.
 
     ``figures`` is ``[{"name", "caption", "pages": [png bytes]}]``; ``calib``
@@ -417,9 +428,13 @@ def build_payload(docs, display=None, details=None, methods_text="",
     ``"casaxps"`` block (CasaXPS's own exported quantification -- see
     ``casaquant.py``); the page's Quantification tab shows that instead of
     the fit-derived breakdown for that sample, but the sample's regions and
-    any embedded fit (curve overlay, CSV) are unaffected."""
+    any embedded fit (curve overlay, CSV) are unaffected. ``rsf_entries``
+    (default: ``rsf.load_rsf()``) is the RSF reference table the page's own
+    quantification fallback offers (off by default, the same "nothing is
+    guessed" stance ``quant.py`` takes on the desktop)."""
     details = details or {}
     element_lines = xpslines.load_lines() if lines is None else lines
+    rsf_entries = rsf_lib.load_rsf() if rsf_entries is None else rsf_entries
     samples, files, notes = [], [], []
     map_src = []                     # (parser, region, shown region, its dict)
     n_regions = 0
@@ -537,6 +552,7 @@ def build_payload(docs, display=None, details=None, methods_text="",
         "files": files, "samples": samples, "figures": figs,
         "holders": holders, "cameras": cams, "maps": maps,
         "elements": element_table(element_lines),
+        "rsf": rsf_table(rsf_entries),
         "build_notes": notes,
         "palette": {"light": list(light["cycle"]), "dark": list(dark["cycle"]),
                     "bg": {"light": light["plot_bg"], "dark": dark["plot_bg"]}},

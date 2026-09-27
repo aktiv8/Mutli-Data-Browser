@@ -613,7 +613,12 @@ class TestPage(unittest.TestCase):
                        peak=285 + i / 20) for i in range(60)]
         page = hb.build_html(hb.build_payload([doc("a.vms", regs)]))
         raw = sum(len(r.counts) for r in regs) * 8
-        self.assertLess(len(page), 120_000 + raw)     # far below plain JSON
+        # +25_000: the curated RSF reference table (3027 rows, both
+        # libraries) is now always embedded so the page's own quantification
+        # fallback needs no server round-trip -- ~16 KB gzip-compressed,
+        # ~22 KB once base64-encoded into the page -- plus viewer.js's own
+        # new RSF-fallback/preferred-line code
+        self.assertLess(len(page), 145_000 + raw)     # far below plain JSON
 
     def test_missing_viewer_file_is_a_clear_error(self):
         old = hb.VIEWER_DIR

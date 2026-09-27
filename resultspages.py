@@ -18,8 +18,14 @@ Rules for what counts, stated on the pages (``Results.method`` / ``notes``):
   depth is counted once (the dedicated scan, else the first), so the total is
   not inflated by a survey and its own high-resolution scan of the same line;
   an element counted from two of its lines (2p and 1s) is counted from both and
-  the page says so;
-* a region with no sensitivity factor or no area is listed and says why.
+  the page says so -- unless one of the two is that element's known "standard"
+  line (``_PREFERRED_LINE``, e.g. Pt 4f over Pt 4d), in which case only that
+  one is counted and the page says so instead;
+* a region with no sensitivity factor or no area is listed and says why; an
+  optional reference-table fallback (``collect(..., rsf_table=)``, off by
+  default -- ``quant.py``'s own "nothing is guessed" stance) can supply one
+  when the file records none, and the page marks it as a substitute, never
+  as though it were the file's own recorded value.
 """
 
 from __future__ import annotations
@@ -32,6 +38,7 @@ from dataclasses import dataclass, field
 import casaquant
 import quant
 import reportspec
+import rsf as rsf_lib
 
 METHOD = ("Atomic percent is each fitted region's area divided by its "
           "sensitivity factor (RSF), as a share of the sum over the regions "
@@ -72,6 +79,9 @@ class Sample:
     casaxps: object = None    # casaquant.SampleQuant: CasaXPS's own export,
                               # preferred over the levels above when present
                               # (see collect(); levels is then empty)
+    rsf_table: list | None = None    # quant.normalise's RSF-fallback args,
+    rsf_library: str = "scofield"    # carried so profile_series() can reuse
+                                     # them when it re-normalises fresh
 
     @property
     def is_profile(self):
@@ -111,9 +121,14 @@ CASAXPS_NOTE = ("Quantification for this sample is CasaXPS's own exported "
                "Quant_Dparam.txt), not recomputed from an embedded fit.")
 
 
-def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None):
+def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
+           rsf_table=None, rsf_library="scofield"):
     """Read the CasaXPS fits of the loaded files (``display`` maps a region to
     the copy that is drawn, with the user's names and binding-energy shift).
+
+    ``rsf_table``/``rsf_library`` are ``quant.normalise``'s own RSF-fallback
+    args (a list from ``rsf.load_rsf()``, off by default) -- carried onto
+    each ``Sample`` so ``profile_series`` can reuse them later.
 
     ``casa_quant`` (a ``casaquant.CasaQuant``, see that module) is preferred
     over a fit for any sample it names: no fit-derived level is built for
@@ -165,7 +180,9 @@ def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None):
                 continue
             k = (key_of(p), r.sample)
             if k not in by_sample:
-                by_sample[k] = Sample(f"{k[0]}/{k[1]}", label)
+                by_sample[k] = Sample(f"{k[0]}/{k[1]}", label,
+                                      rsf_table=rsf_table,
+                                      rsf_library=rsf_library)
                 order.append(k)
             sample = by_sample[k]
             lv = r.etch_level
@@ -184,9 +201,12 @@ def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None):
         sample.levels.sort(key=lambda x: (x.level is None, x.level or 0))
         for level in sample.levels:
             _settle(level, sample.label, sample.notes)
+            _prefer_lines(level, sample.label, sample.notes, rsf_table,
+                         rsf_library)
         sample.notes = list(dict.fromkeys(sample.notes))
         _element_note(sample)
         _source_note(sample)
+        _rsf_note(sample)
         if sample.label in approx:
             sample.notes.append(
                 "The background under some of the fits of "
@@ -247,6 +267,63 @@ def _settle(level, label, notes):
             res["why"] = why
 
 
+# The standard "workhorse" line for an element that has a real, commonly-
+# fitted choice between more than one core level -- checked against the
+# curated RSF library's own numbers (see rsf.py): the 4f/4d "heavy metal"
+# block, where 4f is the accepted standard line even though 4d's RSF can be
+# higher (Au: 4f 17.12 vs 4d 19.80, Scofield/Al -- the user's own example).
+# Pd/Ag are deliberately NOT here: their libraries show 3d overwhelmingly
+# dominant in real use (Ag 3d 18.04 vs 4d 1.55), so there is no genuine
+# ambiguity to resolve for them. An element absent from this table is left
+# to _element_note's existing "counted from both, with a note" handling.
+_PREFERRED_LINE = {"Pt": "4f", "Au": "4f", "Ir": "4f", "Os": "4f", "Re": "4f",
+                   "W": "4f", "Ta": "4f", "Hf": "4f", "Hg": "4f", "Tl": "4f",
+                   "Pb": "4f", "Bi": "4f"}
+
+
+def _prefer_lines(level, label, notes, rsf_table=None, rsf_library="scofield"):
+    """After ``_settle``: when more than one of an element's distinct region
+    names is still included and one of them is that element's known
+    preferred line (``_PREFERRED_LINE``), the others are excluded (``why =
+    "not the preferred line"``) and a note is added -- an element absent
+    from the table, or whose preferred line was not itself fitted here, is
+    left untouched (``_element_note`` still says both are counted). Re-runs
+    ``quant.normalise`` the same way ``_settle`` does, this time with
+    ``rsf_table``/``rsf_library`` (``quant.normalise``'s own RSF-fallback
+    args, off by default) so the final numbers reflect both changes."""
+    entries = level.entries
+    by_element = {}                   # element -> {region name: entry index}
+    for i, e in enumerate(entries):
+        if not level.include[i]:
+            continue
+        region = e["row"]["region"]
+        el = element_of(region)
+        if el:
+            by_element.setdefault(el, {})[region] = i
+    for el, regions in by_element.items():
+        preferred_orbital = _PREFERRED_LINE.get(el)
+        if not preferred_orbital or len(regions) < 2:
+            continue
+        preferred_name = f"{el} {preferred_orbital}"
+        if preferred_name not in regions:
+            continue
+        losers = sorted(name for name in regions if name != preferred_name)
+        if not losers:
+            continue
+        for name in losers:
+            level.include[regions[name]] = False
+            level.why[regions[name]] = "not the preferred line"
+        notes.append(
+            f"{el} is fitted from more than one line ({preferred_name}, "
+            + ", ".join(losers) + f") in {label}; only {preferred_name}, "
+            "the standard line for quantification, is counted.")
+    level.res = quant.normalise([e["row"] for e in entries], level.include,
+                                rsf_table=rsf_table, rsf_library=rsf_library)
+    for res, why in zip(level.res, level.why):
+        if why:
+            res["why"] = why
+
+
 def _element_note(sample):
     """One note when an element is counted from two of its lines (its 2p and
     its 1s, say): its share then includes both."""
@@ -292,6 +369,29 @@ def _source_note(sample):
             "this total mixes quantification of different precision.")
 
 
+def _rsf_note(sample):
+    """One note per region whose atomic percent used a reference-table
+    substitute RSF (``quant.normalise``'s ``rsf_source`` -- "component" is
+    not noted here, since that is the file's own cross-referenced data, just
+    read from a different place, not a substitute)."""
+    seen = set()
+    for level in sample.levels:
+        for e, x in zip(level.entries, level.res):
+            src = x.get("rsf_source")
+            if not src or src == "component":
+                continue
+            region = e["row"]["region"]
+            if region in seen:
+                continue
+            seen.add(region)
+            lib_label = rsf_lib.LIBRARY_SHORT.get(src, src)
+            sample.notes.append(
+                f"{region}'s sensitivity factor is not recorded in "
+                f"{sample.label}; the {lib_label} library's value "
+                f"({x['rsf_value']:g}, {x['rsf_anode']} Kα) is used "
+                "instead.")
+
+
 # -- cells ----------------------------------------------------------------------------
 def _fmt(v, spec):
     return "" if v is None else format(v, spec)
@@ -320,6 +420,19 @@ def _fmt_chi2(v):
     return "" if v is None else f"{v:.2f}"
 
 
+def _fmt_rsf(row, x):
+    """The RSF cell: the row's own recorded value normally, or, when
+    ``quant.normalise``'s reference-table fallback supplied a substitute
+    (``rsf_source`` is the library name, not "component"), that value
+    labelled with its library and anode so it never reads like a real
+    recorded RSF -- e.g. "15.45 (Scofield, Al Kα)"."""
+    src = x.get("rsf_source")
+    if src and src != "component":
+        label = rsf_lib.LIBRARY_SHORT.get(src, src)
+        return f"{x['rsf_value']:.4g} ({label}, {x['rsf_anode']} Kα)"
+    return _fmt(row.get("rsf"), ".4g")
+
+
 def composition_cells(level):
     """``[(kind, [cells])]`` for one sample at one level: a "region" row
     (region, background, RSF, area, area / RSF, at %, fit RMS, reduced
@@ -334,7 +447,13 @@ def composition_cells(level):
     comparable across regions in a way the RMS fraction is not. Both are
     blank where there is no envelope (a component-less survey region, or an
     unreproduced background); chi-square is also blank when dwell/scans are
-    unknown, since there are then no true counts to weight by."""
+    unknown, since there are then no true counts to weight by. The RSF cell
+    shows a substitute's own value and provenance (e.g. "15.45 (Scofield,
+    Al Kα)") in place of the row's own (blank/zero) recorded RSF when
+    ``quant.normalise``'s reference-table fallback supplied one -- see
+    ``_fmt_rsf``; a component-level fallback (the file's own data, just
+    summed a different way) leaves the cell as the plain, unlabelled area
+    ratio, matching the file's own honest style."""
     rows = []
     for e, x in zip(level.entries, level.res):
         row = e["row"]
@@ -342,7 +461,7 @@ def composition_cells(level):
         name = row["region"] + (" †" if row.get("source") == "survey"
                                 else "")
         rows.append(("region", [name, row.get("background") or "",
-                                _fmt(row.get("rsf"), ".4g"),
+                                _fmt_rsf(row, x),
                                 _fmt(row.get("area"), ".4g"),
                                 _fmt(x["corrected"], ".4g"), pct,
                                 _fmt_rms(row.get("rms")),
@@ -413,9 +532,12 @@ def profile_axis(sample):
 
 
 def profile_series(sample):
-    """``quant.profile`` (atomic percent of each region) for a sample."""
+    """``quant.profile`` (atomic percent of each region) for a sample, with
+    the same RSF fallback (if any) ``collect()`` used for it."""
     return quant.profile([lv.group() for lv in sample.levels], "element",
-                         [lv.include for lv in sample.levels])
+                         [lv.include for lv in sample.levels],
+                         rsf_table=sample.rsf_table,
+                         rsf_library=sample.rsf_library)
 
 
 def profile_cells(sample):

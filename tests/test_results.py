@@ -190,6 +190,87 @@ class TestNumbers(unittest.TestCase):
         self.assertEqual(rp.element_of("WideScan"), "")
         self.assertEqual(rp.element_of("VB"), "")
 
+    def test_pt_4f_is_preferred_over_pt_4d(self):
+        # the user's own real case: Au 4d has the higher RSF but Au/Pt 4f is
+        # the standard line -- both counted from _settle's own pass, then
+        # _prefer_lines excludes the non-preferred one
+        lv = level(None, [row("Pt 4f", 15.45, 200.0), row("Pt 4d", 19.8, 300.0)])
+        notes = []
+        rp._prefer_lines(lv, "S", notes)
+        self.assertEqual(len(notes), 1)
+        self.assertIn("Pt is fitted from more than one line (Pt 4f, Pt 4d)",
+                      notes[0])
+        self.assertIn("only Pt 4f", notes[0])
+        by_region = dict(zip((e["row"]["region"] for e in lv.entries),
+                             zip(lv.include, lv.why)))
+        self.assertEqual(by_region["Pt 4f"], (True, ""))
+        self.assertEqual(by_region["Pt 4d"], (False, "not the preferred line"))
+
+    def test_pt_4f_alone_is_untouched(self):
+        lv = level(None, [row("Pt 4f", 15.45, 200.0)])
+        notes = []
+        rp._prefer_lines(lv, "S", notes)
+        self.assertEqual(notes, [])
+        self.assertEqual(lv.include, [True])
+
+    def test_an_element_with_no_preference_entry_is_untouched(self):
+        # Ti has no _PREFERRED_LINE entry: _prefer_lines does nothing, and
+        # _element_note's existing "counted from both" behaviour is intact
+        s = sample("S", [level(None, [row("Ti 2p", 5.0, 100.0),
+                                      row("Ti 1s", 98.0, 900.0)])])
+        notes = []
+        rp._prefer_lines(s.levels[0], "S", notes)
+        self.assertEqual(notes, [])
+        rp._element_note(s)
+        self.assertEqual(len(s.notes), 1)
+        self.assertIn("Ti is counted from more than one line", s.notes[0])
+
+    def test_pt_4f_only_the_preferred_one_wins_when_neither_is_fitted(self):
+        # neither Pt's preferred line ("4f") nor a competing line: nothing
+        # to prefer between, left untouched
+        lv = level(None, [row("Pt 4d", 19.8, 300.0)])
+        notes = []
+        rp._prefer_lines(lv, "S", notes)
+        self.assertEqual(notes, [])
+        self.assertEqual(lv.include, [True])
+
+    def test_composition_cell_labels_a_substitute_rsf(self):
+        table = [{"library": "scofield", "anode": "Al", "line": "Pt 4f",
+                 "rsf": 15.45}]
+        lv = level(None, [row("Pt 4f", 0.0, 100.0)])
+        rp._prefer_lines(lv, "S", [], rsf_table=table)
+        cells = rp.composition_cells(lv)
+        self.assertIn("Scofield", cells[0][1][2])
+        self.assertIn("15.45", cells[0][1][2])
+        self.assertIn("Al", cells[0][1][2])
+
+    def test_rsf_note_names_the_substituted_region(self):
+        table = [{"library": "scofield", "anode": "Al", "line": "Pt 4f",
+                 "rsf": 15.45}]
+        s = rp.Sample("f1/S", "S", rsf_table=table)
+        lv = level(None, [row("Pt 4f", 0.0, 100.0)])
+        s.levels = [lv]
+        rp._prefer_lines(lv, "S", s.notes, rsf_table=table)
+        rp._rsf_note(s)
+        self.assertEqual(len(s.notes), 1)
+        self.assertIn("Pt 4f", s.notes[0])
+        self.assertIn("Scofield", s.notes[0])
+
+    def test_component_level_fallback_is_not_noted_as_a_substitute(self):
+        # a component-level fix is the file's own data, just read from a
+        # different place -- not a substitute, so _rsf_note stays silent
+        r = row("Pt 4f", 0.0, 999.0)
+        r["components"] = [{"name": "a", "area": 100.0, "rsf": 15.45}]
+        s = rp.Sample("f1/S", "S")
+        lv = rp.Level(None)
+        lv.entries = [{"spectrum": "Pt 4f", "row": r}]
+        s.levels = [lv]
+        rp._settle(lv, "S", s.notes)
+        rp._prefer_lines(lv, "S", s.notes)
+        rp._rsf_note(s)
+        self.assertEqual(lv.res[0]["rsf_source"], "component")
+        self.assertEqual(s.notes, [])
+
     def test_the_same_numbers_as_quant(self):
         lv = three_element_level(None)
         direct = quant.normalise([e["row"] for e in lv.entries])

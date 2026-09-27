@@ -224,7 +224,62 @@
      tests compare both on the same rows). Rows of one sample (and one depth
      level) are normalised together. */
   V.QUANT_HEADER = ['Sample', 'Level', 'Spectrum', 'Region', 'Background', 'RSF', 'Area (counts/s.eV)',
-                    'Area / RSF', 'at %', 'State', 'State at %', 'Note', 'Source'];
+                    'Area / RSF', 'at %', 'State', 'State at %', 'Note', 'Source', 'RSF Source'];
+  /* The standard "workhorse" line for an element with a real, commonly-fitted
+     choice between more than one core level (hand-copied from
+     resultspages.py's own _PREFERRED_LINE -- see that module for why Pd/Ag
+     are deliberately not here). */
+  V.PREFERRED_LINE = { Pt: '4f', Au: '4f', Ir: '4f', Os: '4f', Re: '4f', W: '4f',
+                       Ta: '4f', Hf: '4f', Hg: '4f', Tl: '4f', Pb: '4f', Bi: '4f' };
+  /* JS port of resultspages.element_of: the element of a core-level name
+     ("Ti 2p" -> "Ti"), else ''. */
+  var ELEMENT_OF_RE = /^([A-Z][a-z]?)\s*\d+\s*[spdf]/;
+  V.elementOf = function (region) {
+    var m = ELEMENT_OF_RE.exec(String(region || '').trim());
+    return m ? m[1] : '';
+  };
+  /* JS port of rsf.py's anode_for/rsf_of: AL_HV/MG_HV match rsf.py exactly. */
+  V.AL_HV = 1486.6; V.MG_HV = 1253.6;
+  V.anodeFor = function (hv) {
+    if (hv && Math.abs(hv - V.MG_HV) < Math.abs(hv - V.AL_HV)) return 'Mg';
+    return 'Al';
+  };
+  V.rsfOf = function (line, table, library, hv) {
+    var anode = V.anodeFor(hv);
+    for (var i = 0; i < table.length; i++) {
+      var e = table[i];
+      if (e[0] === library && e[1] === anode && e[2] === line) return e[3];
+    }
+    return null;
+  };
+  /* Suggested defaults for one quantGroups() group's entries: a non-
+     preferred line of an element whose preferred line is also (still)
+     included gets `false` -- a *default* the user can still re-tick, unlike
+     resultspages.py's own hard exclusion for the static report. `include`
+     is only consulted to see which entries currently still count (so an
+     already-excluded entry isn't treated as "the surviving line"); applying
+     the result is the caller's job (renderFitQuant seeds q.include[key]
+     only where the key is not already present, so a user's own explicit
+     tick is never overridden). */
+  V.preferredDefaults = function (entries, include) {
+    var byElement = {};
+    entries.forEach(function (e) {
+      if (include[e.key] === false) return;
+      var el = V.elementOf(e.row.region);
+      if (el) { (byElement[el] = byElement[el] || {})[e.row.region] = e.key; }
+    });
+    var seed = {};
+    Object.keys(byElement).forEach(function (el) {
+      var orbital = V.PREFERRED_LINE[el], regions = byElement[el];
+      if (!orbital || Object.keys(regions).length < 2) return;
+      var preferred = el + ' ' + orbital;
+      if (!(preferred in regions)) return;
+      Object.keys(regions).forEach(function (name) {
+        if (name !== preferred) seed[regions[name]] = false;
+      });
+    });
+    return seed;
+  };
   /* the fit rows of these spectra grouped by sample and level, in order of appearance;
      an entry's key is stable, so a page can remember which rows are ticked */
   V.quantGroups = function (specs) {
@@ -238,20 +293,50 @@
     });
     return groups;
   };
-  V.quantNormalise = function (rows, include, transmission) {
+  /* Tiered exactly like quant.normalise: a row's own recorded RSF first;
+     then each component's own RSF summed (area_i/rsf_i -- a KherveFitting
+     fit can carry a different one per component, unlike CasaXPS's one RSF
+     per whole region); then, only when rsfTable is given (off by default,
+     the same "nothing is guessed" stance as the desktop), a reference-table
+     lookup by the row's own region name and photon energy. */
+  V.quantNormalise = function (rows, include, transmission, rsfTable, rsfLibrary) {
     var out = rows.map(function (row, i) {
       var area = transmission && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
-      var res = { corrected: null, at: null, why: '' };
-      if (include && include[i] === false) res.why = 'not included';
-      else if (!row.rsf || row.rsf <= 0) res.why = 'no RSF';
-      else if (area === null || area === undefined || !(area > 0)) res.why = 'no area';
-      else res.corrected = area / row.rsf;
+      var res = { corrected: null, at: null, why: '', rsfSource: null, rsfAnode: null, rsfValue: null };
+      if (include && include[i] === false) { res.why = 'not included'; return res; }
+      if (row.rsf && row.rsf > 0) {
+        if (area === null || area === undefined || !(area > 0)) res.why = 'no area';
+        else res.corrected = area / row.rsf;
+        return res;
+      }
+      var compTotal = (row.components || []).reduce(function (a, c) {
+        return a + (c.rsf && c.rsf > 0 && c.area !== null && c.area !== undefined ? c.area / c.rsf : 0);
+      }, 0);
+      if (compTotal > 0) { res.corrected = compTotal; res.rsfSource = 'component'; return res; }
+      if (rsfTable && rsfTable.length) {
+        var value = V.rsfOf(row.region, rsfTable, rsfLibrary || 'scofield', row.photon_energy);
+        if (!value) res.why = 'no RSF';
+        else if (area === null || area === undefined || !(area > 0)) res.why = 'no area';
+        else {
+          res.corrected = area / value; res.rsfSource = rsfLibrary || 'scofield';
+          res.rsfAnode = V.anodeFor(row.photon_energy); res.rsfValue = value;
+        }
+        return res;
+      }
+      res.why = 'no RSF';
       return res;
     });
     var total = out.reduce(function (a, x) { return a + (x.corrected === null ? 0 : x.corrected); }, 0);
     out.forEach(function (x) { if (x.corrected !== null && total > 0) x.at = 100 * x.corrected / total; });
     return out;
   };
+  V.RSF_LIBRARY_SHORT = { scofield: 'Scofield', kratos_f1s: 'Kratos F1s' };
+  function rsfSourceText(x) {
+    if (!x.rsfSource) return '';
+    if (x.rsfSource === 'component') return "components' own RSF";
+    var label = V.RSF_LIBRARY_SHORT[x.rsfSource] || x.rsfSource;
+    return label + ', ' + x.rsfAnode + ' Kα (' + sig6(x.rsfValue) + ')';
+  }
   /* the chemical states of one row: each one's share of the positive component area */
   V.quantStates = function (row, at) {
     var groups = [], by = {};
@@ -269,28 +354,29 @@
   function sig6(v) { return v === null || v === undefined || v !== v ? '' : String(+v.toPrecision(6)); }
   /* the table as rows of cells, one per region and one per chemical state under it;
      `inc` maps an entry's key to false when it is unticked */
-  V.quantTable = function (groups, inc, transmission) {
+  V.quantTable = function (groups, inc, transmission, rsfTable, rsfLibrary) {
     var rows = [V.QUANT_HEADER.slice()];
     groups.forEach(function (g) {
       var res = V.quantNormalise(g.entries.map(function (e) { return e.row; }),
-        g.entries.map(function (e) { return !(inc && inc[e.key] === false); }), transmission);
+        g.entries.map(function (e) { return !(inc && inc[e.key] === false); }), transmission,
+        rsfTable, rsfLibrary);
       var lv = g.level === null || g.level === undefined ? '' : String(g.level);
       g.entries.forEach(function (e, i) {
         var row = e.row, x = res[i];
         var area = transmission && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
         rows.push([g.sample, lv, e.spectrum, row.region, row.background || '', sig6(row.rsf), sig6(area),
-                   sig6(x.corrected), sig6(x.at), '', '', x.why, row.source || '']);
+                   sig6(x.corrected), sig6(x.at), '', '', x.why, row.source || '', rsfSourceText(x)]);
         if (x.at !== null) {
           V.quantStates(row, x.at).forEach(function (st) {
-            rows.push([g.sample, lv, e.spectrum, row.region, '', '', '', '', '', st.name, sig6(st.at), '', '']);
+            rows.push([g.sample, lv, e.spectrum, row.region, '', '', '', '', '', st.name, sig6(st.at), '', '', '']);
           });
         }
       });
     });
     return rows;
   };
-  V.quantCsv = function (groups, inc, transmission) {
-    return V.quantTable(groups, inc, transmission).map(function (r) {
+  V.quantCsv = function (groups, inc, transmission, rsfTable, rsfLibrary) {
+    return V.quantTable(groups, inc, transmission, rsfTable, rsfLibrary).map(function (r) {
       return r.map(V.csvField).join(',');
     }).join('\r\n') + '\r\n';
   };
@@ -758,7 +844,7 @@
             holderHot: null, tab: 'plot', filter: '', camIdx: 0, mapById: {}, camById: {},
             fit: { components: true, envelope: true, background: true, residual: false, hidden: {},
                   colour: {} },   // state name -> colour, kept across every panel on the page
-            q: { include: {}, transmission: false, level: {} },
+            q: { include: {}, transmission: false, level: {}, rsfLibrary: '' },
             d: { sample: null, mode: 'element', axis: null, last: null },
             ident: { on: false, win: 2, auto: false, secondary: false, auger: false,
                     clicked: null, extra: {} },
@@ -1651,20 +1737,32 @@
   }
   function renderFitQuant(box, all, q) {
     var hasT = all.some(function (g) { return g.entries.some(function (e) { return e.row.area_t !== null && e.row.area_t !== undefined; }); });
+    var rsfTable = q.rsfLibrary ? (S.data.rsf || []) : null;
     box.appendChild(h('p', { class: 'muted small', text: 'Atomic % = (region area ÷ RSF) as a share of the ticked regions of the same sample. Areas and RSFs are ' +
       'CasaXPS\'s own, read from the fitted VAMAS file; nothing here is refitted. A region without an RSF is left out and says so.' }));
     var tcb = h('input', { type: 'checkbox', id: 'q-trans' });
     tcb.checked = q.transmission && hasT; tcb.disabled = !hasT;
     tcb.addEventListener('change', function () { q.transmission = tcb.checked; renderQuant(); });
+    var rsel = h('select', { 'aria-label': 'RSF fallback for regions with no recorded sensitivity factor' });
+    [['', 'Off'], ['scofield', 'Scofield'], ['kratos_f1s', 'Kratos Axis F1s']].forEach(function (opt) {
+      var o = h('option', { value: opt[0], text: opt[1] });
+      if (opt[0] === q.rsfLibrary) o.selected = true;
+      rsel.appendChild(o);
+    });
+    rsel.addEventListener('change', function () { q.rsfLibrary = rsel.value; renderQuant(); });
     var dl = h('button', { type: 'button', text: 'Download quantification.csv' });
-    dl.addEventListener('click', function () { saveText('quantification.csv', V.quantCsv(all, q.include, q.transmission && hasT)); });
+    dl.addEventListener('click', function () { saveText('quantification.csv', V.quantCsv(all, q.include, q.transmission && hasT, rsfTable, q.rsfLibrary)); });
     box.appendChild(h('div', { class: 'controls' },
-      h('label', { class: 'field', title: hasT ? 'Divide the spectrometer transmission function out of each region area' : 'These files carry no transmission function' }, tcb, ' Divide out the transmission function'), dl));
+      h('label', { class: 'field', title: hasT ? 'Divide the spectrometer transmission function out of each region area' : 'These files carry no transmission function' }, tcb, ' Divide out the transmission function'),
+      h('label', { class: 'field', title: 'A region with no recorded RSF gets one from this reference library instead — marked as a substitute, never shown as though it were the file’s own' }, 'RSF fallback ', rsel),
+      dl));
     var bySample = [], seen = {};
     all.forEach(function (g) { if (!seen[g.sid]) { seen[g.sid] = []; bySample.push(seen[g.sid]); } seen[g.sid].push(g); });
     bySample.forEach(function (gs) {
       var sid = gs[0].sid, cur = q.level[sid];
       var g = gs.filter(function (x) { return String(x.level) === String(cur); })[0] || gs[0];
+      var seed = V.preferredDefaults(g.entries, q.include);
+      Object.keys(seed).forEach(function (key) { if (!(key in q.include)) q.include[key] = seed[key]; });
       box.appendChild(h('h2', { text: g.sample || '(unnamed)' }));
       if (gs.length > 1) {
         var sel = h('select', { 'aria-label': 'Depth level' });
@@ -1677,7 +1775,8 @@
         box.appendChild(h('div', { class: 'controls' }, h('label', { class: 'field' }, 'Depth level ', sel)));
       }
       var res = V.quantNormalise(g.entries.map(function (e) { return e.row; }),
-        g.entries.map(function (e) { return q.include[e.key] !== false; }), q.transmission && hasT);
+        g.entries.map(function (e) { return q.include[e.key] !== false; }), q.transmission && hasT,
+        rsfTable, q.rsfLibrary);
       var tb = h('tbody');
       g.entries.forEach(function (e, i) {
         var row = e.row, x = res[i], off = q.include[e.key] === false;
@@ -1686,9 +1785,12 @@
         cb.addEventListener('change', function () { q.include[e.key] = cb.checked; renderQuant(); });
         var area = q.transmission && hasT && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
         var name = row.region + (e.spectrum !== row.region ? '  (' + e.spectrum + ')' : '') + (row.source === 'survey' ? ' †' : '');
+        var rsfCell = x.rsfSource && x.rsfSource !== 'component'
+          ? sig6(x.rsfValue) + ' (' + (V.RSF_LIBRARY_SHORT[x.rsfSource] || x.rsfSource) + ', ' + x.rsfAnode + ' Kα)'
+          : (row.rsf ? String(+row.rsf.toPrecision(4)) : '');
         tb.appendChild(h('tr', { class: off ? 'off' : '' },
           h('td', null, cb), h('td', { text: name }), h('td', { text: row.background }),
-          h('td', { class: 'num', text: row.rsf ? String(+row.rsf.toPrecision(4)) : '' }),
+          h('td', { class: 'num', text: rsfCell }),
           h('td', { class: 'num', text: area === null || area === undefined ? '' : Math.round(area).toLocaleString('en-US') + (row.basis === 'components' ? ' *' : '') }),
           h('td', { class: 'num', text: x.corrected === null ? '' : Math.round(x.corrected).toLocaleString('en-US') }),
           h('td', { class: 'num', text: x.at === null ? (x.why && x.why !== 'not included' ? x.why : '') : x.at.toFixed(1) })));
@@ -1707,6 +1809,9 @@
       }
       var reg = g.entries.length > 1 && g.entries.some(function (e) { return e.row.region === g.entries[0].row.region && e !== g.entries[0]; });
       if (reg) box.appendChild(h('p', { class: 'muted small', text: 'The same region appears more than once (for example from a survey and from its own scan): untick one to avoid counting it twice.' }));
+      if (Object.keys(seed).length) {
+        box.appendChild(h('p', { class: 'muted small', text: 'A non-standard line of the same element (e.g. a 4d region where 4f is also fitted) is unticked by default — the standard line for quantification; re-tick it if you want both counted.' }));
+      }
       if (g.entries.some(function (e) { return e.row.source === 'survey'; })) {
         box.appendChild(h('p', { class: 'muted small', text: '† survey-scan quantification, not a dedicated high-resolution scan — typically less precise than the rest of this total.' }));
       }

@@ -104,6 +104,7 @@ import handover
 import htmlbrowser
 import imagepages
 import snapshot
+import rsf as rsf_lib
 import xpslines
 import report
 import reportspec
@@ -589,6 +590,7 @@ class Workspace:
         self._pdf_figure_size = (11.7, 8.3)  # landscape figure/image page, in
         self._click_cb = None       # persistent plot-click hook (Identify)
         self._xps_lines = None      # element line table, loaded on demand
+        self._rsf_entries = None    # RSF reference table, loaded on demand
 
         self._build_menu()
         self._build_body()
@@ -2034,6 +2036,11 @@ class Workspace:
         if self._xps_lines is None:
             self._xps_lines = xpslines.load_lines()
         return self._xps_lines
+
+    def rsf_entries(self):
+        if self._rsf_entries is None:
+            self._rsf_entries = rsf_lib.load_rsf()
+        return self._rsf_entries
 
     def open_identify(self):
         regs = self.calibration_regions()
@@ -3769,17 +3776,23 @@ class Workspace:
         from the fits of the loaded files as they are drawn, or from
         CasaXPS's own exported files where a folder had them (preferred);
         only a sample with at least one region ticked in the tree is
-        included. Remembered until the files, the ticks, the annotations or
-        the quantification change."""
+        included. The report spec's own "rsf" option (off by default) picks
+        an RSF reference library to fall back to for a region with none of
+        its own -- see ``rsf.py``/``quant.normalise``. Remembered until the
+        files, the ticks, the annotations, the quantification or that option
+        change."""
+        rsf_option = reportspec.option(self._spec_for_output(None), "rsf")
         key = (tuple(id(p) for p in self.docs), self._ann_serial,
               id(self.casa_quant),
               len(self.casa_quant.samples) if self.casa_quant else 0,
-              frozenset(self.checked))
+              frozenset(self.checked), rsf_option)
         if self._results_memo is None or self._results_memo[0] != key:
+            rsf_table = self.rsf_entries() if rsf_option != "off" else None
             self._results_memo = (key, resultspages.collect(
                 self.docs, self._display,
                 lambda p: reportspec.doc_key(p), self.casa_quant,
-                ticked=lambda r: id(r) in self.checked))
+                ticked=lambda r: id(r) in self.checked,
+                rsf_table=rsf_table, rsf_library=rsf_option))
         return self._results_memo[1]
 
     def _build_report(self, path, spec=None, notes=None):

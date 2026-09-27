@@ -170,6 +170,54 @@ meaning with no example to check) is not read at all. Revisit once a real
 file with this switched on and populated is available to check the
 ``values`` keying and ``anchors``' purpose against.
 
+**A sheet's own label can be wrong.** Checked on both real PtCl2 files
+(``PtCl2_quantified.kfit`` and a second re-fit of the same VAMAS import,
+``PtCl2_refitted.kfit``): a sheet named ``Pt4p`` in both actually holds two
+fitted **O 1s** peaks (``"O1s"``/``"O1s p2"``, a background window of
+529.4-536.45 eV -- squarely the O 1s range, nothing like Pt 4p's ~60-80 eV);
+the sheet's own ``ExperimentalInfo["Species & Transition"]`` says ``"Pt4p"``
+too, so this is a real labelling mistake in the source data itself, not
+something ``_region_identity`` above can see through (its cross-check is a
+different, unrelated field). Left alone, these two peaks would be quantified
+as part of "Pt 4p" -- wrong element and RSF entirely -- and there is no
+"O 1s" sheet anywhere else in either file to catch them, so the O 1s signal
+would not just be mis-attributed, it would vanish. ``_peaks_own_identity``
+cross-checks a sheet's fitted peak names (spin-orbit split ignored, so a
+real doublet like ``Al2p3/2 Al2O3``/``Al2p1/2_Al2O3`` still agrees with its
+own ``Al2p`` sheet) against the sheet's own resolved name and, only when
+every peak agrees on one *different* core level, uses that instead --
+checked against the full 10-file corpus plus both PtCl2 files: this fires on
+**only** the two known ``Pt4p``/O 1s sheets, nowhere else (a "Survey" sheet's
+several auto-identified markers for different elements correctly disagree
+with each other, so are left alone, same as an ordinary CasaXPS survey).
+
+**A sheet can have a real background and zero fitted peaks.** Also checked
+on both real PtCl2 files: several sheets (``PtCl2_refitted.kfit``'s ``C1s``;
+``PtCl2_quantified.kfit``'s ``Survey``/``C1s1``/``Cl2p1``/``Pt4s``) have a
+genuine, non-empty background type and curve (Shirley/Tougaard, clearly
+different from the raw data) but an empty ``Fitting.Peaks`` -- background
+subtraction was set up, decomposition into components never was.
+``_build_fit`` used to require at least one peak before building *any*
+``Fit`` at all, so these sheets got no fit whatsoever and vanished from
+quantification with no explanation, unlike this module's and ``quant.py``'s
+own rule of leaving a row out only when it can say why. The obvious cruder
+signal -- "the stored background differs at all from the raw data" -- was
+tried first and rejected: many sheets that were simply never independently
+re-fit for a later sample row (KherveFitting clones the sheet per row; e.g.
+Fe2O3.kfit alone has nine such unfit clones) also have a "Bkg Y" that
+numerically differs from "Raw Data" despite nothing having been configured,
+but their own ``Bkg Type`` is always the empty string in every one of those
+cases -- checked to give zero false positives across the whole 10-file
+corpus once the background is also required to carry a non-empty type. A
+peakless sheet with a real background now still gets a ``casafit.Fit`` with
+an empty ``components`` list (``Fit.is_empty()`` only checks ``regions or
+components``, so this is not empty) -- ``casafit.curves()`` already produces
+a background-only ``Curves`` for a region with none, exactly the shape
+``quant.fit_rows()`` already expects for a CasaXPS survey quantified by area
+alone (``SOURCE_SURVEY``), so it now honestly reports "no RSF" (or, with the
+RSF reference-table fallback turned on, a labelled substitute) instead of
+being silently invisible.
+
 ``import_peak_library`` (D4) reads a standalone Peaks Library ``.json`` file
 on its own -- the same ``Core levels[<name>].Fitting.Peaks`` shape as a
 ``.kfit`` project's own ``project_json_gz``, but with no ``B.E.``/``Raw
@@ -276,6 +324,30 @@ def _region_identity(raw_name, sheet_json, sample_id_row):
     if sample_id not in sample_id_row:
         sample_id_row[sample_id] = len(sample_id_row)
     return canon_region_name(species), sample_id_row[sample_id], sample_id
+
+
+_ORBITAL_RE = re.compile(r"^([A-Z][a-z]?)\s*(\d[spdf])(\d/\d)?")
+
+
+def _orbital_family(name):
+    """``(element, shell)`` ignoring any spin-orbit split, from a name that
+    starts with one (``"O1s"`` -> ``("O", "1s")``, ``"Mn2p3/2 Mn2O3 peak 1"``
+    -> ``("Mn", "2p")``, so a real doublet's two peaks -- or a component's
+    name and its own sheet's canonical name -- still agree with each other),
+    else None."""
+    m = _ORBITAL_RE.match((name or "").strip())
+    return (m.group(1), m.group(2)) if m else None
+
+
+def _peaks_own_identity(peaks):
+    """The one ``(element, shell)`` every name in ``peaks`` (a sheet's
+    ``Fitting.Peaks`` keys) agrees on, or None -- no peaks, a name that
+    doesn't parse, or disagreement between peaks all mean "no confident
+    signal", left alone the same way every other ambiguous case in this
+    module is (see the "a sheet's own label can be wrong" section of the
+    module docstring)."""
+    found = {fam for fam in (_orbital_family(p) for p in peaks) if fam}
+    return next(iter(found)) if len(found) == 1 else None
 
 
 def _combined_date(info):
@@ -487,8 +559,27 @@ class KherveFittingKfitFile(SpectrumFile):
             identities = {}         # hdf5 key -> (raw_name, canon, row, hint)
             for key in sorted(cls_group.keys()):
                 raw_name = cls_group[key].attrs.get("name") or key
+                sheet_json = core_levels_json.get(raw_name)
                 canon, row, hint = _region_identity(
-                    raw_name, core_levels_json.get(raw_name), sample_id_row)
+                    raw_name, sheet_json, sample_id_row)
+                # A sheet's own label can itself be wrong (see the module
+                # docstring): when every one of its fitted peaks agrees on a
+                # *different* core level than the sheet's resolved name,
+                # trust the peaks -- more specific and more likely deliberate
+                # than a stale/mistaken sheet label -- and say so.
+                peaks = ((sheet_json or {}).get("Fitting") or {}
+                        ).get("Peaks") or {}
+                peak_family = _peaks_own_identity(peaks)
+                sheet_family = _orbital_family(canon)
+                if (peak_family and sheet_family
+                        and peak_family != sheet_family):
+                    new_canon = f"{peak_family[0]} {peak_family[1]}"
+                    self.warnings.append(
+                        f"'{raw_name}' is labelled {canon} but its fitted "
+                        f"peaks ({', '.join(sorted(peaks))}) are all "
+                        f"{new_canon} -- treated as {new_canon} for display "
+                        "and quantification.")
+                    canon = new_canon
                 identities[key] = (raw_name, canon, row, hint)
             n_rows = len({row for _rn, _c, row, _h in identities.values()})
             pending = []            # (Region, sheet_json) -- fit built after
@@ -603,18 +694,34 @@ class KherveFittingKfitFile(SpectrumFile):
 
     @staticmethod
     def _build_fit(grp, region, sheet_json, results_row=None):
-        """A ``casafit.Fit`` for this sheet, or None when it has no peaks.
-        ``results_row`` is this sample row's own "Results TableN" (see
-        ``_components_from_peaks``/``_rsf_of``), or None."""
+        """A ``casafit.Fit`` for this sheet, or None when it has neither
+        fitted peaks nor a real background of its own (a peakless sheet with
+        one gets a ``Fit`` with an empty ``components`` list -- see the
+        module docstring's "a sheet can have a real background and zero
+        fitted peaks" section). ``results_row`` is this sample row's own
+        "Results TableN" (see ``_components_from_peaks``/``_rsf_of``), or
+        None."""
         fitting = sheet_json.get("Fitting") or {}
         peaks = fitting.get("Peaks") or {}
-        if not peaks or not region.photon_energy:
+        if not region.photon_energy:
             return None
         bkg = sheet_json.get("Background") or {}
         bkg_y = grp.get("Bkg Y")
         known_bg = [float(v) for v in bkg_y[()]] \
             if bkg_y is not None and len(bkg_y) == len(region.energy) else None
-        bkg_type = str(bkg.get("Bkg Type") or "") or "Unknown"
+        raw_bkg_type = str(bkg.get("Bkg Type") or "")
+        # A sheet can have a real, deliberately-configured background and
+        # zero fitted peaks (see the module docstring) -- checked against
+        # the whole real corpus: a sheet that was simply never (re-)fit for
+        # its own sample row also often has a "Bkg Y" that numerically
+        # differs from "Raw Data", but its own Bkg Type is then always the
+        # empty string, so that alone (not "differs from raw data") is the
+        # signal that a background was genuinely set up here.
+        has_background = bool(raw_bkg_type) and known_bg is not None and \
+            any(abs(a - b) > 1e-9 for a, b in zip(known_bg, region.counts))
+        if not peaks and not has_background:
+            return None
+        bkg_type = raw_bkg_type or "Unknown"
         lo = _num(bkg.get("Bkg Low"))
         hi = _num(bkg.get("Bkg High"))
         if lo is None or hi is None:
@@ -639,7 +746,7 @@ class KherveFittingKfitFile(SpectrumFile):
         raw_name = grp.attrs.get("name") or grp.name.rsplit("/", 1)[-1]
         components = _components_from_peaks(peaks, hv, k, region.name,
                                             results_row, raw_name)
-        if not components:
+        if not components and not has_background:
             return None
         return casafit.Fit(regions=[reg], components=components)
 

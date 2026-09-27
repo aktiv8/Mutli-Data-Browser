@@ -14,6 +14,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import casafit  # noqa: E402
+import quant  # noqa: E402
 import readers  # noqa: E402
 from readers import khervefitting_kfit as kf  # noqa: E402
 
@@ -29,6 +30,9 @@ CORPUS = os.environ.get("XPS_KFIT_DIR", os.path.join(
 
 PTCL2_PATH = os.environ.get("XPS_KFIT_PTCL2", os.path.join(
     "D:\\", "Temp", "KF Test", "PtCl2_quantified.kfit"))
+
+PTCL2_REFITTED_PATH = os.environ.get("XPS_KFIT_PTCL2_REFITTED", os.path.join(
+    "D:\\", "Temp", "for claude files", "PtCl2_new", "PtCl2_refitted.kfit"))
 
 REAL_FILES = [
     os.path.join("1s B-C ... Mg", "06 - C - Carbon", "SP2 Carbon.kfit"),
@@ -138,6 +142,55 @@ class TestRegionIdentity(unittest.TestCase):
                                 self._sheet("PtNO1", "PtCl2 area2"), rows)
         self.assertEqual((a[0], b[0]), ("PtNO1", "PtNO1"))
         self.assertEqual((a[1], b[1]), (0, 1))
+
+
+class TestOrbitalFamily(unittest.TestCase):
+    """_orbital_family / _peaks_own_identity: the spin-orbit-aware check that
+    catches a sheet whose fitted peaks are all a *different* core level than
+    the sheet's own name (real case: PtCl2_quantified.kfit's/PtCl2_refitted.
+    kfit's "Pt4p" sheet, whose peaks are both named "O1s" -- see
+    TestPtCl2RealFile / TestPtCl2RefittedRealFile)."""
+
+    def test_a_bare_name_parses(self):
+        self.assertEqual(kf._orbital_family("O1s"), ("O", "1s"))
+        self.assertEqual(kf._orbital_family("O 1s"), ("O", "1s"))
+
+    def test_a_spin_orbit_suffix_is_ignored(self):
+        self.assertEqual(kf._orbital_family("Mn2p3/2 Mn2O3 peak 1"),
+                         ("Mn", "2p"))
+        self.assertEqual(kf._orbital_family("Pt4f5/2_p2"), ("Pt", "4f"))
+
+    def test_a_canon_name_with_a_space_parses_too(self):
+        self.assertEqual(kf._orbital_family("Pt 4p"), ("Pt", "4p"))
+
+    def test_no_leading_orbital_gives_none(self):
+        self.assertIsNone(kf._orbital_family("PtNO1"))
+        self.assertIsNone(kf._orbital_family(""))
+        self.assertIsNone(kf._orbital_family(None))
+
+    def test_peaks_that_all_agree_give_that_family(self):
+        # a real doublet: both peaks parse to the same (element, shell) once
+        # the spin-orbit split is ignored
+        self.assertEqual(
+            kf._peaks_own_identity(["O1s", "O1s p2"]), ("O", "1s"))
+        self.assertEqual(
+            kf._peaks_own_identity(["Al2p3/2 Al2O3", "Al2p1/2_Al2O3"]),
+            ("Al", "2p"))
+
+    def test_peaks_that_disagree_give_none(self):
+        # real case: a "Survey" sheet's several auto-identified markers for
+        # different elements must not be treated as one confident signal
+        self.assertIsNone(
+            kf._peaks_own_identity(["O1s .", "Ca2p .", "C1s .", "Al2p ."]))
+
+    def test_no_peaks_gives_none(self):
+        self.assertIsNone(kf._peaks_own_identity({}))
+
+    def test_an_unparseable_peak_name_is_ignored_not_counted(self):
+        # one peak with no leading orbital (e.g. a generic label) doesn't
+        # stop the others from agreeing
+        self.assertEqual(
+            kf._peaks_own_identity(["O1s", "O1s p2", "extra"]), ("O", "1s"))
 
 
 class TestCombinedDate(unittest.TestCase):
@@ -490,6 +543,24 @@ class TestRealFiles(unittest.TestCase):
         self.assertEqual(rsf.get("Al2p3/2 Al2O3"), 0.37)
         self.assertEqual(rsf.get("Al2p1/2_Al2O3"), 0.19)
 
+    def test_al2o3_al2p_reaches_actual_quantification(self):
+        # the bug this closes: Al2p3/2/Al2p1/2's cross-referenced RSF
+        # (0.37/0.19) lived only on FitComponent.rsf -- quant.fit_rows()
+        # read the region's own rsf (always 0.0 for a .kfit fit), so this
+        # region's real RSF never reached an actual at% number until
+        # quant.normalise()'s component-level fallback tier was added
+        path = _real(REAL_FILES[1])
+        if not path:
+            self.skipTest("KherveFitting sample corpus not present")
+        doc = readers.load_file(path)
+        al2p = next(r for r in doc.regions if r.name == "Al 2p")
+        rows = quant.fit_rows(al2p)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["rsf"], 0.0)   # the region itself has none
+        out = quant.normalise(rows)
+        self.assertIsNotNone(out[0]["at_pct"])
+        self.assertEqual(out[0]["rsf_source"], "component")
+
     def test_files_with_no_photon_energy_still_load_and_say_why(self):
         path = _real(REAL_FILES[0])   # SP2 Carbon.kfit: known to have none
         if not path:
@@ -657,6 +728,10 @@ class TestPtCl2RealFile(unittest.TestCase):
             self.assertIsNone(r.dwell, r.name)
 
     def test_fitted_regions_reconstruct_with_the_unscaled_k(self):
+        # this is the user's own live file (re-fit in KherveFitting between
+        # sessions -- more regions are fitted now than when this test was
+        # first written), so this checks residuals stay small for however
+        # many regions currently have a fit, not an exact count
         doc = self._doc()
         n = 0
         for r in doc.regions:
@@ -670,29 +745,104 @@ class TestPtCl2RealFile(unittest.TestCase):
                 n += 1
                 self.assertLess(cv.residual_rms, 0.10,
                                f"{r.name} [{r.sample}]: {cv.residual_rms:.3f}")
-        self.assertEqual(n, 5)   # Cl2p, Pt4d, Pt4f (row 0), Pt4p, Pt4f (row 1)
+        self.assertGreaterEqual(n, 5)
 
     def test_the_unicode_greek_la_model_variant_is_recognised(self):
+        # a real Fitting Model string using actual Greek sigma/gamma, not
+        # the spelled-out "sigma"/"gamma" -- whichever region currently uses
+        # LA in this live file (re-fit since this test was first written;
+        # Cl 2p is the one that does now)
         import lineshapes
         doc = self._doc()
-        pt4f = next(r for r in doc.regions
-                   if r.name == "Pt 4f" and r.sample == "PtCl2")
-        self.assertIsNotNone(pt4f.fit)
-        shapes = {c.shape.split("(")[0] for c in pt4f.fit.components}
-        self.assertIn("LA", shapes)
-        for c in pt4f.fit.components:
+        la_regions = [r for r in doc.regions if r.fit and
+                     any(c.shape.startswith("LA") for c in r.fit.components)]
+        if not la_regions:
+            self.skipTest("no LA-fitted region in this live file right now")
+        for c in la_regions[0].fit.components:
             if c.shape.startswith("LA"):
                 self.assertNotEqual(c.shape, "KFUnknown(0)")
                 self.assertFalse(lineshapes.is_exact(c.shape))
 
-    def test_no_rsf_becorrection_or_sample_axis_data_in_this_file(self):
+    def test_no_becorrection_or_sample_axis_data_in_this_file(self):
+        # unlike RSF (a live file the user keeps re-fitting, see above),
+        # BEcorrection/SampleAxis are file-level settings unrelated to the
+        # peak fits and have stayed absent across every version seen so far
         doc = self._doc()
         for r in doc.regions:
-            if r.fit:
-                for c in r.fit.components:
-                    self.assertEqual(c.rsf, 0.0, r.name)
             self.assertNotIn("kf_becorrection", r.extra, r.name)
             self.assertNotIn("kf_sample_axis", r.extra, r.name)
+
+    def test_the_mislabelled_pt4p_sheet_is_renamed_to_o_1s(self):
+        # real bug: this file's "Pt4p" sheet's own two fitted peaks are both
+        # named "O1s"/"O1s p2" -- an O 1s scan mislabelled at the sheet
+        # level, not a KherveFitting/eXPoSe row-suffix issue -- so no region
+        # named "Pt 4p" should hold O1s-named components, and the peaks
+        # should surface as their own "O 1s" region instead
+        doc = self._doc()
+        o1s = [r for r in doc.regions if r.name == "O 1s"]
+        self.assertTrue(o1s)
+        names = {c.name for r in o1s for c in (r.fit.components if r.fit
+                                              else [])}
+        self.assertEqual(names, {"O1s", "O1s p2"})
+        for r in doc.regions:
+            if r.name == "Pt 4p":
+                comp_names = {c.name for c in (r.fit.components if r.fit
+                                              else [])}
+                self.assertNotIn("O1s", comp_names)
+        self.assertTrue(any("Pt4p" in w and "O 1s" in w
+                            for w in doc.warnings), doc.warnings)
+
+    def test_peakless_sheets_with_a_real_background_are_now_quantifiable(self):
+        # real bug: Survey/C1s1/Cl2p1/Pt4s have a genuine background (Shirley
+        # or U 2 Tougaard) but zero fitted peaks -- they used to get no Fit
+        # at all and vanish from quantification with no explanation
+        doc = self._doc()
+        seen = 0
+        for r in doc.regions:
+            if r.fit is None or r.fit.components:
+                continue
+            seen += 1
+            rows = quant.fit_rows(r)
+            self.assertEqual(len(rows), 1, r.name)
+            self.assertEqual(rows[0]["basis"], "data", r.name)
+            res = quant.normalise(rows)[0]
+            self.assertIsNone(res["corrected"], r.name)
+            self.assertEqual(res["why"], "no RSF", r.name)
+        self.assertGreaterEqual(seen, 4)
+
+
+class TestPtCl2RefittedRealFile(unittest.TestCase):
+    """PtCl2_refitted.kfit: a second, independent re-fit of the same PtCl2
+    VAMAS import as PtCl2_quantified.kfit (see TestPtCl2RealFile) -- the
+    user's own report that its "Pt4p" sheet holds O 1s peaks and its "C1s"
+    sheet has a background but no fitted peaks, confirming both are real,
+    recurring bugs rather than one-off oddities of a single file."""
+
+    def _doc(self):
+        if not os.path.isfile(PTCL2_REFITTED_PATH):
+            self.skipTest("PtCl2_refitted.kfit not present")
+        return readers.load_file(PTCL2_REFITTED_PATH)
+
+    def test_the_mislabelled_pt4p_sheet_is_renamed_to_o_1s(self):
+        doc = self._doc()
+        self.assertNotIn("Pt 4p", {r.name for r in doc.regions})
+        o1s = next(r for r in doc.regions if r.name == "O 1s")
+        self.assertEqual({c.name for c in o1s.fit.components},
+                         {"O1s", "O1s p2"})
+        self.assertTrue(any("Pt4p" in w and "O 1s" in w
+                            for w in doc.warnings), doc.warnings)
+
+    def test_c1s_background_only_is_now_quantifiable(self):
+        doc = self._doc()
+        c1s = next(r for r in doc.regions if r.name == "C 1s")
+        self.assertIsNotNone(c1s.fit)
+        self.assertEqual(c1s.fit.components, [])
+        rows = quant.fit_rows(c1s)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["basis"], "data")
+        self.assertGreater(rows[0]["area"], 0)
+        res = quant.normalise(rows)[0]
+        self.assertEqual(res["why"], "no RSF")
 
 
 if __name__ == "__main__":

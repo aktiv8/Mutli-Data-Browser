@@ -8,7 +8,7 @@ workbook and in named presets)::
      "sections": [{"id": "cover", "on": True}, ...],     # this order is the order
      "skip": {"figures": ["fig2"], "metadata": ["f3"]},  # children switched off
      "options": {"sha": "short", "dividers": "auto", "mosaic": "on",
-                "page": "a4"},
+                "page": "a4", "rsf": "off"},
      "cover": {"design": "ribbon", "image": "", "accent": ""}}   # see covers
 
 Children that are not listed in ``skip`` are on, so a figure or file added
@@ -70,12 +70,16 @@ LEGACY_DECK = {"title": ("cover", "summary", "methods", "calibration"),
 
 # option -> allowed values: the checksum column of the file list, and whether
 # the slides get a divider slide before a long section ("auto": 5 slides or more),
-# whether overlapping camera pictures are also stitched into a mosaic, and the
-# PDF's page size (the deck is always 16:9 regardless of this)
+# whether overlapping camera pictures are also stitched into a mosaic, the
+# PDF's page size (the deck is always 16:9 regardless of this), and which RSF
+# reference library (if any) fills in for a region with no recorded
+# sensitivity factor -- "off" (the default: quant.py's own "nothing is
+# guessed" stance) leaves such a region out and says why, same as always.
 OPTIONS = {"sha": ("short", "none"), "dividers": ("auto", "none"),
-           "mosaic": ("on", "off"), "page": ("a4", "letter")}
+           "mosaic": ("on", "off"), "page": ("a4", "letter"),
+           "rsf": ("off", "scofield", "kratos_f1s")}
 DEFAULT_OPTIONS = {"sha": "short", "dividers": "auto", "mosaic": "on",
-                  "page": "a4"}
+                  "page": "a4", "rsf": "off"}
 # The cover picture (see ``covers``): a design id, the file for the 'image'
 # design, and the accent colour ('' = the default one).
 DEFAULT_COVER = {"design": "ribbon", "image": "", "accent": ""}
