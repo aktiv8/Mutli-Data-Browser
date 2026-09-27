@@ -699,7 +699,7 @@ class TestFits(unittest.TestCase):
 
     def test_notes_come_along(self):
         r = fitted_region()
-        r.fit.regions[0].background = "Tougaard 3 Parameter"
+        r.fit.regions[0].background = "E Tougaard"
         fit = hb.build_payload([doc("a.vms", [r])])["samples"][0]["regions"][0]["fit"]
         self.assertTrue(any("not reproduced" in n for n in fit["notes"]))
 

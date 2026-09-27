@@ -280,9 +280,24 @@ class TestBackgrounds(unittest.TestCase):
         self.assertEqual(len(ls.background("Shirley", y)), 50)
         self.assertEqual(len(ls.background("Linear", y)), 50)
         self.assertEqual(float(ls.background("None", y).sum()), 0.0)
-        self.assertIsNone(ls.background("Tougaard", y))     # not reproduced
-        self.assertIsNone(ls.background("U 3 Tougaard", y))
+        # every Tougaard variant needs x/params; without them, None
+        self.assertIsNone(ls.background("Tougaard", y))
+        self.assertIsNone(ls.background("W Tougaard", y))
+        self.assertIsNone(ls.background("U 3 Tougaard", y))    # not a
+        self.assertIsNone(ls.background("E Tougaard", y))      # cross
+        self.assertIsNone(ls.background("Spline", y))          # section
         self.assertEqual(len(ls.shirley(np.array([1.0, 2.0]))), 2)
+
+    def test_plain_and_w_tougaard_with_params(self):
+        x = np.linspace(1000.0, 1010.0, 51)
+        y = self.peak(51)
+        plain = ls.background("Tougaard", y, x=x, params=(0, 0, 300, 400, 1))
+        upoly = ls.background("U Poly Tougaard", y, x=x,
+                              params=(0, 0, 300, 400, 1))
+        np.testing.assert_allclose(plain, upoly)
+        w = ls.background("W Tougaard", y, x=x, params=(0, 0, 300, 400))
+        self.assertEqual(len(w), 51)
+        self.assertFalse(np.allclose(w, plain))
 
 
 # ------------------------------------------------------------------ parsing
@@ -521,13 +536,46 @@ class TestCurves(unittest.TestCase):
         be, counts = model_data(fit, self.hv, 0.27, 25)
         cv = casafit.curves(fit, be, counts, self.hv, 0.27, 25)[0]
         self.assertIsNotNone(cv.background)
-        lines = [l.replace("(*Shirley*)", "(*Tougaard*)") for l in CASA]
+        # "E Tougaard" is still unreproduced (checked against KherveFitting's
+        # own background source too: it has no equivalent function either)
+        lines = [l.replace("(*Shirley*)", "(*E Tougaard*)") for l in CASA]
         fit = casafit.parse(lines)
         cv = casafit.curves(fit, be, counts, self.hv, 0.27, 25)[0]
         self.assertIsNone(cv.background)
         self.assertFalse(cv.background_known)
         self.assertTrue(cv.components)            # components still drawn
         self.assertIsNone(cv.envelope)            # but no envelope on air
+
+    def test_plain_tougaard_reconstructs_via_the_3param_cross_section(self):
+        # plain "Tougaard" (no "U ..." prefix) now shares tougaard_3param
+        # with the U-family: same B/C/D slots (params[2:5]), confirmed
+        # against KherveFitting's own background source to be the identical
+        # cross section, just with generic defaults instead of a material
+        # preset name (see lineshapes.background's own docstring)
+        be, counts = model_data(self.fit, self.hv, 0.27, 25)
+        lines = [l.replace("(*Shirley*)", "(*Tougaard*)") for l in CASA]
+        plain = casafit.curves(casafit.parse(lines), be, counts, self.hv,
+                               0.27, 25)[0]
+        lines = [l.replace("(*Shirley*)", "(*U Poly Tougaard*)")
+                for l in CASA]
+        upoly = casafit.curves(casafit.parse(lines), be, counts, self.hv,
+                               0.27, 25)[0]
+        self.assertTrue(plain.background_known)
+        np.testing.assert_allclose(np.nan_to_num(plain.background),
+                                   np.nan_to_num(upoly.background))
+
+    def test_w_tougaard_reconstructs_and_differs_from_the_3param_family(self):
+        be, counts = model_data(self.fit, self.hv, 0.27, 25)
+        lines = [l.replace("(*Shirley*)", "(*W Tougaard*)") for l in CASA]
+        w = casafit.curves(casafit.parse(lines), be, counts, self.hv,
+                           0.27, 25)[0]
+        lines = [l.replace("(*Shirley*)", "(*U Poly Tougaard*)")
+                for l in CASA]
+        upoly = casafit.curves(casafit.parse(lines), be, counts, self.hv,
+                               0.27, 25)[0]
+        self.assertTrue(w.background_known)
+        self.assertFalse(np.allclose(np.nan_to_num(w.background),
+                                     np.nan_to_num(upoly.background)))
 
 
 # ------------------------------------------------------ files and exports

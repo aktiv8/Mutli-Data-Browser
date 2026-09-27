@@ -120,7 +120,7 @@ class TestFitRows(unittest.TestCase):
 
     def test_unreproduced_background_falls_back_to_components(self):
         r = linear_region()
-        r.fit.regions[0].background = "Tougaard 3 Parameter"   # not reproduced
+        r.fit.regions[0].background = "E Tougaard"   # not reproduced
         row = quant.fit_rows(r)[0]
         self.assertEqual(row["basis"], "components")
         self.assertAlmostEqual(

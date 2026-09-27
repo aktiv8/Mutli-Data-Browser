@@ -716,18 +716,78 @@ def tougaard_3param(x, y, b, c, d, avg=1):
     return base + bg * dx
 
 
+def tougaard_w(x, y, b, c):
+    """The W Tougaard background of ``y`` on the ascending-KE grid ``x``:
+    reconstructed from KherveFitting's own
+    ``calculate_w_tougaard_background`` (github.com/KherveFitting/
+    KherveFitting, ``libraries/Peak_Functions.py``, read directly 2026-09-27)
+    -- a genuinely different cross section from both :func:`tougaard_u2` and
+    :func:`tougaard_3param`, not a renamed duplicate: ``K(T) = B' T /
+    (C + T^2)`` (no ``D`` term, and ``C`` is not squared), where
+    ``B' = B * y[0] / y[-1]`` -- an endpoint-intensity-ratio adjustment to
+    ``B`` KherveFitting's own comment calls "Adjust B based on endpoint
+    intensities" that no other Tougaard variant in this module has. Ported
+    faithfully, including that KherveFitting's own version does **not**
+    subtract and restore a flat baseline the way :func:`tougaard_u2`/
+    :func:`tougaard_3param` do (so no ``avg`` parameter here: there is no
+    baseline level to average).
+
+    **Two things are left unconfirmed, same tier as the Gelius/TLA shapes**:
+    no real CasaXPS-fitted file using literally ``"W Tougaard"`` as its
+    region type is available anywhere in the corpora this module was
+    checked against, so this is a reconstruction from a credible secondary
+    source only, self-consistency tested, not validated against a real
+    residual; and KherveFitting's own ``y[0]``/``y[-1]`` endpoint indices are
+    taken as-is with no confirmation of which physical end (high or low
+    binding energy) they are meant to be on *this* module's own
+    ascending-kinetic-energy convention."""
+    np = _np()
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n = len(y)
+    if n < 3:
+        return y.copy()
+    b_adj = b * (y[0] / y[-1]) if y[-1] else b
+    dx = float(np.abs(np.diff(x)).mean())
+    bg = np.empty(n)
+    for i in range(n):
+        t = x[i + 1:] - x[i]
+        bg[i] = float(np.sum(b_adj * t / (c + t * t) * y[i + 1:]))
+    return bg * dx
+
+
 _TOUGAARD_U2 = re.compile(r"^u\s*2\s*tougaard")
-_TOUGAARD_3P = re.compile(r"^u\s*(poly|sio2|si|ge|al|4)\s*tougaard\b")
+_TOUGAARD_3P = re.compile(r"^(?:u\s*(?:poly|sio2|si|ge|al|4)\s*)?tougaard\b")
+_TOUGAARD_W = re.compile(r"^w\s*tougaard\b")
 
 
 def background(kind, y, avg=1, x=None, params=()):
     """Background under ``y`` for a CasaXPS type name ('Shirley', 'Linear',
-    'None', 'U 2 Tougaard', 'U Poly Tougaard', 'U Si Tougaard', 'U SiO2
-    Tougaard', 'U Ge Tougaard', 'U Al Tougaard', 'U 4 Tougaard' ...); None for
-    a type this module cannot reproduce (e.g. plain 'Tougaard', 'W Tougaard',
-    'E Tougaard', a Spline background). ``x`` (ascending KE) and ``params``
-    (the region line's six numbers after the averaging width) are needed for
-    every Tougaard variant."""
+    'None', 'Tougaard', 'U 2 Tougaard', 'U Poly Tougaard', 'U Si Tougaard',
+    'U SiO2 Tougaard', 'U Ge Tougaard', 'U Al Tougaard', 'U 4 Tougaard',
+    'W Tougaard' ...); None for a type this module cannot reproduce ('E
+    Tougaard', a Spline background -- checked against KherveFitting's own
+    readable background source too: it has no ``E`` Tougaard function at all
+    either, and its own Spline background is anchor-point/interactive, not a
+    closed form of the handful of numbers a CasaXPS region line's ``params``
+    can carry, so there is nothing to reconstruct it from). ``x`` (ascending
+    KE) and ``params`` (the region line's six numbers after the averaging
+    width) are needed for every Tougaard variant.
+
+    Plain ``'Tougaard'`` (no ``U ...`` prefix) shares :func:`tougaard_3param`
+    with the ``U ...`` family: KherveFitting's own ``calculate_
+    tougaard_background`` uses the identical ``B T / ((C - T^2)^2 + D T^2)``
+    cross section (confirmed by reading both side by side) with generic
+    default constants instead of a named material preset -- a second,
+    independent confirmation of that function (Tougaard's own paper was the
+    first), though still not a validation against a real CasaXPS file using
+    literally ``"Tougaard"`` as its type (none found), so it carries the
+    same caveat :func:`tougaard_3param`'s own docstring already states.
+    ``'W Tougaard'`` is a distinct cross section (:func:`tougaard_w`, its own
+    caveats there); its ``C`` sign convention (which family it follows,
+    :func:`tougaard_u2`'s negated storage or :func:`tougaard_3param`'s
+    natural one) is unconfirmed, so it is read with the natural sign, the
+    more common convention among CasaXPS's Tougaard types."""
     t = str(kind or "").strip().lower()
     if t.startswith("shirley"):
         return shirley(y, avg)
@@ -735,6 +795,10 @@ def background(kind, y, avg=1, x=None, params=()):
         if x is None or len(params) < 4 or not params[2]:
             return None
         return tougaard_u2(x, y, params[2], abs(params[3]) or 1643.0, avg)
+    if _TOUGAARD_W.match(t):
+        if x is None or len(params) < 4 or not params[2] or not params[3]:
+            return None
+        return tougaard_w(x, y, params[2], params[3])
     if _TOUGAARD_3P.match(t):
         if x is None or len(params) < 5 or not params[2] or not params[3]:
             return None
