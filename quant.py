@@ -54,8 +54,9 @@ def fit_rows(r, curves=False):
     source ("survey" or "high-res", from ``r.is_survey`` -- CasaXPS can
     quantify a wide survey region as readily as a fitted high-resolution one,
     but the two should not be treated as equally precise when mixed in one
-    total), be_lo / be_hi (region limits, binding energy), avg, rms, approximate,
-    background_known, scale_known, and components (name, group, index, be,
+    total), be_lo / be_hi (region limits, binding energy), avg, rms, chi2_red
+    (Poisson-weighted reduced chi-square, None when dwell/scans are unknown),
+    approximate, background_known, scale_known, and components (name, group, index, be,
     fwhm, area, shape, rsf, plus ``gk`` / ``state``: its chemical state's key
     and name). With ``curves=True`` a row also has ``curves``: ``i0`` (index of
     the first point of the region in the spectrum) and the background, envelope
@@ -116,6 +117,7 @@ def fit_rows(r, curves=False):
             "be_lo": None if hi is None else hv - (hi + rshift),
             "be_hi": None if lo is None else hv - (lo + rshift),
             "avg": getattr(reg, "avg", 1), "rms": cv.residual_rms,
+            "chi2_red": cv.chi2_red,
             "approximate": bool(cv.approximate),
             "background_known": bool(cv.background_known),
             "scale_known": bool(cv.scale_known),

@@ -396,6 +396,21 @@ class TestCurves(unittest.TestCase):
         self.assertFalse(cv.approximate)                # GL is exact
         self.assertTrue(cv.scale_known)
 
+    def test_chi2_red_is_a_small_finite_number_for_a_good_fit(self):
+        be, counts = model_data(self.fit, self.hv, 0.27, 25)
+        cv = casafit.curves(self.fit, be, counts, self.hv, 0.27, 25)[0]
+        self.assertIsNotNone(cv.chi2_red)
+        self.assertTrue(cv.chi2_red == cv.chi2_red)      # not NaN
+        self.assertGreater(cv.chi2_red, 0.0)
+        self.assertLess(cv.chi2_red, 5.0)                # generous sanity bound
+
+    def test_chi2_red_is_none_without_dwell(self):
+        """Reduced chi-square needs true counts, not counts/s: with no dwell
+        (and so no known scale) there is nothing to weight the residual by."""
+        be, counts = model_data(self.fit, self.hv, 1.0, 1)
+        cv = casafit.curves(self.fit, be, counts, self.hv, None, 1)[0]
+        self.assertIsNone(cv.chi2_red)
+
     def test_envelope_never_exceeds_the_data_it_was_built_from(self):
         """Regression for the reported bug: a component's tail can run past
         its own CasaXPS region window (a broad or asymmetric peak commonly

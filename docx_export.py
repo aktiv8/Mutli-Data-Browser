@@ -319,7 +319,7 @@ def _results_section(d, results, skip=()):
             if cpng:
                 d.picture(cpng)
             d.table(resultspages.COMPOSITION_HEADER, [c for _k, c in rows],
-                   [4.0, 3.0, 1.6, 3.4, 2.6, 1.8, 1.6])
+                   [3.8, 2.8, 1.5, 3.0, 2.4, 1.6, 1.5, 1.4])
             if resultspages.has_survey_rows(s.levels[0]):
                 d.paragraph(resultspages.SURVEY_FOOTNOTE, size=8)
         else:

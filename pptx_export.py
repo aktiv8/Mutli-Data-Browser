@@ -640,7 +640,7 @@ def _results_slides(deck, results, skip=()):
                     None if (cpng or i) else s.label)
                 shape = deck.table(
                     slide, MARGIN, TABLE_TOP, BODY_W,
-                    [4.0, 3.0, 1.6, 3.4, 2.6, 1.8, 1.6],
+                    [3.8, 2.8, 1.5, 3.0, 2.4, 1.6, 1.5, 1.4],
                     resultspages.COMPOSITION_HEADER, [c for _k, c in chunk],
                     size=11, row_h=0.32)
                 right(shape, 2)

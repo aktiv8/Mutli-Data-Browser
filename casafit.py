@@ -283,6 +283,9 @@ class Curves:
                                     # are reconstructions
     scale_known: bool               # False: dwell / scans unknown (CPS shown)
     residual_rms: float | None = None   # rms(data - envelope) / data range
+    chi2_red: float | None = None   # Poisson-weighted reduced chi-square
+                                    # (None when dwell/scans are unknown, so
+                                    # there are no true counts to weight by)
     background_known: bool = True   # False: this background type is not
                                     # reproduced (components only)
     fit_region: object = None       # the FitRegion these curves belong to
@@ -351,13 +354,21 @@ def curves(fit, energies, counts, hv, dwell=None, scans=1):
         if comps and bg is not None and float(y.max() - y.min()) > 0:
             rms = float(np.sqrt(np.mean((y - total) ** 2))
                         / (y.max() - y.min()))
+        chi2 = None
+        if comps and bg is not None and scale is not None and len(sel) > 1:
+            # Poisson-weighted reduced chi-square needs true counts, not the
+            # counts/s "y"/"total" above -- undo the scaling with the same k.
+            raw_y, raw_total = y * k, total * k
+            var = np.maximum(raw_y, 1.0)
+            chi2 = float(np.sum((raw_y - raw_total) ** 2 / var)
+                        / (len(sel) - 1))
         out.append(Curves(
             region=reg.name, background_type=reg.background,
             background=None if bg is None else full(bg),
             components=[(c, full(v)) for c, v in comps],
             envelope=full(total) if comps and bg is not None else None,
             approximate=approx, scale_known=scale is not None,
-            residual_rms=rms, background_known=bg is not None,
+            residual_rms=rms, chi2_red=chi2, background_known=bg is not None,
             fit_region=reg))
     return out
 

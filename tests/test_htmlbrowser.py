@@ -661,6 +661,7 @@ class TestFits(unittest.TestCase):
         row = reg["fit"]["rows"][0]
         self.assertEqual(row["region"], "Ti 2p")
         self.assertAlmostEqual(row["rsf"], 2.001)
+        self.assertIsInstance(row["chi2_red"], float)
         self.assertEqual(len(row["components"]), 2)
         c = row["components"][0]
         self.assertEqual(set(("name", "be", "fwhm", "area", "shape", "state",

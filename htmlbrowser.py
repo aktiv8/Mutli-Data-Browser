@@ -347,7 +347,7 @@ def _fit_block(d, budget):
                        "env": _round_curve(cur["env"]),
                        "comps": [_round_curve(c) for c in cur["comps"]]}
         row["curve"] = cur
-        for k in ("area", "area_t", "be_lo", "be_hi", "rms"):
+        for k in ("area", "area_t", "be_lo", "be_hi", "rms", "chi2_red"):
             if row.get(k) is not None:
                 row[k] = round_sig(row[k], 7)
         for c in row["components"]:

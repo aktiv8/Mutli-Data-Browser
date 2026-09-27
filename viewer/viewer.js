@@ -1081,6 +1081,7 @@
       if (row.rsf) head.push('RSF ' + +row.rsf.toPrecision(4));
       if (row.area !== null && row.area !== undefined) head.push('area ' + Math.round(row.area).toLocaleString('en-US') + ' counts/s·eV' + (row.basis === 'components' ? ' (sum of components)' : ''));
       if (row.rms !== null && row.rms !== undefined) head.push('fit rms ' + (row.rms * 100).toFixed(1) + ' % of the range');
+      if (row.chi2_red !== null && row.chi2_red !== undefined) head.push('reduced χ² ' + row.chi2_red.toFixed(2));
       box.appendChild(h('div', { class: 'fit-head', text: head.join('  ·  ') }));
       if (!row.components.length) return;
       var tot = row.components.reduce(function (a, c) { return a + Math.max(0, c.area || 0); }, 0);

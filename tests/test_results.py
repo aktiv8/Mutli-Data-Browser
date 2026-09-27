@@ -52,9 +52,9 @@ def row(region, rsf, area, states=(), background="Shirley"):
               "state": n} for n, a in states]
     return {"region": region, "background": background, "rsf": rsf,
             "area": area, "area_t": None, "basis": "data", "be_lo": 280.0,
-            "be_hi": 290.0, "avg": 1, "rms": 0.01, "approximate": False,
-            "background_known": True, "scale_known": True,
-            "components": comps}
+            "be_hi": 290.0, "avg": 1, "rms": 0.01, "chi2_red": 1.43,
+            "approximate": False, "background_known": True,
+            "scale_known": True, "components": comps}
 
 
 def row_src(region, rsf, area, source, **kw):
@@ -129,7 +129,17 @@ class TestNumbers(unittest.TestCase):
         lv = level(None, [row("A", 1.0, 100.0),
                           dict(row("B", 2.0, 100.0), rms=None)])
         cells = dict((c[0], c) for _k, c in rp.composition_cells(lv))
-        self.assertEqual(cells["A"][-1], "1.0%")            # row()'s rms=0.01
+        self.assertEqual(cells["A"][-2], "1.0%")            # row()'s rms=0.01
+        self.assertEqual(cells["B"][-2], "")
+        states = [c for k, c in rp.composition_cells(
+            three_element_level(None)) if k == "state"]
+        self.assertTrue(all(c[-2] == "" for c in states))
+
+    def test_reduced_chi2_is_shown_and_blank_when_unknown(self):
+        lv = level(None, [row("A", 1.0, 100.0),
+                          dict(row("B", 2.0, 100.0), chi2_red=None)])
+        cells = dict((c[0], c) for _k, c in rp.composition_cells(lv))
+        self.assertEqual(cells["A"][-1], "1.43")          # row()'s chi2_red
         self.assertEqual(cells["B"][-1], "")
         states = [c for k, c in rp.composition_cells(
             three_element_level(None)) if k == "state"]

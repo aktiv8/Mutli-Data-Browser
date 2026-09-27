@@ -324,7 +324,7 @@ def results_story(results, skip=(), look=None, sid="results"):
                                    hAlign="LEFT"))
             block.append(_grid(resultspages.COMPOSITION_HEADER,
                                [c for _k, c in rows],
-                               [36, 26, 18, 32, 26, 20, 22], look,
+                               [34, 24, 16, 28, 24, 18, 18, 18], look,
                                right_from=2, kinds=[k for k, _c in rows]))
             story += block
             if resultspages.has_survey_rows(s.levels[0]):
