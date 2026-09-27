@@ -55,6 +55,19 @@ shape.
 ``BEcorrection``/``BEcorrections`` charge-referencing values (a component's
 ``Position`` is imported as-is), and the depth/tilt ``SampleAxis``. Revisit
 once this first version has been used on more real files.
+
+``import_peak_library`` (D4) reads a standalone Peaks Library ``.json`` file
+on its own -- the same ``Core levels[<name>].Fitting.Peaks`` shape as a
+``.kfit`` project's own ``project_json_gz``, but with no ``B.E.``/``Raw
+Data``/``ExperimentalInfo`` beside it (it is a fitting template, not a
+recording). There being no spectrum to import, this is a distinct action
+(Tools > "Import KherveFitting peak model...", not the ordinary Open dialog:
+see ``Workspace.import_kfit_peak_library``): the region's "data" is the
+model's own curve -- background none, its reconstructed components summed on
+a synthetic axis spanning the peaks with margin -- at a nominal photon energy
+(``xpslines.DEFAULT_HV``, Al Kalpha) needed only to carry the library's BE
+positions into ``casafit``'s raw-KE frame; nothing about a real instrument or
+acquisition is claimed, and the region says so in its own note.
 """
 
 from __future__ import annotations
@@ -67,6 +80,7 @@ import zlib
 
 import casafit
 import lineshapes
+import xpslines
 from .base import Region, SpectrumFile, canon_region_name, is_survey_name, \
     read_bytes
 
@@ -129,6 +143,39 @@ def _shape_string(peak):
         b = _num(peak.get("Gamma"), 1.0)
         return f"LA({a:g},{b:g},0)"
     return ""
+
+
+def _components_from_peaks(peaks, hv, k, region_name):
+    """``[FitComponent]`` from a ``Fitting.Peaks`` dict (shared by a
+    ``.kfit`` sheet and a standalone Peaks Library file): ``k`` divides
+    ``Area`` down from whatever raw scale it was stored in (1.0 -- no
+    division -- for a Peaks Library file, which has no dwell/scans of its
+    own to have been multiplied up by)."""
+    components = []
+    for pname, p in peaks.items():
+        if not isinstance(p, dict):
+            continue
+        pos = _num(p.get("Position"))
+        fwhm = _num(p.get("FWHM"))
+        area = _num(p.get("Area"))
+        if pos is None or fwhm is None or area is None:
+            continue
+        area = area / k
+        # an unreconstructed model (e.g. a skewed Voigt) gets a fixed,
+        # well-formed placeholder shape name lineshapes.py cannot parse
+        # as GL/SGL, so is_exact() still honestly flags it -- same
+        # convention as an unrecognised CasaXPS shape (H/F/QF; see
+        # lineshapes.py's own docstring). The real model name is kept
+        # in `line`, not folded into the shape string: KherveFitting's
+        # own model names can carry parentheses of their own ("Voigt
+        # (Area, L/G, sigma, S)"), which would corrupt lineshapes.py's
+        # own NAME(params) parsing if embedded there directly.
+        shape = _shape_string(p)
+        components.append(casafit.FitComponent(
+            name=str(pname), shape=shape or "KFUnknown(0)", area=area,
+            fwhm=fwhm, pos_ke=hv - pos, rsf=0.0, region=region_name,
+            line="" if shape else str(p.get("Fitting Model") or "")))
+    return components
 
 
 class KherveFittingKfitFile(SpectrumFile):
@@ -270,30 +317,103 @@ class KherveFittingKfitFile(SpectrumFile):
         # dropped the reconstruction's residual from 15.6% to 0.4%.
         dwell, scans = region.dwell_and_scans()
         k = (dwell * scans) if dwell else 1.0
-        components = []
-        for pname, p in peaks.items():
-            if not isinstance(p, dict):
-                continue
-            pos = _num(p.get("Position"))
-            fwhm = _num(p.get("FWHM"))
-            area = _num(p.get("Area"))
-            if pos is None or fwhm is None or area is None:
-                continue
-            area = area / k
-            # an unreconstructed model (e.g. a skewed Voigt) gets a fixed,
-            # well-formed placeholder shape name lineshapes.py cannot parse
-            # as GL/SGL, so is_exact() still honestly flags it -- same
-            # convention as an unrecognised CasaXPS shape (H/F/QF; see
-            # lineshapes.py's own docstring). The real model name is kept
-            # in `line`, not folded into the shape string: KherveFitting's
-            # own model names can carry parentheses of their own ("Voigt
-            # (Area, L/G, sigma, S)"), which would corrupt lineshapes.py's
-            # own NAME(params) parsing if embedded there directly.
-            shape = _shape_string(p)
-            components.append(casafit.FitComponent(
-                name=str(pname), shape=shape or "KFUnknown(0)", area=area,
-                fwhm=fwhm, pos_ke=hv - pos, rsf=0.0, region=region.name,
-                line="" if shape else str(p.get("Fitting Model") or "")))
+        components = _components_from_peaks(peaks, hv, k, region.name)
         if not components:
             return None
         return casafit.Fit(regions=[reg], components=components)
+
+
+# -- D4: a standalone Peaks Library .json file, no spectrum ------------------
+
+class KherveFittingPeakLibraryFile(SpectrumFile):
+    """A standalone KherveFitting Peaks Library ``.json`` file: a fitting
+    template someone else measured and fitted, not this file's own data (see
+    the module docstring). Not registered in ``readers.READERS`` -- opened
+    only through :func:`import_peak_library` (``Workspace.
+    import_kfit_peak_library``, Tools menu), never the ordinary Open dialog,
+    because there is no spectrum to plot it against."""
+
+    format_name = "KherveFitting peak library (.json)"
+
+    def load(self, path: str):
+        self.path = path
+        raw = read_bytes(path)
+        try:
+            project = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ValueError(
+                f"{os.path.basename(path)} is not a readable JSON file "
+                f"({exc})")
+        core_levels = project.get("Core levels") if isinstance(
+            project, dict) else None
+        if not core_levels:
+            raise ValueError(
+                f"{os.path.basename(path)} has no 'Core levels' -- not a "
+                "KherveFitting peak library file")
+        hv = xpslines.DEFAULT_HV
+        for idx, raw_name in enumerate(sorted(core_levels)):
+            region = self._load_region(raw_name, core_levels[raw_name],
+                                       idx, hv)
+            if region is not None:
+                self.regions.append(region)
+        if not self.regions:
+            raise ValueError(
+                f"{os.path.basename(path)} has no peak with a Position, "
+                "FWHM and Area")
+        self.warnings.append(
+            f"{os.path.basename(path)} is a KherveFitting peak-model "
+            "template, not a measured spectrum: each region's curve is the "
+            f"model itself, at a nominal photon energy ({hv:g} eV, Al "
+            "Kα) used only to carry its binding-energy positions into "
+            "the raw-KE frame this app's fits work in.")
+        return self._finish()
+
+    @staticmethod
+    def _load_region(raw_name, entry, idx, hv):
+        """One ``Region`` synthesised from a ``Core levels[name]`` entry, or
+        None when it has no peak with a usable Position/FWHM/Area."""
+        fitting = entry.get("Fitting") if isinstance(entry, dict) else None
+        peaks = {k: v for k, v in ((fitting or {}).get("Peaks") or {}).items()
+                 if isinstance(v, dict)}
+        valid = [p for p in peaks.values()
+                if _num(p.get("Position")) is not None
+                and _num(p.get("FWHM")) is not None
+                and _num(p.get("Area")) is not None]
+        if not valid:
+            return None
+        canon, _row = _split_sheet_name(raw_name)
+        components = _components_from_peaks(peaks, hv, 1.0, canon)
+        if not components:
+            return None
+        positions = [_num(p["Position"]) for p in valid]
+        fwhms = [_num(p["FWHM"]) for p in valid]
+        margin = max(3.0, 3.0 * max(fwhms))
+        lo_be, hi_be = min(positions) - margin, max(positions) + margin
+        n = max(200, min(4000, int((hi_be - lo_be) / 0.02)))
+
+        import numpy as np
+        ke = np.linspace(hv - hi_be, hv - lo_be, n)     # ascending KE
+        be = hv - ke                                    # matching, descending
+        total = np.zeros(n)
+        for c in components:
+            total += lineshapes.component_curve(ke, c.shape, c.pos_ke,
+                                                 c.fwhm, c.area)
+
+        region = Region(
+            name=canon, index=idx, offset=idx, technique="XPS",
+            energy=be.tolist(), counts=total.tolist(),
+            energy_label="Binding Energy", energy_units="eV",
+            count_label="Fit model", count_units="a.u.", decodable=True,
+            sample="", photon_energy=hv,
+            note="KherveFitting peak-library template -- not a measured "
+                 "spectrum; the curve is the model's own components, not "
+                 "acquired data.")
+        reg = casafit.FitRegion(
+            name=canon, background="None", start_ke=hv - hi_be,
+            end_ke=hv - lo_be, rsf=0.0)
+        region.fit = casafit.Fit(regions=[reg], components=components)
+        return region
+
+
+def import_peak_library(path: str) -> KherveFittingPeakLibraryFile:
+    return KherveFittingPeakLibraryFile().load(path)

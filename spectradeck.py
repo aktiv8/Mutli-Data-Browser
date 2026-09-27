@@ -79,6 +79,7 @@ from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
                      load_file, reader_for, supported_patterns,
                      UnsupportedFormat, ThermoExperiment, LoadCancelled,
                      looks_like_experiment, experiment_roots)
+from readers import khervefitting_kfit
 import about_ui
 import fonts
 import holder
@@ -697,6 +698,8 @@ class Workspace:
                        command=self.open_sputter)
         tm.add_command(label="ISS / REELS…", command=self.open_iss_reels)
         tm.add_command(label="SnapMap viewer…", command=self.open_snapmap)
+        tm.add_command(label="Import KherveFitting peak model…",
+                       command=self.import_kfit_peak_library)
         tm.add_command(label="Rename…   (F2)", command=self.rename_selected)
         tm.add_command(label="Notes…", command=self.notes_selected)
         bar.add_cascade(label="Tools", menu=tm)
@@ -1754,6 +1757,16 @@ class Workspace:
             return [str(exc)]
         except Exception as exc:
             return [f"{name}: could not be read ({exc})"]
+        return self._register_parser(parser, path, file_id, origin, refresh)
+
+    def _register_parser(self, parser, path, file_id=None, origin="",
+                         refresh=True):
+        """Common bookkeeping once a ``SpectrumFile`` has been built, however
+        it was loaded (``_add_file``'s ``load_file(path)``, or an explicit
+        import such as ``import_kfit_peak_library`` that builds one directly
+        with no file-format sniffing). Returns problem strings, same as
+        ``_add_file``."""
+        name = os.path.basename(path.rstrip("\\/")) or path
         self.docs.append(parser)
         fid = file_id or wbk.new_id(self._fid_used, "f")
         self._fid_used.add(fid)
@@ -2122,6 +2135,38 @@ class Workspace:
         parser = self.region_parser.get(id(region))
         if parser is not None:
             snapmap_ui.SnapMapDialog(self.root, self, parser, region)
+
+    def import_kfit_peak_library(self):
+        """Bring in one or more standalone KherveFitting Peaks Library
+        ``.json`` files (github.com/KherveFitting/KherveFitting) as fit-only
+        reference spectra -- there is no acquisition to open, so this is its
+        own action rather than a row in the Open dialog (see
+        ``readers.khervefitting_kfit``'s module docstring)."""
+        paths = filedialog.askopenfilenames(
+            title="Import KherveFitting peak model",
+            filetypes=[("KherveFitting peak library", "*.json"),
+                      ("All files", "*.*")])
+        if not paths:
+            return
+        problems = []
+        many = len(paths) > 1
+        for path in paths:
+            name = os.path.basename(path)
+            if any(p.path == os.path.abspath(path) or p.path == path
+                  for p in self.docs):
+                problems.append(f"{name}: already loaded.")
+                continue
+            try:
+                parser = khervefitting_kfit.import_peak_library(path)
+            except Exception as exc:
+                problems.append(f"{name}: could not be read ({exc})")
+                continue
+            problems += self._register_parser(parser, path, refresh=not many)
+        if many:
+            self._finish_adding()
+        if problems:
+            messagebox.showwarning("Import KherveFitting peak model",
+                                   "\n\n".join(problems))
 
     def _on_tree_double(self, event):
         """Double-click a SnapMap row to open its map."""

@@ -4,8 +4,10 @@ and (when h5py and the real sample corpus are available) real files.
 Run:  python -m unittest discover tests
 """
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -159,6 +161,113 @@ class TestRealFiles(unittest.TestCase):
         self.assertGreater(len(doc.regions), 0)
         self.assertTrue(all(r.fit is None for r in doc.regions))
         self.assertTrue(any("photon energy" in w for w in doc.warnings))
+
+
+PEAKS_LIBRARY_DIR = os.environ.get("XPS_KFIT_PEAKS_DIR", os.path.join(
+    "D:\\", "Temp", "for claude files", "temp", "KherveFitting Files",
+    "Peaks Library"))
+
+# a real two-peak entry (alpha-Fe2O3's Fe2p3/2 satellite pair), trimmed from
+# MnNiFeCoCr_Biesinger_Applied SurfaceScience_257_2011_2717/
+# Fe2p_alpha-Fe2O3_GL.json
+_FE2P_FIXTURE = {
+    "Core levels": {
+        "Fe2p": {
+            "Fitting": {
+                "Model": "GL (Area)",
+                "Peaks": {
+                    "Fe2p3/2 aFe2O3 peak 1": {
+                        "Position": 709.83, "Height": 14907.85, "FWHM": 1.0,
+                        "L/G": 30.0, "Area": 15868.91, "Sigma": 0.0,
+                        "Gamma": 0.0, "Skew": 0.0, "Fitting Model": "GL (Area)",
+                    },
+                    "Fe2p3/2 aFe2O3 peak 2": {
+                        "Position": 710.73, "Height": 10472.76, "FWHM": 1.2,
+                        "L/G": 30.0, "Area": 13377.49, "Sigma": 0.0,
+                        "Gamma": 0.0, "Skew": 0.0, "Fitting Model": "GL (Area)",
+                    },
+                },
+            },
+        },
+    },
+}
+
+
+class TestPeakLibrary(unittest.TestCase):
+    """D4: a standalone Peaks Library .json opened on its own, with no
+    associated spectrum."""
+
+    def _load(self, data):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            return kf.import_peak_library(path)
+        finally:
+            os.remove(path)
+
+    def test_one_region_per_core_level_with_its_fit(self):
+        doc = self._load(_FE2P_FIXTURE)
+        self.assertEqual(len(doc.regions), 1)
+        r = doc.regions[0]
+        self.assertEqual(r.name, "Fe 2p")
+        self.assertTrue(r.decodable)
+        self.assertGreater(r.n_points, 100)
+        self.assertIsNotNone(r.fit)
+        self.assertEqual(len(r.fit.components), 2)
+        self.assertEqual(r.fit.regions[0].background, "None")
+
+    def test_the_synthesised_axis_covers_every_peak_with_margin(self):
+        r = self._load(_FE2P_FIXTURE).regions[0]
+        self.assertLess(min(r.energy), 709.83 - 1.0)
+        self.assertGreater(max(r.energy), 710.73 + 1.0)
+
+    def test_the_regions_own_curve_is_the_models_curve(self):
+        # the "data" is synthesised from the same components casafit.curves
+        # will reconstruct, so the residual against itself is ~0 -- this
+        # is not a validation of the model, just of self-consistency
+        r = self._load(_FE2P_FIXTURE).regions[0]
+        cvs = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy)
+        self.assertEqual(len(cvs), 1)
+        self.assertIsNotNone(cvs[0].residual_rms)
+        self.assertLess(cvs[0].residual_rms, 1e-6)
+        self.assertIsNone(cvs[0].chi2_red)   # no dwell/scans: honestly None
+
+    def test_a_file_with_no_core_levels_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._load({"Core levels": {}})
+
+    def test_not_json_is_rejected(self):
+        fd, path = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("not json at all")
+            with self.assertRaises(ValueError):
+                kf.import_peak_library(path)
+        finally:
+            os.remove(path)
+
+
+class TestPeakLibraryRealFiles(unittest.TestCase):
+    def test_every_real_file_loads_and_reproduces_its_own_model(self):
+        if not os.path.isdir(PEAKS_LIBRARY_DIR):
+            self.skipTest("KherveFitting Peaks Library corpus not present")
+        n = 0
+        for dirpath, _dirs, names in os.walk(PEAKS_LIBRARY_DIR):
+            for fn in names:
+                if not fn.lower().endswith(".json"):
+                    continue
+                path = os.path.join(dirpath, fn)
+                n += 1
+                doc = kf.import_peak_library(path)
+                self.assertGreater(len(doc.regions), 0, path)
+                for r in doc.regions:
+                    self.assertIsNotNone(r.fit, path)
+                    cvs = casafit.curves(r.fit, r.energy, r.counts,
+                                         r.photon_energy)
+                    self.assertEqual(len(cvs), 1, path)
+                    self.assertLess(cvs[0].residual_rms, 1e-6, path)
+        self.assertGreater(n, 0)
 
 
 if __name__ == "__main__":
