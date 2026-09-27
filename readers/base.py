@@ -548,6 +548,11 @@ class SpectrumFile:
                 f"{cc['assigned']:.4f})"
                 + (", taken from the other regions of this sample"
                    if cc.get("inherited") else ""))
+        kfc = r.extra.get("kf_becorrection")
+        if kfc:
+            md["BE calibration (KherveFitting)"] = (
+                f"{kfc:+.3f} eV (already applied by the source file to its "
+                "stored positions -- not applied again here)")
         for k, v in (r.extra.get("preserved_metadata") or {}).items():
             if not md.get(k):              # restored from a VAMAS comment
                 md[k] = v

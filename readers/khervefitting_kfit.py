@@ -73,11 +73,31 @@ also has) is imported with ``shape=""``, which ``lineshapes.parse_shape``
 reads as an honestly-flagged placeholder, same as an unrecognised CasaXPS
 shape.
 
-**Not attempted in this version** (deliberately, not an oversight):
-KherveFitting's own ``BEcorrection``/``BEcorrections`` charge-referencing
-values (a component's ``Position`` is imported as-is), and the depth/tilt
-``SampleAxis``. Revisit once this first version has been used on more real
-files.
+**BEcorrection.** A project's file-wide ``BEcorrection`` and per-sample-row
+``BEcorrections`` record a charge-referencing shift KherveFitting applied at
+some point -- but, checked directly (no reader source exists to read
+instead): **the shift is already baked into the stored ``B.E.``/Position
+values, not layered on top of them the way a CasaXPS ``Calib`` line is**.
+Confirmed two ways on real files: BaSO4.kfit's ``BEcorrection`` of 1.83 eV
+sits beside a C1s ``C-C`` peak stored at exactly 284.8 eV, the standard
+adventitious-carbon reference value a correction would be *aiming for*, not
+a value still needing 1.83 eV added to reach it; and, decisively,
+STO_Tilt.kfit's row 0 has a real, tested fit (``TestRealFiles``) with a
+nonzero per-row correction (``BEcorrections["0"] = 0.2``) -- adding that
+0.2 eV to every component's position, as a CasaXPS-style shift would need,
+makes the reconstruction's residual 13-27x worse across every sample row of
+that sheet (0.004-0.016 unshifted vs. 0.074-0.101 shifted). So this module
+imports ``Position`` as-is and never touches ``Region.calibration_shift``
+(which would double the correction on display, via ``Workspace._display``,
+exactly the same real way this shift is proven not to belong a second
+time) -- ``_becorrection_of`` only surfaces the value already applied as
+read-only metadata (region_metadata's "BE calibration (KherveFitting)" row,
+``Region.extra["kf_becorrection"]``), the file's own audit trail, not an
+instruction to shift anything again.
+
+**Not attempted in this version** (deliberately, not an oversight): the
+depth/tilt ``SampleAxis``. Revisit once this first version has been used on
+more real files.
 
 ``import_peak_library`` (D4) reads a standalone Peaks Library ``.json`` file
 on its own -- the same ``Core levels[<name>].Fitting.Peaks`` shape as a
@@ -147,6 +167,22 @@ def _num(v, default=None):
         return float(v)
     except (TypeError, ValueError):
         return default
+
+
+def _becorrection_of(row, becorrections, file_level):
+    """The BE correction KherveFitting already applied to sample row
+    ``row``'s stored positions (see the module docstring's "BEcorrection"
+    section), or None when nothing is recorded or it is zero. ``row``'s own
+    entry of ``becorrections`` (``BEcorrections``, per row) wins when the
+    file records one -- even a zero, over a nonzero file-wide
+    ``BEcorrection`` (real case, Y2O3_Kfitting.kfit: file-wide 0.4 but row
+    0's own entry is 0.0) -- since it is the more specific record; the
+    file-wide value is a fallback for a file that only ever recorded that
+    one (SP2 Carbon.kfit and Metal_Bi.kfit record neither)."""
+    val = becorrections.get(row)
+    if val is None:
+        val = file_level
+    return val if val else None
 
 
 def _shape_string(peak):
@@ -277,6 +313,17 @@ class KherveFittingKfitFile(SpectrumFile):
                 m = re.match(r"^Results Table(\d+)$", key)
                 if m and isinstance(val, dict):
                     results_tables[int(m.group(1))] = val
+            becorrections = {}
+            raw_bc = (project or {}).get("BEcorrections")
+            if isinstance(raw_bc, dict):
+                for k, v in raw_bc.items():
+                    n = _num(v)
+                    if n is not None:
+                        try:
+                            becorrections[int(k)] = n
+                        except (TypeError, ValueError):
+                            pass
+            becorrection_file = _num((project or {}).get("BEcorrection"))
             n_rows = len({r for _n, r in (
                 _split_sheet_name(cls_group[k].attrs.get("name") or k)
                 for k in cls_group.keys())})
@@ -309,7 +356,11 @@ class KherveFittingKfitFile(SpectrumFile):
                 if tx is not None and r.photon_energy:
                     r.tf_ke = [r.photon_energy - b for b in r.energy]
                     r.tf_values = [float(v) for v in tx[()]]
-                results_row = results_tables.get(r.extra.pop("_row"))
+                row = r.extra.pop("_row")
+                results_row = results_tables.get(row)
+                bec = _becorrection_of(row, becorrections, becorrection_file)
+                if bec:
+                    r.extra["kf_becorrection"] = bec
                 r.fit = self._build_fit(grp, r, sheet_json, results_row)
                 self.regions.append(r)
         self.instrument = {k: v for k, v in self.instrument.items() if v}

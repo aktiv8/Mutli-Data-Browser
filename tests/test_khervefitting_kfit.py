@@ -216,6 +216,32 @@ class TestRsfCrossReference(unittest.TestCase):
         self.assertEqual(comps[0].rsf, 0.0)
 
 
+class TestBEcorrection(unittest.TestCase):
+    """_becorrection_of: which of a file's BEcorrection (file-wide) /
+    BEcorrections (per sample row) values, if any, describes a given row --
+    never applied to a position (see the module docstring: real files prove
+    it is already baked in), only surfaced as metadata."""
+
+    def test_a_rows_own_entry_is_used(self):
+        # BaSO4.kfit's real case
+        self.assertEqual(
+            kf._becorrection_of(0, {0: 1.83, 1: 0.0}, 1.83), 1.83)
+
+    def test_a_zero_entry_is_not_shown(self):
+        self.assertIsNone(kf._becorrection_of(1, {0: 1.83, 1: 0.0}, 1.83))
+
+    def test_a_rows_own_zero_wins_over_a_nonzero_file_wide_value(self):
+        # Y2O3_Kfitting.kfit's real case: file-wide 0.4, row 0's own 0.0
+        self.assertIsNone(kf._becorrection_of(0, {0: 0.0}, 0.4))
+
+    def test_falls_back_to_the_file_wide_value_when_the_row_has_none(self):
+        self.assertEqual(kf._becorrection_of(2, {0: 1.83}, 0.4), 0.4)
+
+    def test_nothing_recorded_at_all_gives_none(self):
+        # SP2 Carbon.kfit / Metal_Bi.kfit's real case
+        self.assertIsNone(kf._becorrection_of(0, {}, None))
+
+
 @unittest.skipUnless(HAVE_H5PY, "h5py not installed")
 class TestRealFiles(unittest.TestCase):
     """Every sample .kfit file loads cleanly; every reconstructed fit's
@@ -262,6 +288,55 @@ class TestRealFiles(unittest.TestCase):
                         f"{cv.residual_rms:.3f}")
         if n == 0:
             self.skipTest("no fitted region found in the available corpus")
+
+    def test_becorrection_is_shown_as_metadata_even_without_a_fit(self):
+        # BaSO4.kfit: BEcorrection/BEcorrections both 1.83 eV for row 0, but
+        # this file has no photon energy anywhere so there is no fit to
+        # touch -- the metadata still surfaces on its own.
+        path = _real(REAL_FILES[2])
+        if not path:
+            self.skipTest("KherveFitting sample corpus not present")
+        doc = readers.load_file(path)
+        c1s = next(r for r in doc.regions if r.name == "C 1s")
+        self.assertAlmostEqual(c1s.extra["kf_becorrection"], 1.83)
+        md = doc.region_metadata(c1s)
+        self.assertIn("BE calibration (KherveFitting)", md)
+        self.assertIn("1.83", md["BE calibration (KherveFitting)"])
+
+    def test_becorrection_is_not_reapplied_to_a_real_fits_positions(self):
+        # STO_Tilt.kfit row 0: a real per-row correction (0.2 eV) beside a
+        # real, fitted Sr3d sheet. Reapplying it (as a CasaXPS-style shift
+        # would need) makes the residual 13-27x worse by hand (see the
+        # module docstring); this checks the shipped reader stays well
+        # clear of that.
+        path = _real(REAL_FILES[6])
+        if not path:
+            self.skipTest("KherveFitting sample corpus not present")
+        doc = readers.load_file(path)
+        sr3d = next((r for r in doc.regions if r.name == "Sr 3d"
+                    and r.extra.get("kf_becorrection")), None)
+        if sr3d is None:
+            self.skipTest("no Sr 3d row with its own BEcorrections entry")
+        self.assertAlmostEqual(sr3d.extra["kf_becorrection"], 0.2)
+        self.assertIsNotNone(sr3d.fit)
+        cvs = casafit.curves(sr3d.fit, sr3d.energy, sr3d.counts,
+                             sr3d.photon_energy, sr3d.dwell,
+                             sr3d.extra.get("n_scans", 1))
+        self.assertTrue(cvs)
+        for cv in cvs:
+            if cv.residual_rms is not None:
+                self.assertLess(cv.residual_rms, 0.02)
+
+    def test_a_zero_row_correction_is_not_reported(self):
+        # Al2O3.kfit: BEcorrection/BEcorrections are all 0.0
+        path = _real(REAL_FILES[1])
+        if not path:
+            self.skipTest("KherveFitting sample corpus not present")
+        doc = readers.load_file(path)
+        for r in doc.regions:
+            self.assertNotIn("kf_becorrection", r.extra, r.name)
+            self.assertNotIn("BE calibration (KherveFitting)",
+                             doc.region_metadata(r), r.name)
 
     def test_al2o3_gets_its_real_rsf_cross_referenced(self):
         # Al2O3.kfit: Results Table0 is fully in step with the live fit for
