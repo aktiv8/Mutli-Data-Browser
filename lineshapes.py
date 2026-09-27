@@ -388,7 +388,7 @@ def parse_shape(text) -> dict:
             out.update(m=1401.0 - 14.01 * raw)
     elif kind == "DS":
         out.update(a=ps[0] if ps else 0.0, m=ps[1] if len(ps) > 1 else 0.0)
-    elif kind in ("GL", "SGL"):
+    elif kind in ("GL", "SGL", "VOIGT"):
         out["mix"] = ps[0] if ps else 30.0
     elif kind == "A":
         # A(a,b,n)GL(m) / A(a,b,n)SGL(m): the Gelius asymmetric shape (see
@@ -514,15 +514,52 @@ def _tla_values(x, pos, fwhm, alpha, mu):
     return lor * tail
 
 
+def _voigt_fwhm_split(fwhm, fraction):
+    """``(Gaussian FWHM, Lorentzian FWHM)`` for a total Voigt FWHM and an
+    L/G fraction (per cent Lorentzian of the total width), via the analytic
+    Olivero-Longbothum inverse -- an exact match to KherveFitting's own
+    ``voigt_fwhm_split`` (``Peak_Functions.py``, retrieved 2026-09-27): the
+    forward relation ``F = 0.5346*f_l + sqrt(0.2166*f_l**2 + f_g**2)`` is
+    linear in the overall scale, so splitting a stated total ``fwhm`` by a
+    fraction ``r`` is analytic (``f_g = (1-r)*scale``, ``f_l = r*scale``,
+    ``scale = fwhm/k``)."""
+    r = min(max(fraction / 100.0, 0.0), 0.999)
+    k = 0.5346 * r + math.sqrt(0.2166 * r * r + (1.0 - r) ** 2)
+    scale = fwhm / k if k > 0 else fwhm
+    return (1.0 - r) * scale, r * scale
+
+
+def _voigt_values(x, pos, fwhm, fraction):
+    """A true Voigt (Gaussian convolved with Lorentzian), split from its
+    total FWHM and L/G fraction the same way KherveFitting's own
+    ``voigt_simple`` does. Not a CasaXPS shape string -- ``"VOIGT(fraction)"``
+    is this module's own encoding, used only by the KherveFitting ``.kfit``
+    reader (CasaXPS itself has no true-Voigt shape string; its own
+    Voigt-like shapes are the ``GL``/``SGL`` pseudo-Voigt already above).
+    Computed as a plain Lorentzian of the split Lorentzian FWHM, Gaussian-
+    convolved by the split Gaussian FWHM -- the same convolution
+    KherveFitting evaluates analytically via the Faddeeva function
+    (``lmfit``'s ``voigt``), not an approximation of a different kind."""
+    np = _np()
+    f_g, f_l = _voigt_fwhm_split(fwhm, fraction)
+    f_l = f_l if f_l > 0 else 1e-6
+    t = (x - pos) / f_l
+    lor = 1.0 / (1.0 + 4.0 * t * t)
+    return gauss_conv(x, lor, f_g)
+
+
 def _raw_values(x, sp, pos, fwhm):
-    """The lineshape before any Gaussian broadening (GL/SGL have none): the
-    GL product, the SGL sum, the Gelius asymmetric shape, the TLA shape, or
-    the raw asymmetric Lorentzian (with its LF finite-tail taper) on grid
-    ``x``. Used both for the values a caller asked for and, on a separate
-    wide grid, for area normalisation."""
+    """The lineshape before any Gaussian broadening (GL/SGL/VOIGT have their
+    own convolution already folded in): the GL product, the SGL sum, the
+    true Voigt, the Gelius asymmetric shape, the TLA shape, or the raw
+    asymmetric Lorentzian (with its LF finite-tail taper) on grid ``x``.
+    Used both for the values a caller asked for and, on a separate wide
+    grid, for area normalisation."""
     np = _np()
     if sp["kind"] in ("GL", "SGL"):
         return _gl_sgl_values(x, sp["kind"], sp["mix"], pos, fwhm)
+    if sp["kind"] == "VOIGT":
+        return _voigt_values(x, pos, fwhm, sp["mix"])
     if sp["kind"] == "DS":
         t = 2.0 * (x - pos) / fwhm
         a = sp["a"]
@@ -562,7 +599,7 @@ def component_curve(ke, shape, pos, fwhm, area):
     sp = parse_shape(shape)
     fwhm = fwhm if fwhm and fwhm > 0 else 1.0
     v = _raw_values(ke, sp, pos, fwhm)
-    if sp["kind"] in ("GL", "SGL"):
+    if sp["kind"] in ("GL", "SGL", "VOIGT"):
         conv = v
     else:
         gw = fwhm * GAUSS_K.get(sp["kind"], 0.0) * (

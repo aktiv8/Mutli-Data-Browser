@@ -7,6 +7,7 @@ Run:  python -m unittest discover tests
 """
 
 import csv
+import math
 import os
 import shutil
 import sys
@@ -1120,6 +1121,59 @@ class TestTLAShape(unittest.TestCase):
         ke = np.linspace(-10, 10, 101)
         curve = ls.component_curve(ke, "TLA(0,0,0)", 0.0, 0.0, 100.0)
         self.assertTrue(np.all(np.isfinite(curve)))
+
+
+@unittest.skipUnless(HAVE_NP, "numpy not installed")
+class TestTrueVoigtShape(unittest.TestCase):
+    """The true-Voigt reconstruction (``VOIGT(fraction)``) used by the
+    KherveFitting ``.kfit`` reader for its "Voigt (Area, L/G, sigma)" model
+    -- not a CasaXPS shape string, this module's own encoding. The FWHM
+    split matches KherveFitting's own ``voigt_fwhm_split`` (Olivero-
+    Longbothum inverse) exactly; the convolution itself (Lorentzian +
+    gauss_conv) is the same operation KherveFitting evaluates analytically
+    via the Faddeeva function, so this is checked for self-consistency
+    (symmetry, FWHM, area) rather than against a real fitted file."""
+
+    def test_parse_shape(self):
+        sp = ls.parse_shape("VOIGT(30)")
+        self.assertEqual(sp["kind"], "VOIGT")
+        self.assertAlmostEqual(sp["mix"], 30.0)
+
+    def test_not_exact(self):
+        self.assertFalse(ls.is_exact("VOIGT(30)"))
+
+    def test_fwhm_split_reproduces_the_stated_total_fwhm(self):
+        # the Olivero-Longbothum forward relation, run on the split, must
+        # give back the original total fwhm
+        for fraction in (0.0, 10.0, 30.0, 50.0, 80.0, 100.0):
+            f_g, f_l = ls._voigt_fwhm_split(5.0, fraction)
+            total = 0.5346 * f_l + math.sqrt(0.2166 * f_l ** 2 + f_g ** 2)
+            self.assertAlmostEqual(total, 5.0, places=6, msg=fraction)
+
+    def test_symmetric_and_the_right_width_and_area(self):
+        ke = np.linspace(-30, 30, 6001)
+        area = 1000.0
+        curve = ls.component_curve(ke, "VOIGT(35)", 0.0, 2.0, area)
+        i = int(np.argmax(curve))
+        self.assertAlmostEqual(ke[i], 0.0, delta=0.02)
+        mid = len(curve) // 2
+        np.testing.assert_allclose(curve[:mid], curve[mid + 1:][::-1],
+                                   atol=curve.max() * 1e-6)
+        half = curve.max() / 2.0
+        above = ke[curve >= half]
+        self.assertAlmostEqual(above.max() - above.min(), 2.0, delta=0.05)
+        got = float((0.5 * (curve[1:] + curve[:-1])
+                    * np.diff(ke)).sum())
+        self.assertAlmostEqual(got, area, delta=area * 0.02)
+
+    def test_pure_lorentzian_and_pure_gaussian_extremes(self):
+        ke = np.linspace(-30, 30, 6001)
+        lor = ls.component_curve(ke, "VOIGT(100)", 0.0, 2.0, 1000.0)
+        gau = ls.component_curve(ke, "VOIGT(0)", 0.0, 2.0, 1000.0)
+        # a Gaussian falls off much faster than a Lorentzian of the same
+        # FWHM, so far from the peak the Lorentzian is much taller
+        far = np.argmin(np.abs(ke - 10.0))
+        self.assertGreater(lor[far], gau[far] * 5)
 
 
 if __name__ == "__main__":

@@ -55,6 +55,10 @@ class FitRegion:
     params: tuple = ()               # the six numbers after the averaging
                                      # width (background parameters)
     line: str = ""
+    known_background: tuple | None = None   # a background curve the file
+        # already computed (e.g. KherveFitting's own "Bkg Y"), same order
+        # and units as the spectrum's own counts -- when set, curves() uses
+        # it directly instead of computing one from `background`/`params`
 
 
 @dataclass
@@ -334,8 +338,12 @@ def curves(fit, energies, counts, hv, dwell=None, scans=1):
         if len(sel) < 3:
             continue
         kx, y = ke[sel], cps[sel]
-        bg = lineshapes.background(reg.background, y, reg.avg, x=kx,
-                                   params=reg.params)
+        if reg.known_background is not None:
+            kb = np.asarray(reg.known_background, dtype=float)
+            bg = kb[sel] / (scale or 1.0)
+        else:
+            bg = lineshapes.background(reg.background, y, reg.avg, x=kx,
+                                       params=reg.params)
         comps, total = [], (np.zeros(len(sel)) if bg is None else bg.copy())
         approx = False
         for c in fit.region_components(reg):
