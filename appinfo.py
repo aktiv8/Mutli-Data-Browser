@@ -17,6 +17,7 @@ FONT_CREDIT = "Fonts: IBM Plex Sans, SIL Open Font License 1.1"
 
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".gif")
+TEXT_EXTS = (".txt",)
 
 # (label, import name, distribution name) of the libraries the About box lists
 LIBRARIES = (("matplotlib", "matplotlib", "matplotlib"),
@@ -56,6 +57,27 @@ def cover_images(folder=None):
         return []
     return [(n, os.path.join(folder, n)) for n in names
             if os.path.splitext(n)[1].lower() in IMAGE_EXTS
+            and os.path.isfile(os.path.join(folder, n))]
+
+
+def template_dir():
+    """The folder the user drops methods description templates into (it need
+    not exist): ``assets/method_templates``."""
+    return os.path.join(ASSETS, "method_templates")
+
+
+def method_templates(folder=None):
+    """``[(file name, path)]`` of the ``.txt`` templates in the template
+    folder, by name. Never raises (a missing or unreadable folder is an empty
+    list)."""
+    folder = folder or template_dir()
+    try:
+        names = sorted(os.listdir(folder), key=str.lower)
+    except OSError:
+        return []
+    return [(n, os.path.join(folder, n)) for n in names
+            if os.path.splitext(n)[1].lower() in TEXT_EXTS
+            and os.path.splitext(n)[0].lower() != "readme"
             and os.path.isfile(os.path.join(folder, n))]
 
 

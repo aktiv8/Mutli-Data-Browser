@@ -10,6 +10,7 @@ import os
 import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+import appinfo
 import panelview
 import plotstyle
 import workbook as wbk
@@ -93,6 +94,9 @@ class DetailsDialog(tk.Toplevel):
                   ).pack(side="left", fill="x", expand=True)
         ttk.Button(mrow, text="Regenerate",
                    command=self._regenerate).pack(side="right")
+        self._template_btn = ttk.Menubutton(mrow, text="Use a template…")
+        self._build_template_menu()
+        self._template_btn.pack(side="right", padx=(0, 6))
 
         r += 2
         ttk.Label(body, text="Letterhead logo").grid(
@@ -123,6 +127,30 @@ class DetailsDialog(tk.Toplevel):
         self.generated = self.app.methods_generated()
         self.methods.delete("1.0", "end")
         self.methods.insert("1.0", self.generated)
+
+    def _build_template_menu(self):
+        menu = self._template_menu = tk.Menu(self._template_btn, tearoff=False)
+        self._template_btn["menu"] = menu
+        templates = appinfo.method_templates()
+        if not templates:
+            menu.add_command(
+                label="No templates found in assets/method_templates",
+                state="disabled")
+            return
+        for name, path in templates:
+            label = os.path.splitext(name)[0]
+            menu.add_command(label=label,
+                             command=lambda p=path: self._load_template(p))
+
+    def _load_template(self, path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
+        except OSError as exc:
+            messagebox.showerror("Template", f"Could not read {path}:\n{exc}")
+            return
+        self.methods.delete("1.0", "end")
+        self.methods.insert("1.0", text)
 
     def _show_logo(self):
         self.logo_lbl.config(text=os.path.basename(self.logo)

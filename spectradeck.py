@@ -298,6 +298,15 @@ def _grid_dims(n):
     return rows, cols
 
 
+def _normalize_kinds(kind):
+    """``generate_report``'s ``kind`` as a set of ``{"pdf", "pptx", "docx"}``:
+    a single legacy string ("pdf" / "pptx" / "docx" / "both") or an iterable
+    of those three."""
+    if isinstance(kind, str):
+        return {"pdf", "pptx"} if kind == "both" else {kind}
+    return set(kind)
+
+
 class CalibrationPanel(ttk.LabelFrame):
     """Camera-to-stage calibration for the holder photo. Every change is
     applied to the photo at once (``on_change(calibration)``): flip the axes,
@@ -3498,14 +3507,15 @@ class Workspace:
         """A best-effort step count for the report/deck progress dialog: one
         tick per saved figure (a figure spanning several pages just ticks
         past its share, harmlessly) plus one per camera/SnapMap page;
-        doubled when both a PDF and a deck are being built."""
+        multiplied by how many output formats are being built at once."""
+        kinds = _normalize_kinds(kind)
         n = len(self._report_figures()) if reportspec.is_on(
             spec, "figures") else 0
         if reportspec.is_on(spec, "images") and self._has_image_pages():
             left_out = reportspec.skipped(spec, "images")
             mosaics = reportspec.option(spec, "mosaic") == "on"
             n += len(self._image_page_plan(skip=left_out, mosaics=mosaics))
-        return max(1, n * (2 if kind == "both" else 1))
+        return max(1, n * max(1, len(kinds)))
 
     def _render_figure_pages(self, fig, consume, size=(11.7, 8.3),
                              rect=(0.0, 0.17, 1.0, 0.94), decorate=True,
@@ -4004,9 +4014,13 @@ class Workspace:
 
     def generate_report(self, kind="pdf"):
         """Write the PDF report, the PowerPoint deck, the Word document, or
-        both the PDF and the deck, with what the Report generator says goes
-        in (``kind``: "pdf", "pptx", "docx" or "both")."""
+        any combination of them, with what the Report generator says goes
+        in (``kind``: "pdf", "pptx", "docx", "both" (legacy for pdf+pptx),
+        or an iterable of "pdf"/"pptx"/"docx")."""
         if not self._report_ready():
+            return
+        kinds = _normalize_kinds(kind)
+        if not kinds:
             return
         spec = self._spec_for_output()
         inv = self.report_inventory()
@@ -4017,42 +4031,49 @@ class Workspace:
             return
         stem = re.sub(r"[^\w.\- ]+", "_", self.details.get("title")
                       or "experiment report").strip() or "experiment report"
-        if kind == "pptx":
+        primary = next(k for k in ("pdf", "pptx", "docx") if k in kinds)
+        combo = len(kinds) > 1
+        if primary == "pptx":
             path = filedialog.asksaveasfilename(
-                title="Export PowerPoint", defaultextension=".pptx",
-                initialfile=stem + ".pptx",
+                title=("Save the presentation (other files are saved "
+                       "beside it)" if combo else "Export PowerPoint"),
+                defaultextension=".pptx", initialfile=stem + ".pptx",
                 filetypes=[("PowerPoint presentation", "*.pptx")])
-        elif kind == "docx":
+        elif primary == "docx":
             path = filedialog.asksaveasfilename(
-                title="Export Word document", defaultextension=".docx",
-                initialfile=stem + ".docx",
+                title=("Save the Word document (other files are saved "
+                       "beside it)" if combo else "Export Word document"),
+                defaultextension=".docx", initialfile=stem + ".docx",
                 filetypes=[("Word document", "*.docx")])
         else:
             path = filedialog.asksaveasfilename(
-                title=("Save the report (the deck is saved beside it)"
-                       if kind == "both" else "Save experiment report"),
+                title=("Save the report (other files are saved beside it)"
+                       if combo else "Save experiment report"),
                 defaultextension=".pdf", initialfile=stem + ".pdf",
                 filetypes=[("PDF", "*.pdf")])
         if not path:
             return
+        stem_path = os.path.splitext(path)[0]
+        ext_for = {"pdf": ".pdf", "pptx": ".pptx", "docx": ".docx"}
+        path_for = {k: path if k == primary else stem_path + ext_for[k]
+                    for k in kinds}
         saved, notes = [], []
-        total = self._report_progress_total(spec, kind)
+        total = self._report_progress_total(spec, kinds)
         self._gen_prog = workbook_ui.ProgressDialog(
             self.root, self, "Building the report", total)
         self.root.config(cursor="watch")
         self.root.update_idletasks()
         try:
-            if kind in ("pdf", "both"):
-                n = self._build_report(path, spec, notes)
-                saved.append((path, f"Report ({n} pages)"))
-            if kind in ("pptx", "both"):
-                deck = path if kind == "pptx" else os.path.splitext(path)[0] \
-                    + ".pptx"
-                n = self._build_deck(deck, spec, notes)
-                saved.append((deck, f"Presentation ({n} slides)"))
-            if kind == "docx":
-                n = self._build_docx(path, spec, notes)
-                saved.append((path, f"Word document ({n} sections)"))
+            if "pdf" in kinds:
+                n = self._build_report(path_for["pdf"], spec, notes)
+                saved.append((path_for["pdf"], f"Report ({n} pages)"))
+            if "pptx" in kinds:
+                n = self._build_deck(path_for["pptx"], spec, notes)
+                saved.append((path_for["pptx"], f"Presentation ({n} slides)"))
+            if "docx" in kinds:
+                n = self._build_docx(path_for["docx"], spec, notes)
+                saved.append((path_for["docx"],
+                             f"Word document ({n} sections)"))
         except ReportCancelled:
             if saved:
                 text = "\n".join(f"{what} was already saved to\n{where}"

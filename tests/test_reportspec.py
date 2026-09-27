@@ -35,6 +35,11 @@ try:
     HAVE_PPTX = True
 except ImportError:
     HAVE_PPTX = False
+try:
+    import docx  # noqa: F401
+    HAVE_DOCX = True
+except ImportError:
+    HAVE_DOCX = False
 
 
 class TestSpec(unittest.TestCase):
@@ -497,14 +502,25 @@ class TestInTheApp(unittest.TestCase):
     def test_preview_button_is_disabled_for_a_pptx_only_output(self):
         dlg = self.dialog()
         self.assertEqual(str(dlg.preview_btn["state"]), "normal")
-        dlg.output.set("pptx")
+        dlg.out_pdf.set(False)
+        dlg.out_pptx.set(True)
         dlg._sync_preview_button()
         self.assertEqual(str(dlg.preview_btn["state"]), "disabled")
         self.assertNotEqual(dlg.preview_btn["text"], "Preview PDF")
-        dlg.output.set("both")
+        self.assertEqual(dlg._chosen_kinds(), {"pptx"})
+        dlg.out_pdf.set(True)
         dlg._sync_preview_button()
         self.assertEqual(str(dlg.preview_btn["state"]), "normal")
         self.assertEqual(dlg.preview_btn["text"], "Preview PDF")
+        self.assertEqual(dlg._chosen_kinds(), {"pdf", "pptx"})
+
+    def test_generate_with_nothing_ticked_asks_for_a_format_first(self):
+        dlg = self.dialog()
+        dlg.out_pdf.set(False)
+        ee.filedialog.asksaveasfilename = lambda **k: self.fail("asked to save")
+        dlg.generate()
+        self.assertTrue(self.shown)
+        self.assertIn("Tick at least one format", self.shown[-1][1])
 
     def test_ticking_moving_and_selecting_change_the_apps_choice(self):
         dlg = self.dialog()
@@ -569,12 +585,33 @@ class TestInTheApp(unittest.TestCase):
         self.assertTrue(os.path.isfile(deck))
         self.assertEqual(self.shown, [])                   # no errors
 
-    def test_progress_total_counts_figures_and_doubles_for_both(self):
+    @unittest.skipUnless(HAVE_DOCX, "python-docx not installed")
+    def test_generate_writes_any_combination_of_formats(self):
+        ws = self.ws
+        out = os.path.join(self.dir, "combo")
+        os.makedirs(out, exist_ok=True)
+        pdf = os.path.join(out, "c.pdf")
+        ee.filedialog.asksaveasfilename = lambda **k: pdf
+        ws.generate_report({"pdf", "docx"})
+        self.assertTrue(os.path.isfile(pdf))
+        self.assertTrue(os.path.isfile(os.path.join(out, "c.docx")))
+        self.assertFalse(os.path.isfile(os.path.join(out, "c.pptx")))
+        self.assertEqual(self.shown, [])                   # no errors
+
+    def test_generate_report_ignores_an_empty_kind_set(self):
+        ws = self.ws
+        ee.filedialog.asksaveasfilename = lambda **k: self.fail("asked to save")
+        ws.generate_report(set())
+        self.assertEqual(self.shown, [])
+
+    def test_progress_total_counts_figures_and_multiplies_per_format(self):
         ws = self.ws
         ws.figures = [{"name": "F1", "caption": "", "state": ws.capture_state()}]
         spec = rs.default_spec()
         self.assertEqual(ws._report_progress_total(spec, "pdf"), 1)
         self.assertEqual(ws._report_progress_total(spec, "both"), 2)
+        self.assertEqual(
+            ws._report_progress_total(spec, {"pdf", "pptx", "docx"}), 3)
         ws.figures = []
 
     def test_cancelling_mid_generation_saves_nothing_and_says_so(self):

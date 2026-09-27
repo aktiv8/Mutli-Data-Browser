@@ -1,0 +1,7 @@
+X-ray photoelectron spectroscopy (XPS) measurements were made on a Kratos Axis Ultra (or Supra) spectrometer using a monochromated Al Kα X-ray source (1486.6 eV) and a hemispherical analyser operated in hybrid (or slot) lens mode. Survey and high-resolution core-level spectra were acquired at the pass energies noted above, using the constant analyser energy (CAE) mode.
+
+A low-energy electron charge neutraliser was used throughout the acquisition to compensate for surface charging on the insulating sample.
+
+Binding energies were referenced to the adventitious C 1s hydrocarbon peak at 284.8 eV unless otherwise stated.
+
+Where depth profiling was carried out, Ar+ ion beam sputtering was used at the beam energy, current and raster area given above, with spectra recorded at each etch level.
