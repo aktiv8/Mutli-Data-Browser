@@ -1,0 +1,2485 @@
+{
+ "comment": "Literature-derived chemical-state binding energies, curated from KherveFitting's Peaks Library JSON files (github.com/KherveFitting/KherveFitting) -- each row's own 'source' cites the underlying paper when its containing folder names one (mostly the Biesinger group's Applied Surface Science handbook papers), else credits the Peaks Library file itself. 'be' is the position from the file's own worked example fit, not a guaranteed universal constant -- treat as a starting point for identification, not ground truth. Edit or extend this file freely.",
+ "states": [
+  {
+   "core_level": "Br 3d",
+   "state": "Br3d5/2 Br-Lat",
+   "be": 68.05,
+   "fwhm": 0.98,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Br3d_Iperov_1doublet_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Br 3d",
+   "state": "Br3d5/2 Br-Lat",
+   "be": 68.14,
+   "fwhm": 0.94,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Br3d_Cs4d_Iperov_1doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Br 3d",
+   "state": "Br3d3/2 Br-Lat",
+   "be": 69.09,
+   "fwhm": 0.98,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Br3d_Iperov_1doublet_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Br 3d",
+   "state": "Br3d3/2 Br-Lat",
+   "be": 69.18,
+   "fwhm": 0.95,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Br3d_Cs4d_Iperov_1doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Br 3d",
+   "state": "Cs4d5/2 Cs-Lat",
+   "be": 75.35,
+   "fwhm": 0.96,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Br3d_Cs4d_Iperov_1doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Br 3d",
+   "state": "Cs4d3/2 Cs-Lat",
+   "be": 77.62,
+   "fwhm": 0.96,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Br3d_Cs4d_Iperov_1doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C=C",
+   "be": 284.5,
+   "fwhm": 0.95,
+   "model": "LA (Area, σ/γ, γ)",
+   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C-C",
+   "be": 284.78,
+   "fwhm": 1.12,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C-C",
+   "be": 284.8,
+   "fwhm": 1.13,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C-C",
+   "be": 285.75,
+   "fwhm": 1.47,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_3peaks_Voigt_GK_2412"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C-O",
+   "be": 285.88,
+   "fwhm": 1.12,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C-O",
+   "be": 286.09,
+   "fwhm": 1.13,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C-O",
+   "be": 286.3,
+   "fwhm": 1.9,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C=O",
+   "be": 286.77,
+   "fwhm": 1.12,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C-O",
+   "be": 287.05,
+   "fwhm": 1.47,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_3peaks_Voigt_GK_2412"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C=O",
+   "be": 287.7,
+   "fwhm": 1.9,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C=O",
+   "be": 287.95,
+   "fwhm": 1.13,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s O-C=O",
+   "be": 288.37,
+   "fwhm": 1.23,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s O-C=O",
+   "be": 288.74,
+   "fwhm": 1.13,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s O-C=O",
+   "be": 289.5,
+   "fwhm": 1.9,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s C=O",
+   "be": 289.65,
+   "fwhm": 1.47,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: C1s_C-C_3peaks_Voigt_GK_2412"
+  },
+  {
+   "core_level": "C 1s",
+   "state": "C1s $\\pi$-$\\pi$*",
+   "be": 290.98,
+   "fwhm": 2.97,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 v",
+   "be": 880.92,
+   "fwhm": 2.0,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 v0",
+   "be": 881.13,
+   "fwhm": 3.1,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 V0",
+   "be": 881.79,
+   "fwhm": 3.25,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_GL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 V0",
+   "be": 881.81,
+   "fwhm": 3.23,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 v",
+   "be": 882.45,
+   "fwhm": 1.85,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 v'",
+   "be": 885.05,
+   "fwhm": 3.38,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 V'",
+   "be": 885.63,
+   "fwhm": 3.67,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_GL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 v''",
+   "be": 887.71,
+   "fwhm": 3.45,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 v''",
+   "be": 888.93,
+   "fwhm": 3.45,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 v'''",
+   "be": 896.88,
+   "fwhm": 1.93,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d5/2 v'''",
+   "be": 898.47,
+   "fwhm": 1.81,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_u0",
+   "be": 899.26,
+   "fwhm": 3.5,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_u",
+   "be": 899.42,
+   "fwhm": 2.0,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_U0",
+   "be": 900.15,
+   "fwhm": 3.54,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_U0",
+   "be": 900.22,
+   "fwhm": 3.55,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_GL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_u",
+   "be": 900.91,
+   "fwhm": 1.85,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_u'",
+   "be": 903.51,
+   "fwhm": 3.58,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_U'",
+   "be": 904.12,
+   "fwhm": 3.75,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_GL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_u''",
+   "be": 906.21,
+   "fwhm": 3.28,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_u''",
+   "be": 907.43,
+   "fwhm": 3.29,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d7 loss",
+   "be": 910.61,
+   "fwhm": 5.0,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d7 loss",
+   "be": 912.13,
+   "fwhm": 3.7,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_u'''",
+   "be": 915.32,
+   "fwhm": 1.93,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Ce 3d",
+   "state": "Ce3d3/2_u'''",
+   "be": 916.81,
+   "fwhm": 1.81,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Metal peak 1",
+   "be": 778.08,
+   "fwhm": 0.75,
+   "model": "LA (Area, σ, γ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Co3O4 peak 1",
+   "be": 779.6,
+   "fwhm": 1.39,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 CoO peak 1",
+   "be": 779.93,
+   "fwhm": 2.24,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 CoOOH peak 1",
+   "be": 780.23,
+   "fwhm": 1.48,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Co(OH)2 peak 1",
+   "be": 780.29,
+   "fwhm": 2.04,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Co3O4 peak 2",
+   "be": 780.87,
+   "fwhm": 1.62,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Metal peak 2",
+   "be": 781.08,
+   "fwhm": 3.0,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 CoOOH peak 2",
+   "be": 781.55,
+   "fwhm": 1.48,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 CoO peak 2",
+   "be": 782.03,
+   "fwhm": 2.66,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Co(OH)2 peak 2",
+   "be": 782.09,
+   "fwhm": 2.55,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Co3O4 peak 3",
+   "be": 782.17,
+   "fwhm": 2.18,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Metal peak 3",
+   "be": 783.08,
+   "fwhm": 3.0,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 CoOOH peak 3",
+   "be": 783.23,
+   "fwhm": 1.48,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Co3O4 peak 4",
+   "be": 785.17,
+   "fwhm": 4.44,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 CoO peak 3",
+   "be": 785.43,
+   "fwhm": 2.29,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Co(OH)2 peak 3",
+   "be": 785.89,
+   "fwhm": 4.47,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 CoO peak 4",
+   "be": 786.43,
+   "fwhm": 4.98,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Co3O4 peak 5",
+   "be": 789.47,
+   "fwhm": 3.29,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 CoOOH peak 4",
+   "be": 790.23,
+   "fwhm": 3.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Co 2p",
+   "state": "Co2p3/2 Co(OH)2 peak 4",
+   "be": 790.29,
+   "fwhm": 2.33,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 Cr(0) p1",
+   "be": 573.72,
+   "fwhm": 1.1,
+   "model": "LA (Area, σ, γ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 Metal peak 1",
+   "be": 574.2,
+   "fwhm": 0.9,
+   "model": "LA (Area, σ, γ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 NiCr2O4 peak 1",
+   "be": 575.01,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p1",
+   "be": 575.36,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p1",
+   "be": 575.52,
+   "fwhm": 0.94,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 FeCr2O4 peak 1",
+   "be": 575.59,
+   "fwhm": 1.2,
+   "model": null,
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 NiCr2O4 peak 2",
+   "be": 576.03,
+   "fwhm": 1.09,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p2",
+   "be": 576.37,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p2",
+   "be": 576.53,
+   "fwhm": 0.94,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 FeCr2O4 peak 2",
+   "be": 576.6798,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOH p1",
+   "be": 576.68,
+   "fwhm": 2.68,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 NiCr2O4 peak 3",
+   "be": 576.84,
+   "fwhm": 1.09,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p3",
+   "be": 577.18,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p3",
+   "be": 577.31,
+   "fwhm": 0.94,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 FeCr2O4 peak 3",
+   "be": 577.5598,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 NiCr2O4 peak 4",
+   "be": 577.89,
+   "fwhm": 1.09,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p4",
+   "be": 578.11,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p4",
+   "be": 578.31,
+   "fwhm": 0.94,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p5",
+   "be": 578.56,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 FeCr2O4 peak 4",
+   "be": 578.5898,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 CrIIIOx p5",
+   "be": 578.72,
+   "fwhm": 0.94,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cr 2p",
+   "state": "Cr2p3/2 NiCr2O4 peak 5",
+   "be": 579.02,
+   "fwhm": 1.09,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cs 3d",
+   "state": "Cs3d5/2 Cs-Lat",
+   "be": 724.23,
+   "fwhm": 1.37,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cs 3d",
+   "state": "Cs3d3/2 Cs-Lat",
+   "be": 738.17,
+   "fwhm": 1.37,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Cu 2p",
+   "state": "Cu2p3/2 peak 1",
+   "be": 933.11,
+   "fwhm": 2.07,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Cu 2p",
+   "state": "Cu2p3/2 peak 2",
+   "be": 934.48,
+   "fwhm": 3.05,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Cu 2p",
+   "state": "Cu2p3/2 peak 1",
+   "be": 934.67,
+   "fwhm": 2.85,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Cu 2p",
+   "state": "Cu2p3/2 peak 2",
+   "be": 939.3,
+   "fwhm": 2.8,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Cu 2p",
+   "state": "Cu2p3/2 peak 3",
+   "be": 940.52,
+   "fwhm": 1.03,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Cu 2p",
+   "state": "Cu2p3/2 peak 4",
+   "be": 941.66,
+   "fwhm": 3.55,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Cu 2p",
+   "state": "Cu2p3/2 peak 3",
+   "be": 942.2,
+   "fwhm": 3.66,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Cu 2p",
+   "state": "Cu2p3/2 peak 5",
+   "be": 943.71,
+   "fwhm": 1.17,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Cu 2p",
+   "state": "Cu2p3/2 peak 4",
+   "be": 944.12,
+   "fwhm": 1.76,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 peak 1",
+   "be": 706.6,
+   "fwhm": 0.88,
+   "model": "LA (Area, σ, γ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeO peak 1",
+   "be": 708.42,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe3O4 2+ peak 1",
+   "be": 708.48,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFe2O3 peak 1",
+   "be": 708.78,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 1",
+   "be": 709.2,
+   "fwhm": 1.1,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe3O4 2+ peak 2",
+   "be": 709.28,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeCO3 peak 1",
+   "be": 709.3,
+   "fwhm": 1.5,
+   "model": null,
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 1",
+   "be": 709.71,
+   "fwhm": 1.1,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeO peak 2",
+   "be": 709.72,
+   "fwhm": 1.6,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFe2O3 peak 2",
+   "be": 709.78,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFe2O3 peak 1",
+   "be": 709.83,
+   "fwhm": 1.0,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFeOOH peak 1",
+   "be": 710.12,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 2",
+   "be": 710.2,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeOOH peak 1",
+   "be": 710.24,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe3O4 3+ peak 1",
+   "be": 710.28,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFeOOH peak 1",
+   "be": 710.36,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeCO3 peak 2",
+   "be": 710.6029,
+   "fwhm": 1.5,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 2",
+   "be": 710.71,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFe2O3 peak 2",
+   "be": 710.73,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFe2O3 peak 3",
+   "be": 710.78,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeO peak 3",
+   "be": 710.92,
+   "fwhm": 1.6,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 3",
+   "be": 711.0,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFeOOH peak 2",
+   "be": 711.12,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeOOH peak 2",
+   "be": 711.24,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe3O4 3+ peak 2",
+   "be": 711.28,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFeOOH peak 2",
+   "be": 711.36,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFe2O3 peak 3",
+   "be": 711.43,
+   "fwhm": 1.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeCO3 peak 3",
+   "be": 711.5029,
+   "fwhm": 3.6,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 3",
+   "be": 711.51,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFe2O3 peak 4",
+   "be": 711.98,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFeOOH peak 3",
+   "be": 712.02,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 4",
+   "be": 712.1,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeO peak 4",
+   "be": 712.12,
+   "fwhm": 2.9,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeOOH peak 3",
+   "be": 712.14,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFe2O3 peak 4",
+   "be": 712.33,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFeOOH peak 3",
+   "be": 712.36,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe3O4 3+ peak 3",
+   "be": 712.38,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 4",
+   "be": 712.61,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFe2O3 peak 5",
+   "be": 713.08,
+   "fwhm": 1.7,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 5",
+   "be": 713.1,
+   "fwhm": 2.0,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFeOOH peak 4",
+   "be": 713.12,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeOOH peak 4",
+   "be": 713.24,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFe2O3 peak 5",
+   "be": 713.33,
+   "fwhm": 2.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFeOOH peak 4",
+   "be": 713.36,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe3O4 3+ peak 4",
+   "be": 713.48,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 5",
+   "be": 713.61,
+   "fwhm": 2.0,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFeOOH peak 5",
+   "be": 714.32,
+   "fwhm": 1.7,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeOOH peak 5",
+   "be": 714.34,
+   "fwhm": 1.8,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFeOOH peak 5",
+   "be": 714.46,
+   "fwhm": 1.8,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe3O4 3+ peak 5",
+   "be": 714.58,
+   "fwhm": 3.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeCO3 peak 4",
+   "be": 715.1029,
+   "fwhm": 3.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeO peak 5",
+   "be": 715.42,
+   "fwhm": 2.5,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFe2O3 peak 6",
+   "be": 718.28,
+   "fwhm": 2.2,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 6",
+   "be": 718.7,
+   "fwhm": 2.6,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeCO3 peak 5",
+   "be": 718.9029,
+   "fwhm": 1.5,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 Fe2O3 peak 6",
+   "be": 719.21,
+   "fwhm": 2.6,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFe2O3 peak 6",
+   "be": 719.33,
+   "fwhm": 2.9,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 gFeOOH peak 6",
+   "be": 719.56,
+   "fwhm": 2.8,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 FeOOH peak 6",
+   "be": 719.64,
+   "fwhm": 2.9,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Fe 2p",
+   "state": "Fe2p3/2 aFeOOH peak 6",
+   "be": 719.72,
+   "fwhm": 3.0,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "I 3d",
+   "state": "I3d5/2 I-Lat",
+   "be": 618.65,
+   "fwhm": 1.12,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: I3d_Iperov_1doublet_Voigt_GK_2412"
+  },
+  {
+   "core_level": "I 3d",
+   "state": "I3d3/2 I-Lat",
+   "be": 630.15,
+   "fwhm": 1.11,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: I3d_Iperov_1doublet_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f7/2 Ir(0)",
+   "be": 61.25,
+   "fwhm": 1.6,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f7/2 Ir(IV)O2",
+   "be": 61.71,
+   "fwhm": 1.92,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_LA_2511"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f7/2 Ir(IV)O2",
+   "be": 62.22,
+   "fwhm": 1.6,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f7/2 Sat",
+   "be": 63.81,
+   "fwhm": 1.92,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_LA_2511"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f7/2 Sat",
+   "be": 64.12,
+   "fwhm": 1.6,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f5/2_Ir(0)",
+   "be": 64.25,
+   "fwhm": 1.6,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f5/2_p2",
+   "be": 64.75,
+   "fwhm": 1.92,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_LA_2511"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f5/2_Ir(IV)O2",
+   "be": 65.29,
+   "fwhm": 1.6,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f5/2_p4",
+   "be": 67.01,
+   "fwhm": 1.92,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_LA_2511"
+  },
+  {
+   "core_level": "Ir 4f",
+   "state": "Ir4f5/2_Sat",
+   "be": 67.32,
+   "fwhm": 1.6,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511"
+  },
+  {
+   "core_level": "La 3d",
+   "state": "La3d5/2 Main",
+   "be": 834.54,
+   "fwhm": 1.53,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: La3d_La2O3_GK_2508"
+  },
+  {
+   "core_level": "La 3d",
+   "state": "La3d5/2 Sat 2",
+   "be": 835.98,
+   "fwhm": 3.47,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: La3d_La2O3_GK_2508"
+  },
+  {
+   "core_level": "La 3d",
+   "state": "La3d5/2 Sat 1",
+   "be": 839.16,
+   "fwhm": 2.3,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: La3d_La2O3_GK_2508"
+  },
+  {
+   "core_level": "La 3d",
+   "state": "La3d Loss?",
+   "be": 848.18,
+   "fwhm": 4.76,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: La3d_La2O3_GK_2508"
+  },
+  {
+   "core_level": "La 3d",
+   "state": "La3d3/2_p2",
+   "be": 851.36,
+   "fwhm": 1.53,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: La3d_La2O3_GK_2508"
+  },
+  {
+   "core_level": "La 3d",
+   "state": "La3d3/2_p7",
+   "be": 852.59,
+   "fwhm": 3.47,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: La3d_La2O3_GK_2508"
+  },
+  {
+   "core_level": "La 3d",
+   "state": "La3d3/2_p4",
+   "be": 855.95,
+   "fwhm": 2.3,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: La3d_La2O3_GK_2508"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 peak 1",
+   "be": 638.6,
+   "fwhm": 0.79,
+   "model": "LA (Area, σ, γ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 peak 2",
+   "be": 639.6,
+   "fwhm": 0.79,
+   "model": "LA (Area, σ, γ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 peak 1",
+   "be": 641.0,
+   "fwhm": 1.35,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO peak 1",
+   "be": 641.36,
+   "fwhm": 1.23,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 Mn2O3 peak 1",
+   "be": 641.43,
+   "fwhm": 1.75,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 peak 2",
+   "be": 641.7,
+   "fwhm": 1.35,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO2 peak 1",
+   "be": 641.97,
+   "fwhm": 0.91,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO peak 2",
+   "be": 642.33,
+   "fwhm": 1.23,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 peak 3",
+   "be": 642.5,
+   "fwhm": 1.35,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 Mn2O3 peak 2",
+   "be": 642.53,
+   "fwhm": 1.75,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO2 peak 2",
+   "be": 642.83,
+   "fwhm": 0.91,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO peak 3",
+   "be": 643.26,
+   "fwhm": 1.23,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 peak 4",
+   "be": 643.5,
+   "fwhm": 1.35,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO2 peak 3",
+   "be": 643.53,
+   "fwhm": 0.91,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 Mn2O3 peak 3",
+   "be": 643.8,
+   "fwhm": 1.75,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO peak 4",
+   "be": 644.21,
+   "fwhm": 1.23,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO2 peak 4",
+   "be": 644.28,
+   "fwhm": 0.91,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 peak 5",
+   "be": 644.9,
+   "fwhm": 1.35,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO2 peak 5",
+   "be": 645.13,
+   "fwhm": 0.91,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 Mn2O3 peak 4",
+   "be": 645.3,
+   "fwhm": 1.75,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO peak 5",
+   "be": 645.35,
+   "fwhm": 1.23,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO2 peak 6",
+   "be": 646.13,
+   "fwhm": 0.91,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 Mn2O3 peak 5",
+   "be": 646.92,
+   "fwhm": 1.75,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Mn 2p",
+   "state": "Mn2p3/2 MnO peak 6",
+   "be": 647.1,
+   "fwhm": 3.5,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "N 1s",
+   "state": "N1s TiN or NbN",
+   "be": 396.96,
+   "fwhm": 0.97,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: N1s_NbN_4peaks_Voigt_GK_2501"
+  },
+  {
+   "core_level": "N 1s",
+   "state": "N1s NbN or TiN",
+   "be": 397.7,
+   "fwhm": 0.97,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: N1s_NbN_4peaks_Voigt_GK_2501"
+  },
+  {
+   "core_level": "N 1s",
+   "state": "N1s O-Nitride",
+   "be": 398.76,
+   "fwhm": 1.7,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: N1s_NbN_4peaks_Voigt_GK_2501"
+  },
+  {
+   "core_level": "N 1s",
+   "state": "N1s N-C",
+   "be": 400.63,
+   "fwhm": 1.69,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: N1s_NbN_4peaks_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d5/2 NbN",
+   "be": 204.03,
+   "fwhm": 1.33,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d5/2 NbN",
+   "be": 204.37,
+   "fwhm": 0.96,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d5/2 NbO$_2$",
+   "be": 205.44,
+   "fwhm": 1.71,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d5/2 NbO$_2$",
+   "be": 205.45,
+   "fwhm": 1.55,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d3/2 NbN",
+   "be": 206.81,
+   "fwhm": 1.33,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d3/2 NbN",
+   "be": 207.24,
+   "fwhm": 0.96,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d5/2 Nb$_2$O$_5$",
+   "be": 207.38,
+   "fwhm": 1.6,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d5/2 Nb$_2$O$_5$",
+   "be": 207.39,
+   "fwhm": 2.52,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d3/2 NbO$_2$",
+   "be": 208.08,
+   "fwhm": 1.71,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d3/2 NbO$_2$",
+   "be": 208.24,
+   "fwhm": 1.55,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d3/2 Nb$_2$O$_5$",
+   "be": 210.14,
+   "fwhm": 2.52,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Nb 3d",
+   "state": "Nb3d3/2 Nb$_2$O$_5$",
+   "be": 210.16,
+   "fwhm": 1.6,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 Ni(0) peak 1",
+   "be": 852.49,
+   "fwhm": 1.15,
+   "model": "LA (Area, σ, γ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiO peak 1",
+   "be": 853.59,
+   "fwhm": 1.1,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 1",
+   "be": 853.7576,
+   "fwhm": 1.3,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 1",
+   "be": 854.51,
+   "fwhm": 1.36,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiOOH peak 1",
+   "be": 854.62,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 Ni(OH)2 peak 1",
+   "be": 855.03,
+   "fwhm": 1.16,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiO peak 2",
+   "be": 855.28,
+   "fwhm": 3.22,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiOOH peak 2",
+   "be": 855.32,
+   "fwhm": 6.5,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiOOH peak 3",
+   "be": 855.68,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 2",
+   "be": 855.7576,
+   "fwhm": 1.96,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 Ni(OH)2 peak 2",
+   "be": 855.8,
+   "fwhm": 2.29,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 2",
+   "be": 856.01,
+   "fwhm": 2.98,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 Ni(0) peak 2",
+   "be": 856.09,
+   "fwhm": 2.85,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 3",
+   "be": 856.4576,
+   "fwhm": 3.81,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiOOH peak 4",
+   "be": 856.46,
+   "fwhm": 1.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiOOH peak 5",
+   "be": 857.79,
+   "fwhm": 1.9,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 Ni(OH)2 peak 3",
+   "be": 857.82,
+   "fwhm": 1.59,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 Ni(0) peak 3",
+   "be": 858.47,
+   "fwhm": 2.95,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 Ni(OH)2 peak 4",
+   "be": 860.61,
+   "fwhm": 1.06,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiO peak 3",
+   "be": 860.64,
+   "fwhm": 3.91,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 4",
+   "be": 860.9576,
+   "fwhm": 1.43,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiOOH peak 6",
+   "be": 860.99,
+   "fwhm": 4.0,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 5",
+   "be": 861.2576,
+   "fwhm": 4.41,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 3",
+   "be": 861.41,
+   "fwhm": 4.5,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 Ni(OH)2 peak 5",
+   "be": 861.61,
+   "fwhm": 4.65,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiO peak 4",
+   "be": 863.74,
+   "fwhm": 1.93,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiOOH peak 7",
+   "be": 864.37,
+   "fwhm": 4.4,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 4",
+   "be": 864.71,
+   "fwhm": 3.01,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 6",
+   "be": 865.9576,
+   "fwhm": 2.23,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 NiO peak 5",
+   "be": 866.12,
+   "fwhm": 2.59,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 Ni(OH)2 peak 6",
+   "be": 866.57,
+   "fwhm": 3.01,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "Ni 2p",
+   "state": "Ni2p3/2 peak 5",
+   "be": 867.01,
+   "fwhm": 2.66,
+   "model": "GL (Area)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s O-Lat",
+   "be": 529.73,
+   "fwhm": 0.99,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_O-Lat_C=O_3peaks_Voigt_GK_2412"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s O-Lat",
+   "be": 530.09,
+   "fwhm": 1.37,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_O-Lat_3peaks_Voigt_GK_2412"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s NbOx, TiOx 1",
+   "be": 530.44,
+   "fwhm": 1.31,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_NbN_4peaks_Voigt_GK_2501"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s C=O",
+   "be": 530.85,
+   "fwhm": 1.38,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_O-Lat_C=O_3peaks_Voigt_GK_2412"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s O-Surf",
+   "be": 531.04,
+   "fwhm": 1.37,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_O-Lat_3peaks_Voigt_GK_2412"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s NbOx, TiOx 2",
+   "be": 531.5,
+   "fwhm": 1.31,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_NbN_4peaks_Voigt_GK_2501"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s C-O",
+   "be": 532.28,
+   "fwhm": 1.38,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_O-Lat_C=O_3peaks_Voigt_GK_2412"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s CO,OH",
+   "be": 532.32,
+   "fwhm": 1.92,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_O-Lat_3peaks_Voigt_GK_2412"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s CO",
+   "be": 532.51,
+   "fwhm": 1.31,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_NbN_4peaks_Voigt_GK_2501"
+  },
+  {
+   "core_level": "O 1s",
+   "state": "O1s NaKLL, OH",
+   "be": 533.9,
+   "fwhm": 1.54,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: O1s_NbN_4peaks_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Pb 4f",
+   "state": "Pb4f7/2 Pb-Lat",
+   "be": 137.98,
+   "fwhm": 0.93,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Pb4f_Iperov_1doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Pb 4f",
+   "state": "Pb4f5/2 Pb-Lat",
+   "be": 142.84,
+   "fwhm": 0.94,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Pb4f_Iperov_1doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f7/2 Pt(0)",
+   "be": 71.07,
+   "fwhm": 1.02,
+   "model": "LA (Area, σ/γ, γ)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f7/2 Pt(0)",
+   "be": 71.15,
+   "fwhm": 1.08,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f7/2 PtO",
+   "be": 72.54,
+   "fwhm": 1.25,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f7/2 PtO2",
+   "be": 74.0,
+   "fwhm": 1.25,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f7/2 PtO",
+   "be": 74.22,
+   "fwhm": 1.2,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f5/2_p2",
+   "be": 74.37,
+   "fwhm": 1.02,
+   "model": "LA (Area, σ/γ, γ)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f5/2_Pt(0)",
+   "be": 74.5,
+   "fwhm": 1.08,
+   "model": "LA (Area, σ, γ)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f5/2_p6",
+   "be": 75.84,
+   "fwhm": 1.25,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f7/2 PtO$_2$",
+   "be": 75.94,
+   "fwhm": 1.2,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f7/2 Sat 1",
+   "be": 76.26,
+   "fwhm": 1.25,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f5/2_p4",
+   "be": 77.3,
+   "fwhm": 1.25,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f5/2_PtO",
+   "be": 77.66,
+   "fwhm": 1.2,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f5/2_p8",
+   "be": 78.87,
+   "fwhm": 1.25,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f5/2_PtO$_2$",
+   "be": 79.16,
+   "fwhm": 1.2,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Pt 4f",
+   "state": "Pt4f Sat 2",
+   "be": 79.98,
+   "fwhm": 1.07,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+  },
+  {
+   "core_level": "Sr 3d",
+   "state": "Sr3d5/2 Sr-Lat",
+   "be": 132.49,
+   "fwhm": 0.96,
+   "model": "LA (Area, σ/γ, γ)",
+   "source": "KherveFitting Peaks Library: Sr3d_STO_1doublets_LA_GK_2412"
+  },
+  {
+   "core_level": "Sr 3d",
+   "state": "Sr3d5/2 p1",
+   "be": 132.49,
+   "fwhm": 0.98,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Sr3d_STO_1doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Sr 3d",
+   "state": "Sr3d5/2 Sr-Lat",
+   "be": 133.54,
+   "fwhm": 1.23,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Sr3d_STO_2doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Sr 3d",
+   "state": "Sr3d3/2 p2",
+   "be": 134.24,
+   "fwhm": 0.98,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Sr3d_STO_1doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Sr 3d",
+   "state": "Sr3d3/2 Sr-Lat",
+   "be": 134.25,
+   "fwhm": 0.96,
+   "model": "LA (Area, σ/γ, γ)",
+   "source": "KherveFitting Peaks Library: Sr3d_STO_1doublets_LA_GK_2412"
+  },
+  {
+   "core_level": "Sr 3d",
+   "state": "Sr3d5/2 SrCO$_3$",
+   "be": 134.64,
+   "fwhm": 1.23,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Sr3d_STO_2doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Sr 3d",
+   "state": "Sr3d3/2 Sr-Lat",
+   "be": 135.32,
+   "fwhm": 1.23,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Sr3d_STO_2doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Sr 3d",
+   "state": "Sr3d3/2 SrCO$_3$",
+   "be": 136.15,
+   "fwhm": 1.23,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Sr3d_STO_2doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 peak 1",
+   "be": 453.74,
+   "fwhm": 0.69,
+   "model": "LA (Area, σ, γ)",
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 Ti-N",
+   "be": 455.23,
+   "fwhm": 1.54,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 TiN",
+   "be": 455.28,
+   "fwhm": 1.35,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_TiN_SGL_GK2605"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 Ti$^{3+}$",
+   "be": 456.81,
+   "fwhm": 1.17,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Ti2p_STO_2doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 Ti-N shake-up",
+   "be": 457.02,
+   "fwhm": 3.45,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 Shake Up",
+   "be": 457.46,
+   "fwhm": 4.0,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_TiN_SGL_GK2605"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 p1",
+   "be": 458.0,
+   "fwhm": 1.01,
+   "model": "LA (Area, σ/γ, γ)",
+   "source": "KherveFitting Peaks Library: Ti2p_STO_1doublets_LA_GK_2412"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 TiO2_3+",
+   "be": 458.23,
+   "fwhm": 1.6,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 Ti$^{4+}$",
+   "be": 458.99,
+   "fwhm": 1.43,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Ti2p_STO_2doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 TiO2",
+   "be": 459.11,
+   "fwhm": 1.6,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2 Ti-N",
+   "be": 461.01,
+   "fwhm": 1.72,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2_TiN",
+   "be": 461.03,
+   "fwhm": 1.35,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_TiN_SGL_GK2605"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2 Ti-N shake-up",
+   "be": 462.54,
+   "fwhm": 3.25,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2 Ti$^{3+}$",
+   "be": 462.71,
+   "fwhm": 1.83,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Ti2p_STO_2doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2_ShakeUP",
+   "be": 463.06,
+   "fwhm": 4.0,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_TiN_SGL_GK2605"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2 p2",
+   "be": 463.74,
+   "fwhm": 1.95,
+   "model": "LA (Area, σ/γ, γ)",
+   "source": "KherveFitting Peaks Library: Ti2p_STO_1doublets_LA_GK_2412"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2 TiO2_3+",
+   "be": 464.13,
+   "fwhm": 1.77,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2 Ti$^{4+}$",
+   "be": 464.71,
+   "fwhm": 2.23,
+   "model": "Voigt (Area, L/G, σ)",
+   "source": "KherveFitting Peaks Library: Ti2p_STO_2doublets_Voigt_GK_2412"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2 TiO2",
+   "be": 464.91,
+   "fwhm": 1.77,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 Ti-N plasmon",
+   "be": 467.3,
+   "fwhm": 7.4,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Nb3s peak 1",
+   "be": 467.58,
+   "fwhm": 3.97,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p3/2 plasmon",
+   "be": 468.67,
+   "fwhm": 6.18,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_TiN_SGL_GK2605"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Nb3s peak 2",
+   "be": 470.92,
+   "fwhm": 3.97,
+   "model": "GL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_NbN_xdoublet_Voigt_GK_2501"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p1/2_plasmon",
+   "be": 474.47,
+   "fwhm": 6.18,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_TiN_SGL_GK2605"
+  },
+  {
+   "core_level": "Ti 2p",
+   "state": "Ti2p plasmon bulk",
+   "be": 480.89,
+   "fwhm": 14.81,
+   "model": "SGL (Area)",
+   "source": "KherveFitting Peaks Library: Ti2p_TiN_SGL_GK2605"
+  }
+ ]
+}

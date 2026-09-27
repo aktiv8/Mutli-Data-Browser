@@ -780,20 +780,30 @@ class ImageOptionsDialog(tk.Toplevel):
 
 
 class IdentifyDialog(tk.Toplevel):
-    """Label the peaks of a survey with element lines. Click a peak on the
-    plot to list the candidate lines near it, add the one you want as a
-    marker, or let 'Auto-label' do every peak. Markers are kept with the
-    workbook. Uses ``app.identify_*`` methods and ``app._click_cb``; not
-    modal, so the plot stays usable."""
+    """Label the peaks of a survey with element lines or, where the region's
+    core level has a literature-derived chemical-state reference, a specific
+    compound/oxidation state (see ``chemstates.py``). Click a peak on the
+    plot to list both kinds of candidate near it -- shown as two visually
+    distinct tiers, since a chemical-state match is a stronger claim than a
+    generic element/orbital match -- add the one you want as a marker, or
+    let 'Auto-label' do every peak with the element-line table (chemical
+    states are not offered by auto-label: they are specific enough that a
+    human should confirm each one). Markers are kept with the workbook.
+    Uses ``app.identify_*`` methods and ``app._click_cb``; not modal, so the
+    plot stays usable."""
+
+    STATE_MARK = "⚙ "     # gear glyph: marks a chemical-state candidate
 
     def __init__(self, master, app, regions):
+        import chemstates
         import xpslines
         super().__init__(master)
-        self.app, self.xl = app, xpslines
+        self.app, self.xl, self.cs = app, xpslines, chemstates
         self.lines = app.element_lines()
+        self.states = chemstates.load_states()
         self.regions = regions
+        self.rows = []                          # [(kind, delta, entry)]
         self.clicked = None                    # measured BE of the last click
-        self.cands = []
         self.title("Identify peaks")
         self.transient(master)
         body = ttk.Frame(self, padding=12)
@@ -828,30 +838,34 @@ class IdentifyDialog(tk.Toplevel):
                                     activestyle="none")
         self.cand_list.grid(row=3, column=0, sticky="ew")
         self.cand_list.bind("<Double-Button-1>", lambda e: self._add())
+        self.cand_list.bind("<<ListboxSelect>>", self._on_select)
+        self.source_label = ttk.Label(body, style="Muted.TLabel",
+                                      wraplength=470, justify="left")
+        self.source_label.grid(row=4, column=0, sticky="w", pady=(2, 0))
         row = ttk.Frame(body)
-        row.grid(row=4, column=0, sticky="w", pady=(4, 8))
+        row.grid(row=5, column=0, sticky="w", pady=(4, 8))
         ttk.Button(row, text="Add marker", command=self._add).pack(
             side="left")
         ttk.Button(row, text="Auto-label all peaks",
                    command=self._auto).pack(side="left", padx=(6, 0))
         ttk.Label(body, text="Markers on this spectrum").grid(
-            row=5, column=0, sticky="w")
+            row=6, column=0, sticky="w")
         self.mark_list = tk.Listbox(body, height=6, exportselection=False,
                                     activestyle="none")
-        self.mark_list.grid(row=6, column=0, sticky="ew")
+        self.mark_list.grid(row=7, column=0, sticky="ew")
         row2 = ttk.Frame(body)
-        row2.grid(row=7, column=0, sticky="w", pady=(4, 0))
+        row2.grid(row=8, column=0, sticky="w", pady=(4, 0))
         ttk.Button(row2, text="Remove selected",
                    command=self._remove).pack(side="left")
         ttk.Button(row2, text="Clear all", command=self._clear).pack(
             side="left", padx=(6, 0))
         ttk.Button(body, text="Close", command=self.destroy).grid(
-            row=8, column=0, sticky="e", pady=(10, 0))
+            row=9, column=0, sticky="e", pady=(10, 0))
         self.protocol("WM_DELETE_WINDOW", self.destroy)
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<Destroy>", lambda e: self._detach()
                   if e.widget is self else None)
-        _finish(self, app, 520, 640)
+        _finish(self, app, 520, 660)
         for lb in (self.cand_list, self.mark_list):
             lb.configure(bg=app.palette["entry"], fg=app.palette["fg"],
                          selectbackground=app.palette["select_bg"],
@@ -875,26 +889,48 @@ class IdentifyDialog(tk.Toplevel):
 
     def _on_click(self, be, event=None):
         self.clicked = be
-        hv = self._region().photon_energy
-        self.cands = self.xl.candidates(be, self._win(), self.lines, hv)
+        reg = self._region()
+        hv = reg.photon_energy
+        line_cands = self.xl.candidates(be, self._win(), self.lines, hv)
+        state_cands = self.cs.state_candidates(be, self._win(), self.states,
+                                               core_level=reg.name)
+        self.rows = [("line", d, e) for d, e in line_cands] \
+            + [("state", d, e) for d, e in state_cands]
         self.cand_list.delete(0, "end")
-        for d, e in self.cands:
-            self.cand_list.insert(
-                "end", f"{self.xl.label_of(e):<12} "
-                       f"{self.xl.line_be(e, hv):8.1f} eV   ({d:+.1f})")
-        if self.cands:
+        for kind, d, e in self.rows:
+            if kind == "line":
+                self.cand_list.insert(
+                    "end", f"{self.xl.label_of(e):<12} "
+                           f"{self.xl.line_be(e, hv):8.1f} eV   ({d:+.1f})")
+            else:
+                self.cand_list.insert(
+                    "end", f"{self.STATE_MARK}{self.cs.label_of(e):<24} "
+                           f"{e['be']:7.1f} eV   ({d:+.1f})")
+        if self.rows:
             self.cand_list.selection_set(0)
+        self._on_select()
+        extra = f", {len(state_cands)} chemical state(s) ({self.STATE_MARK}" \
+                "prefixed)" if state_cands else ""
         self.hint.config(text=f"Peak at {be:.2f} eV measured: "
-                              f"{len(self.cands)} candidate line(s) within "
-                              f"±{self._win():g} eV.")
+                              f"{len(line_cands)} candidate line(s){extra} "
+                              f"within ±{self._win():g} eV.")
+
+    def _on_select(self, event=None):
+        sel = self.cand_list.curselection()
+        if not sel or sel[0] >= len(self.rows):
+            self.source_label.config(text="")
+            return
+        kind, _d, e = self.rows[sel[0]]
+        self.source_label.config(
+            text=f"Source: {e['source']}" if kind == "state" else "")
 
     def _add(self):
         sel = self.cand_list.curselection()
-        if self.clicked is None or not sel:
+        if self.clicked is None or not sel or sel[0] >= len(self.rows):
             return
-        d, e = self.cands[sel[0]]
-        self.app.identify_add(self._region(), self.clicked,
-                              self.xl.label_of(e))
+        kind, _d, e = self.rows[sel[0]]
+        label = self.cs.label_of(e) if kind == "state" else self.xl.label_of(e)
+        self.app.identify_add(self._region(), self.clicked, label)
         self._refresh_markers()
 
     def _auto(self):
