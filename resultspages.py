@@ -25,7 +25,9 @@ Rules for what counts, stated on the pages (``Results.method`` / ``notes``):
   optional reference-table fallback (``collect(..., rsf_table=)``, off by
   default -- ``quant.py``'s own "nothing is guessed" stance) can supply one
   when the file records none, and the page marks it as a substitute, never
-  as though it were the file's own recorded value.
+  as though it were the file's own recorded value; when the fallback is off
+  and it would have applied, a note points at the Report generator option
+  instead of leaving "no RSF" looking like a dead end (``_rsf_hint_note``).
 """
 
 from __future__ import annotations
@@ -207,6 +209,7 @@ def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
         _element_note(sample)
         _source_note(sample)
         _rsf_note(sample)
+        _rsf_hint_note(sample)
         if sample.label in approx:
             sample.notes.append(
                 "The background under some of the fits of "
@@ -390,6 +393,24 @@ def _rsf_note(sample):
                 f"{sample.label}; the {lib_label} library's value "
                 f"({x['rsf_value']:g}, {x['rsf_anode']} Kα) is used "
                 "instead.")
+
+
+def _rsf_hint_note(sample):
+    """One note when the RSF reference-table fallback was off (``sample.
+    rsf_table`` falsy) and at least one region was left out purely for lack
+    of a recorded RSF -- points at the option that might resolve it, so "no
+    RSF" in the table doesn't read as a dead end. Never fires when the
+    fallback was on (that region simply has no entry in the library either
+    -- turning it on again would not help, so no further hint is useful)."""
+    if sample.rsf_table:
+        return
+    if any(x.get("why") == "no RSF"
+          for level in sample.levels for x in level.res):
+        sample.notes.append(
+            f"{sample.label} has a region with no recorded sensitivity "
+            "factor, left out of the total. The Report generator's RSF "
+            "fallback option (Scofield or Kratos Axis F1s) may be able to "
+            "supply one.")
 
 
 # -- cells ----------------------------------------------------------------------------

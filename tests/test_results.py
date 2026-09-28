@@ -271,6 +271,41 @@ class TestNumbers(unittest.TestCase):
         self.assertEqual(lv.res[0]["rsf_source"], "component")
         self.assertEqual(s.notes, [])
 
+    def test_rsf_hint_appears_when_the_fallback_is_off_and_a_region_has_none(
+            self):
+        # no rsf_table on the sample (the default), and this row has no
+        # recorded RSF of its own or from a component -- the hint should
+        # point at the option that could resolve it
+        s = rp.Sample("f1/S", "S")
+        lv = level(None, [row("Pt 4f", 0.0, 100.0)])
+        s.levels = [lv]
+        rp._prefer_lines(lv, "S", s.notes)
+        self.assertEqual(lv.res[0]["why"], "no RSF")
+        rp._rsf_hint_note(s)
+        self.assertEqual(len(s.notes), 1)
+        self.assertIn("RSF fallback", s.notes[0])
+
+    def test_rsf_hint_does_not_appear_when_nothing_is_excluded_for_it(self):
+        # every region here has a real RSF, so nothing reads "no RSF" --
+        # the hint would have nothing to point at
+        s = sample("S", [three_element_level(None)])
+        rp._rsf_hint_note(s)
+        self.assertEqual(s.notes, [])
+
+    def test_rsf_hint_does_not_appear_when_the_fallback_is_already_on(self):
+        # the fallback was on (sample.rsf_table is set) but this particular
+        # line still has no matching entry in the table -- turning it on
+        # again would not help, so no further hint is useful
+        table = [{"library": "scofield", "anode": "Al", "line": "Cl 2p",
+                 "rsf": 2.285}]
+        s = rp.Sample("f1/S", "S", rsf_table=table)
+        lv = level(None, [row("Pt 4f", 0.0, 100.0)])
+        s.levels = [lv]
+        rp._prefer_lines(lv, "S", s.notes, rsf_table=table)
+        self.assertEqual(lv.res[0]["why"], "no RSF")
+        rp._rsf_hint_note(s)
+        self.assertEqual(s.notes, [])
+
     def test_the_same_numbers_as_quant(self):
         lv = three_element_level(None)
         direct = quant.normalise([e["row"] for e in lv.entries])

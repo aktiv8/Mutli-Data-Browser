@@ -1815,6 +1815,9 @@
       if (g.entries.some(function (e) { return e.row.source === 'survey'; })) {
         box.appendChild(h('p', { class: 'muted small', text: '† survey-scan quantification, not a dedicated high-resolution scan — typically less precise than the rest of this total.' }));
       }
+      if (!q.rsfLibrary && res.some(function (x) { return x.why === 'no RSF'; })) {
+        box.appendChild(h('p', { class: 'muted small', text: 'A region here has no recorded sensitivity factor and is left out of the total — try the RSF fallback dropdown above.' }));
+      }
     });
   }
   function fmtPct(v) { return v === null || v === undefined ? '' : v.toFixed(2); }
