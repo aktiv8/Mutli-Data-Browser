@@ -358,6 +358,67 @@ class TestBackgrounds(unittest.TestCase):
         self.assertEqual(len(w), 51)
         self.assertFalse(np.allclose(w, plain))
 
+    # -- CasaXPS "St Offset"/"End Offset" (region params[0]/[1]) -----------
+    def test_shirley_st_end_offset_reduces_the_anchors_by_percent(self):
+        y = np.concatenate([np.full(50, 200.0), np.full(50, 100.0)])
+        y[45:55] += 800
+        b0 = ls.shirley(y, avg=1)
+        b = ls.shirley(y, avg=1, st_offset=10.0, end_offset=20.0)
+        # the End side is an exact match always (``cum[-1] == tot`` by
+        # construction of the cumulative sum, so ``nb[-1] == hi`` however hi
+        # was computed); the St side is only approximate, because reducing
+        # ``lo`` below the region's own first data point(s) means the
+        # iteration's ``cum[0]`` is no longer identically zero -- confirmed
+        # negligible (~0.045%) on the real file in
+        # TestStEndOffsetOnRealShirleyRegions, so a loose relative tolerance
+        # here is the honest expectation, not a bug to chase.
+        self.assertAlmostEqual(b[-1], b0[-1] * 0.8, 6)
+        self.assertAlmostEqual(b[0], b0[0] * 0.9, delta=0.5)
+        # zero offset (the default, and every non-PtCl2 region in the real
+        # corpus) must reproduce today's unmodified curve exactly
+        np.testing.assert_allclose(ls.shirley(y, avg=1, st_offset=0.0,
+                                              end_offset=0.0), b0)
+
+    def test_shirley_end_offset_100_zeroes_that_end(self):
+        y = self.peak()
+        b = ls.shirley(y, end_offset=100.0)
+        self.assertAlmostEqual(b[-1], 0.0, 6)
+
+    def test_linear_bg_st_end_offset(self):
+        y = np.array([10.0, 0.0, 0.0, 30.0])
+        b0 = ls.linear_bg(y)
+        b = ls.linear_bg(y, st_offset=50.0, end_offset=10.0)
+        self.assertAlmostEqual(b[0], b0[0] * 0.5, 6)
+        self.assertAlmostEqual(b[-1], b0[-1] * 0.9, 6)
+
+    def test_tougaard_end_offset_scales_base_st_offset_has_no_target(self):
+        x = np.linspace(1000.0, 1010.0, 51)
+        y = self.peak(51)
+        params0 = (0, 0, 300, 400, 1)
+        paramsA = (37.0, 25.0, 300, 400, 1)   # St Offset ignored, End used
+        u2_0 = ls.background("U 2 Tougaard", y, x=x, params=params0)
+        u2_a = ls.background("U 2 Tougaard", y, x=x, params=paramsA)
+        # base is this construction's only anchor: it sits exactly at the
+        # last point (no inelastic tail above the final channel), so the End
+        # Offset shows up there at exactly the stated percentage, and (via
+        # the "y - base" term inside the integral) as a smaller, gradually
+        # tapering perturbation everywhere else
+        self.assertAlmostEqual(u2_a[-1], u2_0[-1] * 0.75, 6)
+        self.assertFalse(np.allclose(u2_a, u2_0))
+        plain_0 = ls.background("Tougaard", y, x=x, params=params0)
+        plain_a = ls.background("Tougaard", y, x=x, params=paramsA)
+        self.assertAlmostEqual(plain_a[-1], plain_0[-1] * 0.75, 6)
+
+    def test_named_backgrounds_use_st_end_offset_by_default(self):
+        # background() must pull params[0]/[1] itself, without the caller
+        # threading them through separately.
+        y = np.concatenate([np.full(50, 200.0), np.full(50, 100.0)])
+        y[45:55] += 800
+        plain = ls.background("Shirley", y)
+        offset = ls.background("Shirley", y, params=(10.0, 20.0))
+        self.assertAlmostEqual(offset[0], plain[0] * 0.9, delta=0.5)
+        self.assertAlmostEqual(offset[-1], plain[-1] * 0.8, 6)
+
 
 # ------------------------------------------------------------------ parsing
 class TestParse(unittest.TestCase):
@@ -1038,8 +1099,15 @@ class TestLAShorthandOvershootIsIntrinsic(unittest.TestCase):
 
     def test_shorthand_overshoot_stays_in_its_known_range(self):
         doc = readers.load_file(_ptcl2_refitted_file())
+        # Pt 4f's own region carries a real CasaXPS "St Offset" of 11.43%
+        # (see TestStEndOffsetOnRealShirleyRegions): now that the background
+        # reconstruction applies it, the background -- and so the envelope
+        # this overshoot is measured against -- sits lower near the peak,
+        # moving the measured overshoot from ~3.7% to ~3.2%. Cl 2p/Pt 4d's
+        # own offsets are small (Cl 2p) or zero (Pt 4d), so their ranges are
+        # unchanged.
         for name, lo, hi in (("Cl 2p", 3.5, 6.0), ("Pt 4d", 3.5, 6.5),
-                              ("Pt 4f", 3.5, 6.0)):
+                              ("Pt 4f", 3.0, 6.0)):
             pct = self._overshoot_of(doc, "PtCl2 LA(m)", name)
             self.assertTrue(lo <= pct <= hi,
                             f"{name}: {pct:.2f}% (expected {lo}-{hi}%)")
@@ -1052,6 +1120,76 @@ class TestLAShorthandOvershootIsIntrinsic(unittest.TestCase):
             self.assertLess(explicit, short - 0.5,
                             f"{name}: explicit {explicit:.2f}% vs "
                             f"shorthand {short:.2f}%")
+
+
+@unittest.skipUnless(HAVE_NP and _ptcl2_refitted_file(),
+                     "PtCl2_refitted.vms (St/End Offset background) not "
+                     "present")
+class TestStEndOffsetOnRealShirleyRegions(unittest.TestCase):
+    """``PtCl2_refitted.vms``'s Shirley-background ``Pt 4f`` and ``Cl 2p``
+    regions carry nonzero CasaXPS "St Offset"/"End Offset" percentages
+    (region line ``params[0]``/``params[1]``) -- the offset the user spotted
+    by eye between our reconstructed background and CasaXPS's own. This pins
+    the file's own numbers (so a re-export or a parsing change cannot
+    silently drop them) and checks the reconstructed background now lands on
+    the CasaXPS-documented ``I_used = I_natural * (1 - offset / 100)``
+    anchor rather than the plain, un-adjusted data mean."""
+
+    KNOWN_PARAMS = {
+        "Pt 4f": (11.427384, 0.0),
+        "Cl 2p": (1.8406656, 0.5863783),
+    }
+
+    def test_params_match_the_real_file(self):
+        doc = readers.load_file(_ptcl2_refitted_file())
+        for name, (st, en) in self.KNOWN_PARAMS.items():
+            r = next(r for r in doc.regions
+                     if r.sample == "PtCl2 LA(m)" and r.name == name)
+            fr = r.fit.regions[0]
+            self.assertEqual(fr.background, "Shirley")
+            self.assertAlmostEqual(fr.params[0], st, 5, name)
+            self.assertAlmostEqual(fr.params[1], en, 5, name)
+
+    def test_reconstructed_background_lands_on_the_offset_anchor(self):
+        doc = readers.load_file(_ptcl2_refitted_file())
+        for name, (st, en) in self.KNOWN_PARAMS.items():
+            r = next(r for r in doc.regions
+                     if r.sample == "PtCl2 LA(m)" and r.name == name)
+            dwell, scans = r.dwell_and_scans()
+            cv = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                                dwell, scans)[0]
+            fr = cv.fit_region
+            # cv.background is in raw-counts scale (casafit.curves works in
+            # counts/s internally, then multiplies back by dwell*scans), so
+            # the natural anchor below must be computed on raw counts too.
+            bg = np.array(cv.background, dtype=float)
+            bg = bg[~np.isnan(bg)]
+            k = max(1, min(fr.avg, len(bg) // 2 or 1))
+
+            counts = np.array(r.counts, dtype=float)
+            be = np.array(r.energy, dtype=float)
+            ke = r.photon_energy - be
+            order = np.argsort(ke)              # ascending KE, same as
+            sel = order[(ke[order] >= fr.start_ke) &     # casafit.curves'
+                        (ke[order] <= fr.end_ke)]         # own selection
+            y = counts[sel]
+
+            natural_lo = float(y[:k].mean())
+            natural_hi = float(y[-k:].mean())
+            expected_lo = natural_lo * (1 - st / 100)
+            expected_hi = natural_hi * (1 - en / 100)
+            # the End anchor is exact (Shirley's cumulative sum reaches its
+            # full total exactly at the last point, by construction); the
+            # St anchor is only approximate once it is offset below the
+            # region's own first data point(s) -- see TestBackgrounds'
+            # own st/end-offset tests for why -- confirmed well under 1%
+            # on this real file, not the ~9% a units mix-up would give.
+            self.assertLess(abs(bg[0] - expected_lo) / expected_lo, 0.01, name)
+            self.assertAlmostEqual(bg[-1], expected_hi, 6, name)
+            if st:
+                self.assertLess(bg[0], natural_lo, name)   # a real reduction
+            if en:
+                self.assertLess(bg[-1], natural_hi, name)
 
 
 DS_DIR = os.environ.get("XPS_DS_DIR", r"D:\Temp\for claude files")

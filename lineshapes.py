@@ -748,17 +748,33 @@ def component_curve(ke, shape, pos, fwhm, area):
     return conv * (area / s if s > 0 else 0.0)
 
 
-def shirley(y, avg=1, iters=100):
+def shirley(y, avg=1, iters=100, st_offset=0.0, end_offset=0.0):
     """Iterative Shirley background of ``y`` on an ascending-KE slice (the
     low-KE end is the high-binding-energy side, which sits higher). ``avg``
-    points are averaged at each end for the end levels."""
+    points are averaged at each end for the end levels, then ``st_offset``/
+    ``end_offset`` (percent, CasaXPS's own "St Offset"/"End Offset" region
+    parameters -- the region line's ``params[0]``/``params[1]``) reduce those
+    two levels by that percentage before the iteration: ``I_used = I_natural *
+    (1 - offset / 100)``, confirmed against CasaXPS's own "Peak Fitting in
+    XPS" whitepaper (Casa Software Ltd, 2006, p.4: "these intensities can be
+    further adjusted using the St Offset and End Offset parameters to reduce
+    the intensities required to calculate the background beneath the peaks...
+    A value of '0' means no offset while '100' means the background at the
+    end point is zero") and, independently, against a real file
+    (``D:\\Temp\\for claude files\\PtCl2_new\\PtCl2_refitted.vms``): its
+    ``Pt 4f`` region's ``St Offset`` of 11.427384% lowers ``residual_rms``
+    against the real raw counts (0.03663 -> 0.03552) when applied, rather
+    than left at the raw data mean as before. ``st_offset`` is the low-KE/
+    high-BE end (``y[:avg]``, CasaXPS's "E1"), ``end_offset`` the high-KE/
+    low-BE end (``y[-avg:]``, "E2")."""
     np = _np()
     y = np.asarray(y, dtype=float)
     n = len(y)
     if n < 3:
         return y.copy()
     k = max(1, min(int(avg), n // 2 or 1))
-    lo, hi = float(y[:k].mean()), float(y[-k:].mean())
+    lo = float(y[:k].mean()) * (1.0 - st_offset / 100.0)
+    hi = float(y[-k:].mean()) * (1.0 - end_offset / 100.0)
     b = np.full(n, lo)
     for _ in range(iters):
         cum = np.cumsum(np.maximum(y - b, 0.0))
@@ -771,16 +787,20 @@ def shirley(y, avg=1, iters=100):
     return b
 
 
-def linear_bg(y, avg=1):
+def linear_bg(y, avg=1, st_offset=0.0, end_offset=0.0):
+    """Linear background between the two averaged end levels, with the same
+    CasaXPS ``St Offset``/``End Offset`` percentage reduction as
+    :func:`shirley` (see its docstring)."""
     np = _np()
     y = np.asarray(y, dtype=float)
     n = len(y)
     k = max(1, min(int(avg), n // 2 or 1))
-    return float(y[:k].mean()) + (float(y[-k:].mean()) - float(y[:k].mean())) \
-        * np.linspace(0.0, 1.0, n)
+    lo = float(y[:k].mean()) * (1.0 - st_offset / 100.0)
+    hi = float(y[-k:].mean()) * (1.0 - end_offset / 100.0)
+    return lo + (hi - lo) * np.linspace(0.0, 1.0, n)
 
 
-def tougaard_u2(x, y, b, c, avg=1):
+def tougaard_u2(x, y, b, c, avg=1, end_offset=0.0):
     """The two-parameter universal Tougaard background of ``y`` on the
     ascending-KE grid ``x``: the level at the high-KE end (mean of ``avg``
     points) plus the inelastic tail of everything above each point,
@@ -788,7 +808,10 @@ def tougaard_u2(x, y, b, c, avg=1):
     ``K(T) = B T / (C + T^2)^2``. CasaXPS stores C with a minus sign (its
     general form is ``B T / ((C - T^2)^2 + D T^2)`` and the two-parameter
     version has D = 0). ``b`` is B (eV^2), ``c`` the positive C (eV^2).
-    Checked on real CasaXPS fits (see ``tests/test_casafit.py``)."""
+    Checked on real CasaXPS fits (see ``tests/test_casafit.py``). ``end_offset``
+    is CasaXPS's "End Offset" percentage (see :func:`shirley`), applied to this
+    function's only anchor, ``base``; there is no "St Offset" parameter here
+    because this construction has no separate start-anchor for one to act on."""
     np = _np()
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -796,7 +819,7 @@ def tougaard_u2(x, y, b, c, avg=1):
     if n < 3:
         return y.copy()
     k = max(1, min(int(avg), n // 2 or 1))
-    base = float(y[-k:].mean())
+    base = float(y[-k:].mean()) * (1.0 - end_offset / 100.0)
     dx = float(np.abs(np.diff(x)).mean())
     yb = y - base
     bg = np.empty(n)
@@ -806,7 +829,7 @@ def tougaard_u2(x, y, b, c, avg=1):
     return base + bg * dx
 
 
-def tougaard_3param(x, y, b, c, d, avg=1):
+def tougaard_3param(x, y, b, c, d, avg=1, end_offset=0.0):
     """The three-parameter universal Tougaard background of ``y`` on the
     ascending-KE grid ``x``: same construction as :func:`tougaard_u2` (the
     level at the high-KE end plus the inelastic tail of everything above each
@@ -823,17 +846,17 @@ def tougaard_3param(x, y, b, c, d, avg=1):
     reconstructing background + the file's own components against its own raw
     data with these values gives residuals in the same few-percent range as
     this module's pre-existing ``LA``-shape reconstruction noise, not a
-    background-shape mismatch. CasaXPS's region line for this cross-section
-    family carries two further numbers ahead of ``B`` (``params[0]``,
-    ``params[1]``) that are **not reconstructed here**: CasaXPS's docs
-    describe both a per-cross-section T0 energy-loss cutoff and, separately,
-    generic per-region St/End Offset percentages, either of which could
-    explain them, and treating ``params[1]`` as a literal T0 cutoff on the
-    real file above collapses the entire C 1s background to flat (19.6 eV
-    exceeds the whole 15 eV fit window) -- evidence against that reading
-    without enough real files to confirm the right one, so, as with
-    :func:`tougaard_u2`'s own unused slots, they are left alone rather than
-    guessed."""
+    background-shape mismatch. The two further numbers CasaXPS's region line
+    carries ahead of ``B`` (``params[0]``, ``params[1]``) are now confirmed,
+    not guessed: CasaXPS's own "Peak Fitting in XPS" whitepaper (Casa
+    Software Ltd, 2006, p.4) names them the generic per-region "St Offset"/
+    "End Offset" percentages every background type carries (see
+    :func:`shirley`), not a per-cross-section ``T0`` energy-loss cutoff --
+    that earlier guess was already ruled out by ``params[1]`` as a literal
+    ``T0`` collapsing this same file's C 1s background to flat (19.6 eV
+    exceeds the whole 15 eV fit window). ``end_offset`` (``params[1]``) is
+    applied to ``base``, this function's only anchor; there is no "St Offset"
+    parameter here for the same reason :func:`tougaard_u2` has none."""
     np = _np()
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -841,7 +864,7 @@ def tougaard_3param(x, y, b, c, d, avg=1):
     if n < 3:
         return y.copy()
     k = max(1, min(int(avg), n // 2 or 1))
-    base = float(y[-k:].mean())
+    base = float(y[-k:].mean()) * (1.0 - end_offset / 100.0)
     dx = float(np.abs(np.diff(x)).mean())
     yb = y - base
     bg = np.empty(n)
@@ -875,7 +898,11 @@ def tougaard_w(x, y, b, c):
     residual; and KherveFitting's own ``y[0]``/``y[-1]`` endpoint indices are
     taken as-is with no confirmation of which physical end (high or low
     binding energy) they are meant to be on *this* module's own
-    ascending-kinetic-energy convention."""
+    ascending-kinetic-energy convention.
+
+    Neither CasaXPS "St Offset"/"End Offset" percentage (see :func:`shirley`)
+    is applied here: unlike :func:`tougaard_u2`/:func:`tougaard_3param`, this
+    construction has no flat baseline term at all for either to act on."""
     np = _np()
     x = np.asarray(x, dtype=float)
     y = np.asarray(y, dtype=float)
@@ -906,8 +933,13 @@ def background(kind, y, avg=1, x=None, params=()):
     either, and its own Spline background is anchor-point/interactive, not a
     closed form of the handful of numbers a CasaXPS region line's ``params``
     can carry, so there is nothing to reconstruct it from). ``x`` (ascending
-    KE) and ``params`` (the region line's six numbers after the averaging
-    width) are needed for every Tougaard variant.
+    KE) is needed for every Tougaard variant; ``params`` (the region line's
+    six numbers after the averaging width) is needed for every type except
+    'None': ``params[0]``/``params[1]`` are CasaXPS's "St Offset"/
+    "End Offset" percentages (see :func:`shirley`), read here and passed to
+    every background function that has an anchor for them to act on, and
+    ``params[2:5]`` are the Tougaard B/C/D as each variant's own docstring
+    describes.
 
     Plain ``'Tougaard'`` (no ``U ...`` prefix) shares :func:`tougaard_3param`
     with the ``U ...`` family: KherveFitting's own ``calculate_
@@ -924,12 +956,15 @@ def background(kind, y, avg=1, x=None, params=()):
     natural one) is unconfirmed, so it is read with the natural sign, the
     more common convention among CasaXPS's Tougaard types."""
     t = str(kind or "").strip().lower()
+    st = params[0] if len(params) > 0 else 0.0
+    en = params[1] if len(params) > 1 else 0.0
     if t.startswith("shirley"):
-        return shirley(y, avg)
+        return shirley(y, avg, st_offset=st, end_offset=en)
     if _TOUGAARD_U2.match(t):
         if x is None or len(params) < 4 or not params[2]:
             return None
-        return tougaard_u2(x, y, params[2], abs(params[3]) or 1643.0, avg)
+        return tougaard_u2(x, y, params[2], abs(params[3]) or 1643.0, avg,
+                           end_offset=en)
     if _TOUGAARD_W.match(t):
         if x is None or len(params) < 4 or not params[2] or not params[3]:
             return None
@@ -937,9 +972,10 @@ def background(kind, y, avg=1, x=None, params=()):
     if _TOUGAARD_3P.match(t):
         if x is None or len(params) < 5 or not params[2] or not params[3]:
             return None
-        return tougaard_3param(x, y, params[2], params[3], params[4], avg)
+        return tougaard_3param(x, y, params[2], params[3], params[4], avg,
+                               end_offset=en)
     if t.startswith("linear"):
-        return linear_bg(y, avg)
+        return linear_bg(y, avg, st_offset=st, end_offset=en)
     if t in ("none", "", "offset"):
         np = _np()
         return np.zeros(len(y))
