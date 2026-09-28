@@ -478,6 +478,66 @@ class Tooltip:
             self._tip = None
 
 
+class FlowFrame(ttk.Frame):
+    """A container that packs its children left-to-right, wrapping to a new
+    row when the current row would overflow the frame's own width. A child
+    is added as one atomic "chunk" (often a small sub-``ttk.Frame`` the
+    caller has already packed a label + control into), so a logical group
+    wraps as a whole rather than splitting mid-group. Geometry is driven by
+    ``place()`` (``pack()`` cannot wrap); the frame reports its own required
+    height back to whatever packs it ``fill="x"`` so it grows and shrinks
+    with the number of wrapped rows."""
+
+    def __init__(self, parent, hgap=10, vgap=4, **kw):
+        super().__init__(parent, **kw)
+        self.hgap, self.vgap = hgap, vgap
+        self._items = []             # [(widget, (padl, padr), (padt, padb))]
+        self._last_width = -1
+        self._pending = False
+        self.pack_propagate(False)   # height is set explicitly, in _reflow
+        self.bind("<Configure>", self._on_configure)
+        self.bind("<Map>", lambda e: self._schedule_reflow())
+
+    def add(self, widget, padx=(0, 12), pady=(0, 0)):
+        """Register ``widget`` as the next chunk to flow."""
+        padx = padx if isinstance(padx, tuple) else (padx, padx)
+        pady = pady if isinstance(pady, tuple) else (pady, pady)
+        self._items.append((widget, padx, pady))
+        self._schedule_reflow()
+        return widget
+
+    def _schedule_reflow(self):
+        if not self._pending:
+            self._pending = True
+            self.after_idle(self._reflow)
+
+    def _on_configure(self, event):
+        if event.width == self._last_width:
+            return                    # a height-only change (our own doing)
+        self._last_width = event.width
+        self._schedule_reflow()
+
+    def _reflow(self):
+        self._pending = False
+        width = self.winfo_width()
+        if width <= 1:                # not mapped/laid out yet
+            self._schedule_reflow()
+            return
+        x = y = row_h = 0
+        for widget, (pl, pr), (pt, pb) in self._items:
+            w = widget.winfo_reqwidth() + pl + pr
+            h = widget.winfo_reqheight() + pt + pb
+            if x > 0 and x + w > width:
+                x, y = 0, y + row_h + self.vgap
+                row_h = 0
+            widget.place(x=x + pl, y=y + pt)
+            x += w + self.hgap
+            row_h = max(row_h, h)
+        total_h = y + row_h
+        if total_h != self.winfo_height():
+            self.configure(height=total_h)
+
+
 class ReportCancelled(Exception):
     """Raised to unwind report/deck generation when the user clicks Cancel
     on its progress dialog (see ``Workspace._report_tick``)."""
@@ -1044,8 +1104,10 @@ class Workspace:
         self.tree.column("pe", width=66, anchor="e", stretch=False)
         self.tree.column("etch", width=56, anchor="e", stretch=False)
         sb = ttk.Scrollbar(holder, orient="vertical", command=self.tree.yview)
-        self.tree.configure(yscrollcommand=sb.set)
+        hsb = ttk.Scrollbar(holder, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=sb.set, xscrollcommand=hsb.set)
         sb.pack(side="right", fill="y")
+        hsb.pack(side="bottom", fill="x")
         self.tree.pack(side="left", expand=True, fill="both")
         self.tree.bind("<Button-1>", self._on_tree_click)
         self.tree.bind("<space>", self._on_tree_space)
@@ -1061,81 +1123,93 @@ class Workspace:
         cfg = self.cfg
         tip = lambda w, t: Tooltip(w, t, lambda: self.palette)      # noqa: E731
         # one view row: how spectra are combined
-        ctl = ttk.Frame(parent)
+        ctl = FlowFrame(parent, hgap=14, vgap=6)
         ctl.pack(side="top", fill="x", padx=10, pady=(8, 2))
-        ttk.Label(ctl, text="Group by").pack(side="left")
+        grp = ttk.Frame(ctl)
+        ttk.Label(grp, text="Group by").pack(side="left")
         self.group_var = tk.StringVar(value=cfg.get("group_by", "Element name"))
-        gb = ttk.Combobox(ctl, textvariable=self.group_var, width=17,
+        gb = ttk.Combobox(grp, textvariable=self.group_var, width=17,
                           state="readonly", values=list(self.GROUP_MODES))
-        gb.pack(side="left", padx=(6, 12))
+        gb.pack(side="left", padx=(6, 0))
         gb.bind("<<ComboboxSelected>>",
                 lambda e: self._schedule_render(reset_page=True))
         tip(gb, "Which spectra share a panel: the same element name, "
                 "overlapping energy ranges, or the same element within one "
                 "sample / file (one depth or time series each).")
+        ctl.add(grp)
 
-        ttk.Label(ctl, text="Normalise").pack(side="left")
+        grp = ttk.Frame(ctl)
+        ttk.Label(grp, text="Normalise").pack(side="left")
         self.norm_var = tk.StringVar(value=cfg.get("norm", "None"))
-        nb = ttk.Combobox(ctl, textvariable=self.norm_var, width=9,
+        nb = ttk.Combobox(grp, textvariable=self.norm_var, width=9,
                           state="readonly", values=self.NORM_MODES)
-        nb.pack(side="left", padx=(6, 12))
+        nb.pack(side="left", padx=(6, 0))
         nb.bind("<<ComboboxSelected>>", lambda e: self._schedule_render())
         tip(nb, "Scale every spectrum: to its maximum, its area, or to match "
                 "at an energy you click on the plot.")
+        ctl.add(grp)
 
-        ttk.Label(ctl, text="Offset").pack(side="left")
+        grp = ttk.Frame(ctl)
+        ttk.Label(grp, text="Offset").pack(side="left")
         self.offset_var = tk.DoubleVar(value=float(cfg.get("offset", 0.6)))
-        self.offset_lbl = ttk.Label(ctl, text="", width=4,
+        self.offset_lbl = ttk.Label(grp, text="", width=4,
                                     style="Muted.TLabel")
-        sc = ttk.Scale(ctl, from_=0.0, to=3.0, variable=self.offset_var,
+        sc = ttk.Scale(grp, from_=0.0, to=3.0, variable=self.offset_var,
                        orient="horizontal", length=72,
                        command=self._on_offset)
         sc.pack(side="left", padx=(6, 2))
-        self.offset_lbl.pack(side="left", padx=(0, 10))
+        self.offset_lbl.pack(side="left")
         tip(sc, "Vertical gap between stacked spectra. 0 overlays them.")
         self.offset_lbl.config(text=f"{self.offset_var.get():.1f}×")
         self.offset_sc = sc
+        ctl.add(grp)
 
         # second view row: how the traces are drawn, and the axes
-        ctl2 = ttk.Frame(parent)
+        ctl2 = FlowFrame(parent, hgap=14, vgap=6)
         ctl2.pack(side="top", fill="x", padx=10, pady=(0, 2))
-        ttk.Label(ctl2, text="View").pack(side="left")
+        grp = ttk.Frame(ctl2)
+        ttk.Label(grp, text="View").pack(side="left")
         view = cfg.get("view_mode", "Stack")
         self.view_var = tk.StringVar(
             value=view if view in self.VIEW_MODES else "Stack")
-        vb = ttk.Combobox(ctl2, textvariable=self.view_var, width=12,
+        vb = ttk.Combobox(grp, textvariable=self.view_var, width=12,
                           state="readonly", values=self.VIEW_MODES)
-        vb.pack(side="left", padx=(6, 12))
+        vb.pack(side="left", padx=(6, 0))
         vb.bind("<<ComboboxSelected>>", lambda e: self._on_view_changed())
         tip(vb, "Stack: offset traces. Waterfall 3D: energy, trace and "
                 "intensity in a rotatable 3-D plot. Heatmap: intensity as "
                 "colour against energy and trace. Fit: one spectrum with "
                 "its CasaXPS fit. Applies to every panel; right-click a "
                 "panel to give it its own view.")
+        ctl2.add(grp)
 
-        ttk.Label(ctl2, text="Energy").pack(side="left")
+        grp = ttk.Frame(ctl2)
+        ttk.Label(grp, text="Energy").pack(side="left")
         scale = cfg.get("energy_scale", "Binding")
         self.scale_var = tk.StringVar(
             value=scale if scale in viewdata.ENERGY_SCALES else "Binding")
-        eb = ttk.Combobox(ctl2, textvariable=self.scale_var, width=8,
+        eb = ttk.Combobox(grp, textvariable=self.scale_var, width=8,
                           state="readonly", values=list(viewdata.ENERGY_SCALES))
-        eb.pack(side="left", padx=(6, 8))
+        eb.pack(side="left", padx=(6, 0))
         eb.bind("<<ComboboxSelected>>", lambda e: self._on_view_changed())
         tip(eb, "Plot against binding energy or kinetic energy "
                 "(KE = photon energy − BE). Needs the photon energy.")
+        ctl2.add(grp)
+
         self.ke_var = tk.BooleanVar(value=bool(cfg.get("ke_top", False)))
         self.ke_cb = ttk.Checkbutton(ctl2, text="KE top axis",
                                      variable=self.ke_var,
                                      command=self._on_view_changed)
-        self.ke_cb.pack(side="left", padx=(0, 12))
         tip(self.ke_cb, "Mirror the binding-energy axis along the top as "
                         "kinetic energy.")
+        ctl2.add(self.ke_cb)
 
-        ttk.Label(ctl2, text="Z axis").pack(side="left")
+        grp = ttk.Frame(ctl2)
+        ttk.Label(grp, text="Z axis").pack(side="left")
         z = cfg.get("z_axis", "Auto")
         self.z_var = tk.StringVar(
             value=z if z in viewdata.Z_MODES else "Auto")
-        self.z_cb = ttk.Combobox(ctl2, textvariable=self.z_var, width=15,
+        self.z_cb = ttk.Combobox(grp, textvariable=self.z_var, width=15,
                                  state="readonly",
                                  values=list(viewdata.Z_MODES))
         self.z_cb.pack(side="left", padx=(6, 0))
@@ -1144,38 +1218,45 @@ class Workspace:
         tip(self.z_cb, "What the third axis of a waterfall / heatmap shows. "
                        "Auto uses etch time, then level, then acquisition "
                        "time, then trace order.")
+        ctl2.add(grp)
         self._sync_view_controls()
 
         # third view row: colours
-        ctl3 = ttk.Frame(parent)
+        ctl3 = FlowFrame(parent, hgap=14, vgap=6)
         ctl3.pack(side="top", fill="x", padx=10, pady=(0, 2))
-        ttk.Label(ctl3, text="Colour").pack(side="left")
+        grp = ttk.Frame(ctl3)
+        ttk.Label(grp, text="Colour").pack(side="left")
         sc_name = cfg.get("colour_scale", "Theme default")
         self.colscale_var = tk.StringVar(
             value=sc_name if sc_name in themes.SCALE_NAMES
             else "Theme default")
-        cb = ttk.Combobox(ctl3, textvariable=self.colscale_var, width=13,
+        cb = ttk.Combobox(grp, textvariable=self.colscale_var, width=13,
                           state="readonly", values=themes.SCALE_NAMES)
-        cb.pack(side="left", padx=(6, 6))
+        cb.pack(side="left", padx=(6, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self._schedule_render())
         tip(cb, "Colour scale for the heatmap and for the traces of a stack "
                 "or waterfall (spread along the series). Theme default keeps "
                 "the colours of the current theme.")
+        ctl3.add(grp)
+
         self.colrev_var = tk.BooleanVar(value=bool(cfg.get("colour_reverse")))
         rev = ttk.Checkbutton(ctl3, text="Reverse", variable=self.colrev_var,
                               command=self._schedule_render)
-        rev.pack(side="left", padx=(0, 12))
         tip(rev, "Flip the colour scale.")
-        ttk.Label(ctl3, text="Axes").pack(side="left")
+        ctl3.add(rev)
+
+        grp = ttk.Frame(ctl3)
+        ttk.Label(grp, text="Axes").pack(side="left")
         self.axis_var = tk.StringVar(value=self.axis_choice)
-        ab = ttk.Combobox(ctl3, textvariable=self.axis_var, width=13,
+        ab = ttk.Combobox(grp, textvariable=self.axis_var, width=13,
                           state="readonly", values=themes.AXIS_CHOICES)
         ab.pack(side="left", padx=(6, 0))
         ab.bind("<<ComboboxSelected>>", lambda e: self._on_axis_changed())
         tip(ab, "Colour of the axis lines, ticks and labels. Black or white "
                 "are ignored where they would be hard to see.")
+        ctl3.add(grp)
+
         self.fit_frame = ttk.Frame(ctl3)
-        self.fit_frame.pack(side="left", padx=(14, 0))
         ttk.Label(self.fit_frame, text="Fit").pack(side="left", padx=(0, 4))
         self.fit_vars = {}
         for key, text, tipt in (
@@ -1203,8 +1284,9 @@ class Workspace:
             "reconstructing them -- useful for validating the "
             "reconstruction. Enabled once a CSV export has matched at "
             "least one open region.")
+        ctl3.add(self.fit_frame)
+
         self.ident_frame = ttk.Frame(ctl3)
-        self.ident_frame.pack(side="left", padx=(14, 0))
         ttk.Label(self.ident_frame, text="Nearby lines").pack(
             side="left", padx=(0, 4))
         self.ident_vars = {}
@@ -1222,59 +1304,71 @@ class Workspace:
             tip(cb, tipt + " Shown in a different colour beside each peak "
                            "already labelled with Identify peaks, to help "
                            "confirm speciation.")
+        ctl3.add(self.ident_frame)
+
         sty = ttk.Button(ctl3, text="Style…", style="Tool.TButton",
                          command=self.edit_plot_style)
-        sty.pack(side="left", padx=(12, 0))
         tip(sty, "Fonts, line widths, ticks, grid, legend, titles, axis "
                  "ranges and image size. Applies to the screen, PDFs, "
                  "slides and saved images.")
+        ctl3.add(sty)
 
         # canvas + toolbar + contextual footer (bottom widgets are packed in
         # _layout_bottom so they can be shown and hidden in order)
         self.fig = self.canvas = self.toolbar = None
         self._trace_bar_on = False
         self._sb_on = False
-        self.footer = ttk.Frame(parent)
-        ttk.Label(self.footer, text="Panels").pack(side="left")
+        self.footer = FlowFrame(parent, hgap=14, vgap=6)
+        grp = ttk.Frame(self.footer)
+        ttk.Label(grp, text="Panels").pack(side="left")
         self.panels_var = tk.StringVar(value=cfg.get("panels_per_page", "Auto"))
-        pb = ttk.Combobox(self.footer, textvariable=self.panels_var, width=5,
+        pb = ttk.Combobox(grp, textvariable=self.panels_var, width=5,
                           state="readonly", values=self.PANEL_CHOICES)
-        pb.pack(side="left", padx=(6, 14))
+        pb.pack(side="left", padx=(6, 0))
         pb.bind("<<ComboboxSelected>>",
                 lambda e: self._schedule_render(reset_page=True))
         tip(pb, "How many panels to show at once. The mouse wheel scrolls "
                 "through the rest.")
-        ttk.Label(self.footer, text="Traces").pack(side="left")
+        self.footer.add(grp)
+
+        grp = ttk.Frame(self.footer)
+        ttk.Label(grp, text="Traces").pack(side="left")
         self.traces_var = tk.StringVar(value=cfg.get("traces_per_panel", "All"))
         self._traces_last = self.traces_var.get()
-        tbx = ttk.Combobox(self.footer, textvariable=self.traces_var, width=5,
+        tbx = ttk.Combobox(grp, textvariable=self.traces_var, width=5,
                            values=self.TRACE_CHOICES)
-        tbx.pack(side="left", padx=(6, 14))
+        tbx.pack(side="left", padx=(6, 0))
         tbx.bind("<<ComboboxSelected>>", lambda e: self._on_traces_changed())
         tbx.bind("<Return>", lambda e: self._on_traces_changed())
         tbx.bind("<FocusOut>", lambda e: self._on_traces_changed())
         tip(tbx, "Show only this many spectra per stack (type your own "
                  "number). Shift + mouse wheel scrolls through the rest.")
+        self.footer.add(grp)
+
         self.reverse = tk.BooleanVar(value=False)
         rv = ttk.Checkbutton(self.footer, text="Reverse stack",
                              variable=self.reverse,
                              command=self._schedule_render)
-        rv.pack(side="left", padx=(0, 14))
         tip(rv, "Stack the spectra in the opposite order.")
-        self.prev_btn = ttk.Button(self.footer, text="◀", width=3,
+        self.footer.add(rv)
+
+        grp = ttk.Frame(self.footer)
+        self.prev_btn = ttk.Button(grp, text="◀", width=3,
                                    style="Tool.TButton",
                                    command=self.prev_page, state="disabled")
         self.prev_btn.pack(side="left")
-        self.next_btn = ttk.Button(self.footer, text="▶", width=3,
+        self.next_btn = ttk.Button(grp, text="▶", width=3,
                                    style="Tool.TButton",
                                    command=self.next_page, state="disabled")
         self.next_btn.pack(side="left", padx=(2, 8))
         tip(self.prev_btn, "Previous panels")
         tip(self.next_btn, "Next panels")
-        self.page_lbl = ttk.Label(self.footer, text="", style="Muted.TLabel")
+        self.page_lbl = ttk.Label(grp, text="", style="Muted.TLabel")
         self.page_lbl.pack(side="left")
+        self.footer.add(grp)
+
         self.hint = ttk.Label(self.footer, style="Hint.TLabel")
-        self.hint.pack(side="right")
+        self.footer.add(self.hint)
 
         if HAVE_MPL:
             self.fig = Figure(figsize=(6, 3.5), dpi=100)
