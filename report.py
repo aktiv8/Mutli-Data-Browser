@@ -398,13 +398,31 @@ def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
                 look=None, results=None):
     """Flowables of consecutive reportlab sections. ``items`` is
     ``[(section id, skipped child ids)]``; ``art`` the cover picture."""
-    from reportlab.platypus import PageBreak
+    from reportlab.platypus import PageBreak, Paragraph
     import exporters
 
     look = look or pdfstyle.look()
+    st = pdfstyle.styles(look)
     story = []
     methods_on = any(sid == "methods" for sid, _s in items)
     methods = (details.get("methods") or "").strip()
+    # the first of the two audit sections earns a small "Appendix" marker,
+    # not gated on length like a divider page: metadata/files are reference
+    # material even when short, and a reader should see that before either.
+    # Inserted where each branch starts its own content (after "metadata"'s
+    # own PageBreak, not before it), with keepWithNext chaining it to the
+    # heading that follows so the two never land on separate pages.
+    audit_start = next((sid for sid, _s in items
+                        if sid in ("metadata", "files")), None)
+    appendix_style = st["label"].clone("appendix", keepWithNext=1)
+
+    def appendix(sid):
+        nonlocal audit_start
+        if sid != audit_start:
+            return []
+        audit_start = None
+        return [Paragraph("Appendix", appendix_style)]
+
     for sid, skip in items:
         if sid == "cover":
             story += title_block(details, logo, art, look)
@@ -420,7 +438,9 @@ def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
             if cal and not (methods_on and cal in methods):
                 story += text_block("Energy calibration", cal, look, sid)
         elif sid == "files":
-            story += files_table(file_rows, sha, look)
+            block = files_table(file_rows, sha, look)
+            if block:
+                story += appendix(sid) + block
         elif sid == "metadata":
             for parser in docs:
                 if reportspec.doc_key(parser) in skip:
@@ -430,6 +450,7 @@ def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
                     continue
                 if story:
                     story.append(PageBreak())
+                story += appendix(sid)
                 name = os.path.basename(parser.path or "experiment")
                 part = exporters._metadata_story(
                     parser, samples, title=f"Acquisition metadata - {name}",

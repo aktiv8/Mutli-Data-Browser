@@ -254,6 +254,28 @@ class TestReport(unittest.TestCase):
         pages = self.build()
         self.assertFalse(any("•" in p and "pages" in p for p in pages))
 
+    # -- the "Appendix" heading, always on (not length-gated like a divider) -
+    def test_an_appendix_heading_marks_the_audit_section(self):
+        pages = self.build()
+        joined = "\n".join(pages)
+        self.assertEqual(joined.count("Appendix"), 1)
+        page = next(p for p in pages if "Appendix" in p)
+        self.assertIn("Acquisition metadata", page)   # metadata comes first
+
+    def test_the_appendix_heading_moves_to_files_when_metadata_is_off(self):
+        spec = rs.with_on(rs.default_spec(), "metadata", False)
+        pages = self.build(spec)
+        joined = "\n".join(pages)
+        self.assertEqual(joined.count("Appendix"), 1)
+        page = next(p for p in pages if "Appendix" in p)
+        self.assertIn("Data files", page)
+
+    def test_no_appendix_heading_without_an_audit_section(self):
+        spec = rs.with_on(rs.with_on(rs.default_spec(), "metadata", False),
+                          "files", False)
+        pages = self.build(spec)
+        self.assertNotIn("Appendix", "\n".join(pages))
+
 
 if __name__ == "__main__":
     unittest.main()
