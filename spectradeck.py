@@ -96,6 +96,7 @@ import workbook as wbk
 import annotations
 import appinfo
 import calibration
+import casacsv
 import casafit
 import casaquant
 import casaquant_ui
@@ -703,6 +704,8 @@ class Workspace:
         tm.add_command(label="SnapMap viewer…", command=self.open_snapmap)
         tm.add_command(label="Import KherveFitting peak model…",
                        command=self.import_kfit_peak_library)
+        tm.add_command(label="Import CasaXPS CSV export…",
+                       command=self.import_casaxps_csv)
         tm.add_command(label="Rename…   (F2)", command=self.rename_selected)
         tm.add_command(label="Notes…", command=self.notes_selected)
         bar.add_cascade(label="Tools", menu=tm)
@@ -983,6 +986,7 @@ class Workspace:
         cfg["colour_reverse"] = bool(self.colrev_var.get())
         for k, v in self.fit_vars.items():
             cfg["fit_" + k] = bool(v.get())
+        cfg["fit_use_csv_curves"] = bool(self.csv_curves_var.get())
         for k, v in self.ident_vars.items():
             cfg["ident_" + k] = bool(v.get())
         cfg["axis_colour"] = self.axis_choice
@@ -1186,6 +1190,19 @@ class Workspace:
             cb.pack(side="left", padx=(0, 6))
             tip(cb, tipt + " Shown on a panel with one spectrum that has a "
                            "fit; LA and LF shapes are reconstructions.")
+        self.csv_curves_var = tk.BooleanVar(
+            value=bool(cfg.get("fit_use_csv_curves", False)))
+        self._csv_curves_cb = ttk.Checkbutton(
+            self.fit_frame, text="Use CasaXPS CSV curves",
+            variable=self.csv_curves_var, command=self._schedule_render,
+            state="disabled")
+        self._csv_curves_cb.pack(side="left", padx=(10, 0))
+        tip(self._csv_curves_cb,
+            "Use literal curves from an imported CasaXPS CSV export "
+            "(Tools ▸ Import CasaXPS CSV export…) instead of "
+            "reconstructing them -- useful for validating the "
+            "reconstruction. Enabled once a CSV export has matched at "
+            "least one open region.")
         self.ident_frame = ttk.Frame(ctl3)
         self.ident_frame.pack(side="left", padx=(14, 0))
         ttk.Label(self.ident_frame, text="Nearby lines").pack(
@@ -2180,6 +2197,59 @@ class Workspace:
             messagebox.showwarning("Import KherveFitting peak model",
                                    "\n\n".join(problems))
 
+    def import_casaxps_csv(self):
+        """Attach literal CasaXPS ASCII-export curves ("Export All to
+        ASCII") onto already-open regions' fits -- see ``casacsv.py``.
+        Unlike ``import_kfit_peak_library`` this never adds a new document
+        to ``self.docs``; it supplements regions already loaded from a
+        ``.vms``/etc. file with CasaXPS's own literal background/component/
+        envelope curves in place of this app's reconstruction, for regions
+        where a clean match is found."""
+        paths = filedialog.askopenfilenames(
+            title="Import CasaXPS CSV export",
+            filetypes=[("CasaXPS ASCII export", "*.csv"),
+                      ("All files", "*.*")])
+        if not paths:
+            return
+        regions = [r for p in self.docs for r in p.regions]
+        texts, any_problem = [], False
+        for path in paths:
+            name = os.path.basename(path)
+            try:
+                csv_import = casacsv.parse(path)
+            except Exception as exc:
+                texts.append(f"{name}: could not be read ({exc})")
+                any_problem = True
+                continue
+            report = casacsv.match_to_regions(csv_import.blocks, regions)
+            casacsv.apply_matches(report)
+            summary = casacsv.summarise(report)
+            if "0 of 0" not in summary and (
+                    report.unmatched_samples
+                    or any(r.csv_curves is None for r in report.results)):
+                any_problem = True
+            texts.append(f"{name}:\n{summary}")
+        self._refresh_csv_curves_availability()
+        self._schedule_render()
+        title = "Import CasaXPS CSV export"
+        body = "\n\n".join(texts)
+        if any_problem:
+            messagebox.showwarning(title, body)
+        else:
+            messagebox.showinfo(title, body)
+
+    def _any_csv_curves(self):
+        return any(fr.csv_curves is not None
+                  for p in self.docs for r in p.regions if r.fit
+                  for fr in r.fit.regions)
+
+    def _refresh_csv_curves_availability(self):
+        have = self._any_csv_curves()
+        if hasattr(self, "_csv_curves_cb"):
+            self._csv_curves_cb.config(state="normal" if have else "disabled")
+        if not have:
+            self.csv_curves_var.set(False)
+
     def _on_tree_double(self, event):
         """Double-click a SnapMap row to open its map."""
         iid = self.tree.identify_row(event.y)
@@ -2932,7 +3002,8 @@ class Workspace:
         r = disp[0]
         try:
             cvs = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
-                                 *r.dwell_and_scans())
+                                 *r.dwell_and_scans(),
+                                 prefer_csv=bool(self.csv_curves_var.get()))
         except ImportError:
             return None
         if not cvs:
@@ -3189,6 +3260,7 @@ class Workspace:
             "colour_scale": self.colscale_var.get(),
             "colour_reverse": bool(self.colrev_var.get()),
             "fit_show": {k: bool(v.get()) for k, v in self.fit_vars.items()},
+            "csv_curves": bool(self.csv_curves_var.get()),
             "ident_show": {k: bool(v.get())
                           for k, v in self.ident_vars.items()},
             "axis_colour": self.axis_choice,
@@ -3234,6 +3306,12 @@ class Workspace:
             for k, v in self.fit_vars.items():
                 if isinstance(fs.get(k), bool):
                     v.set(fs[k])
+        if isinstance(st.get("csv_curves"), bool):
+            self.csv_curves_var.set(st["csv_curves"])
+        self._refresh_csv_curves_availability()   # a reopened workbook never
+            # carries a matched csv_curves (workbook.py doesn't serialise
+            # Region.fit at all), so this falls back to disabled/off rather
+            # than claim a stale "on" state
         ids = st.get("ident_show")
         if isinstance(ids, dict):
             for k, v in self.ident_vars.items():

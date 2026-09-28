@@ -59,6 +59,9 @@ class FitRegion:
         # already computed (e.g. KherveFitting's own "Bkg Y"), same order
         # and units as the spectrum's own counts -- when set, curves() uses
         # it directly instead of computing one from `background`/`params`
+    csv_curves: "CsvCurves | None" = None   # literal curves matched from a
+        # CasaXPS ASCII export (casacsv.py) -- independent of known_background,
+        # only used when curves() is called with prefer_csv=True
 
 
 @dataclass
@@ -295,6 +298,27 @@ class Curves:
     fit_region: object = None       # the FitRegion these curves belong to
 
 
+@dataclass
+class CsvCurves:
+    """Literal curves read from a CasaXPS ASCII export ("Export All to
+    ASCII"), matched onto one FitRegion by ``casacsv.match_to_regions`` /
+    ``casacsv.apply_matches``. ``ke`` is ascending kinetic energy; every curve
+    is counts/s (CPS), matching this module's own internal working scale --
+    ``curves()`` interpolates them onto its own ``kx`` and then applies the
+    usual dwell x scans conversion back to the spectrum's raw-counts display
+    using the ALREADY-OPEN region's own dwell/scans, never anything from the
+    CSV (which, in its "rows" export layout, may not carry dwell/hv at all).
+    ``components`` is ``((FitComponent, values_cps), ...)``, aligned 1:1 with
+    ``fit.region_components(reg)`` at match time; CasaXPS's own per-component
+    export column has the background added in, already subtracted out here so
+    these are peak-only curves like ``lineshapes.component_curve``'s output."""
+    ke: tuple
+    background: tuple | None
+    components: tuple
+    envelope: tuple | None
+    source: str = ""
+
+
 def distinct_regions(regions):
     """The regions to draw: of several overlapping regions that share a name
     (CasaXPS keeps the earlier ones when a wider one is added, and the
@@ -308,14 +332,20 @@ def distinct_regions(regions):
     return [g for g in regions if any(g is k for k in keep)]
 
 
-def curves(fit, energies, counts, hv, dwell=None, scans=1):
+def curves(fit, energies, counts, hv, dwell=None, scans=1, prefer_csv=False):
     """``[Curves]`` for every region of ``fit`` on a spectrum given by
     binding ``energies`` (native order), ``counts``, photon energy ``hv``,
     dwell and number of scans. [] when nothing can be reconstructed.
 
     Everything is worked out in the spectrum's raw kinetic-energy frame: the
     stored region limits and component positions are moved into it with the
-    shifts the ``Calib`` line implies (see the module notes)."""
+    shifts the ``Calib`` line implies (see the module notes).
+
+    ``prefer_csv``: when true, a region whose ``csv_curves`` is set (see
+    :class:`CsvCurves`) and covers every one of its own fitted components
+    draws those literal CasaXPS-exported curves instead of reconstructing
+    them -- any region without a complete match falls straight through to
+    the usual reconstruction below, unaffected."""
     if fit is None or not hv or not energies or not counts:
         return []
     import numpy as np
@@ -338,20 +368,41 @@ def curves(fit, energies, counts, hv, dwell=None, scans=1):
         if len(sel) < 3:
             continue
         kx, y = ke[sel], cps[sel]
-        if reg.known_background is not None:
-            kb = np.asarray(reg.known_background, dtype=float)
-            bg = kb[sel] / (scale or 1.0)
+        region_comps = fit.region_components(reg)
+        csv_map = None
+        if prefer_csv and reg.csv_curves is not None:
+            csv_map = {id(c): v for c, v in reg.csv_curves.components}
+            if not all(id(c) in csv_map for c in region_comps):
+                csv_map = None       # incomplete: fall through, reconstruct
+        if csv_map is not None:
+            cc = reg.csv_curves
+            cc_ke = np.asarray(cc.ke, dtype=float)
+            bg = (np.interp(kx, cc_ke, np.asarray(cc.background, dtype=float))
+                  if cc.background is not None else None)
+            comps, total = [], (np.zeros(len(sel)) if bg is None else bg.copy())
+            for c in region_comps:
+                v = np.interp(kx, cc_ke, np.asarray(csv_map[id(c)], dtype=float))
+                comps.append((c, v))
+                total = total + v
+            if cc.envelope is not None:
+                total = np.interp(kx, cc_ke, np.asarray(cc.envelope, dtype=float))
+            approx = False            # literal CasaXPS output, not a
+                                       # reconstruction
         else:
-            bg = lineshapes.background(reg.background, y, reg.avg, x=kx,
-                                       params=reg.params)
-        comps, total = [], (np.zeros(len(sel)) if bg is None else bg.copy())
-        approx = False
-        for c in fit.region_components(reg):
-            v = lineshapes.component_curve(kx, c.shape, c.pos_ke + cshift,
-                                           c.fwhm, c.area)
-            comps.append((c, v))
-            total = total + v
-            approx = approx or not lineshapes.is_exact(c.shape)
+            if reg.known_background is not None:
+                kb = np.asarray(reg.known_background, dtype=float)
+                bg = kb[sel] / (scale or 1.0)
+            else:
+                bg = lineshapes.background(reg.background, y, reg.avg, x=kx,
+                                           params=reg.params)
+            comps, total = [], (np.zeros(len(sel)) if bg is None else bg.copy())
+            approx = False
+            for c in region_comps:
+                v = lineshapes.component_curve(kx, c.shape, c.pos_ke + cshift,
+                                               c.fwhm, c.area)
+                comps.append((c, v))
+                total = total + v
+                approx = approx or not lineshapes.is_exact(c.shape)
         k = scale or 1.0
 
         def full(vals):
