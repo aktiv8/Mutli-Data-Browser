@@ -253,6 +253,31 @@ class TestDeck(unittest.TestCase):
             self.assertEqual(self._number_action(contents, ri).action,
                              PP_ACTION.NONE)
 
+    def test_each_picture_page_gets_its_own_contents_entry(self):
+        import pptx_export
+        from pptx import Presentation
+        from pptx.enum.action import PP_ACTION
+
+        png = self.png(1, {"name": "x"})[0]
+        pages = [{"title": "Camera pictures", "png": png, "notes": ""},
+                 {"title": "SnapMap – S1", "png": png, "notes": ""}]
+        path = os.path.join(self.dir, "img.pptx")
+        pptx_export.build_deck(
+            path, self.details, "", self.rows, self.docs, [], self.png,
+            image_pages=lambda: pages, spec=rs.default_spec())
+        slides = list(Presentation(path).slides)
+        contents = next(s for s in slides if self.title(s) == "Contents")
+        rows = self.contents_rows(slides)
+        names = [t for t, _n in rows]
+        self.assertIn("Camera pictures", names)
+        self.assertIn("SnapMap – S1", names)
+        for ri, (title, num) in enumerate(rows):
+            if title in ("Camera pictures", "SnapMap – S1"):
+                self.assertEqual(self.title(slides[num - 1]), title)
+                action = self._title_action(contents, ri)
+                self.assertEqual(action.action, PP_ACTION.NAMED_SLIDE)
+                self.assertIs(action.target_slide, slides[num - 1])
+
 
 if __name__ == "__main__":
     unittest.main()

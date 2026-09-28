@@ -523,9 +523,12 @@ def _figure_slides(deck, figures, render_images):
 
 def _image_slides(deck, pages):
     """One slide per camera sheet / SnapMap site: ``pages`` is
-    ``[{"title", "png", "notes"}]`` (pictures sized ``FIGURE_SIZE``)."""
+    ``[{"title", "png", "notes"}]`` (pictures sized ``FIGURE_SIZE``). Each
+    page is its own entry under Pictures in the contents, the page's own
+    title being unique enough already (a sheet's "(n of M)", a site's own
+    name)."""
     for pg in pages:
-        slide = deck.content_slide(pg["title"])
+        slide = deck.content_slide(pg["title"], pg["title"])
         _fit_picture(deck, slide, pg["png"])
         slide.notes_slide.notes_text_frame.text = pg.get("notes", "")
 
