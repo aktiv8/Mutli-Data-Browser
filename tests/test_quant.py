@@ -14,6 +14,7 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import casafit  # noqa: E402
+import imfp  # noqa: E402
 import quant  # noqa: E402
 import readers  # noqa: E402
 from readers import Region  # noqa: E402
@@ -275,6 +276,67 @@ class TestRsfFallback(unittest.TestCase):
               "photon_energy": 1486.6, "components": []}
         out = quant.normalise([row], rsf_table=self.RSF_TABLE)
         self.assertEqual(out[0]["why"], "no RSF")
+
+    def test_scofield_tpp2m_multiplies_by_the_imfp_in_range(self):
+        # be_lo/be_hi give a region midpoint KE of 1486.6 - 75 = 1411.6 eV,
+        # well inside TPP-2M's 50-2000 eV validity range
+        row = {"area": 100.0, "rsf": 0.0, "region": "Pt 4f",
+              "photon_energy": 1486.6, "be_lo": 70.0, "be_hi": 80.0,
+              "components": []}
+        out = quant.normalise([row], rsf_table=self.RSF_TABLE,
+                              rsf_library="scofield_tpp2m")
+        lam = imfp.imfp_nm(1486.6 - 75.0)
+        self.assertIsNotNone(lam)
+        self.assertEqual(out[0]["rsf_source"], "scofield_tpp2m")
+        self.assertAlmostEqual(out[0]["imfp_nm"], lam)
+        self.assertAlmostEqual(out[0]["rsf_value"], 15.45 * lam)
+        self.assertAlmostEqual(out[0]["corrected"], 100.0 / (15.45 * lam))
+        self.assertIsNone(out[0]["ke_power_factor"])
+
+    def test_scofield_tpp2m_falls_back_to_plain_scofield_out_of_range(self):
+        # midpoint KE = 1486.6 - 1441 = 45.6 eV, below TPP-2M's 50 eV floor
+        row = {"area": 100.0, "rsf": 0.0, "region": "Pt 4f",
+              "photon_energy": 1486.6, "be_lo": 1440.0, "be_hi": 1442.0,
+              "components": []}
+        out = quant.normalise([row], rsf_table=self.RSF_TABLE,
+                              rsf_library="scofield_tpp2m")
+        self.assertEqual(out[0]["rsf_source"], "scofield")
+        self.assertIsNone(out[0]["imfp_nm"])
+        self.assertAlmostEqual(out[0]["rsf_value"], 15.45)
+        self.assertAlmostEqual(out[0]["corrected"], 100.0 / 15.45)
+
+    def test_scofield_tpp2m_falls_back_when_be_lo_hi_are_missing(self):
+        row = {"area": 100.0, "rsf": 0.0, "region": "Pt 4f",
+              "photon_energy": 1486.6, "components": []}
+        out = quant.normalise([row], rsf_table=self.RSF_TABLE,
+                              rsf_library="scofield_tpp2m")
+        self.assertEqual(out[0]["rsf_source"], "scofield")
+        self.assertIsNone(out[0]["imfp_nm"])
+
+    def test_scofield_ke06_multiplies_by_the_power_law(self):
+        row = {"area": 100.0, "rsf": 0.0, "region": "Pt 4f",
+              "photon_energy": 1486.6, "be_lo": 70.0, "be_hi": 80.0,
+              "components": []}
+        out = quant.normalise([row], rsf_table=self.RSF_TABLE,
+                              rsf_library="scofield_ke06")
+        factor = imfp.ke_power_factor(1486.6 - 75.0)
+        self.assertEqual(out[0]["rsf_source"], "scofield_ke06")
+        self.assertAlmostEqual(out[0]["ke_power_factor"], factor)
+        self.assertAlmostEqual(out[0]["rsf_value"], 15.45 * factor)
+        self.assertIsNone(out[0]["imfp_nm"])
+
+    def test_kratos_f1s_is_never_imfp_corrected(self):
+        # the empirical Wagner-style library must never get an IMFP factor
+        # multiplied on top, even when be_lo/be_hi would allow one
+        row = {"area": 100.0, "rsf": 0.0, "region": "Pt 4f",
+              "photon_energy": 1486.6, "be_lo": 70.0, "be_hi": 80.0,
+              "components": []}
+        out = quant.normalise([row], rsf_table=self.RSF_TABLE,
+                              rsf_library="kratos_f1s")
+        self.assertEqual(out[0]["rsf_source"], "kratos_f1s")
+        self.assertAlmostEqual(out[0]["rsf_value"], 5.58)
+        self.assertIsNone(out[0]["imfp_nm"])
+        self.assertIsNone(out[0]["ke_power_factor"])
 
     def test_csv_rsf_source_column(self):
         groups = [{"sample": "S", "level": None, "entries": [

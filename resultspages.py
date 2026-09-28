@@ -376,7 +376,11 @@ def _rsf_note(sample):
     """One note per region whose atomic percent used a reference-table
     substitute RSF (``quant.normalise``'s ``rsf_source`` -- "component" is
     not noted here, since that is the file's own cross-referenced data, just
-    read from a different place, not a substitute)."""
+    read from a different place, not a substitute). When the substitute is
+    one of the IMFP-corrected Scofield tiers (``x["imfp_nm"]``/
+    ``x["ke_power_factor"]`` set), the note also says what kinetic-energy
+    factor was used, so a reader sees exactly what was assumed, not just a
+    combined number."""
     seen = set()
     for level in sample.levels:
         for e, x in zip(level.entries, level.res):
@@ -388,11 +392,19 @@ def _rsf_note(sample):
                 continue
             seen.add(region)
             lib_label = rsf_lib.LIBRARY_SHORT.get(src, src)
+            extra = ""
+            if x.get("imfp_nm"):
+                extra = (f", scaled by a TPP-2M mean free path of "
+                        f"{x['imfp_nm']:.3g} nm at that line's own "
+                        "kinetic energy")
+            elif x.get("ke_power_factor"):
+                extra = (", scaled by (kinetic energy)^0.6 -- Thermo "
+                        "Avantage's own convention")
             sample.notes.append(
                 f"{region}'s sensitivity factor is not recorded in "
                 f"{sample.label}; the {lib_label} library's value "
                 f"({x['rsf_value']:g}, {x['rsf_anode']} Kα) is used "
-                "instead.")
+                f"instead{extra}.")
 
 
 def _rsf_hint_note(sample):

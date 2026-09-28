@@ -77,7 +77,8 @@ LEGACY_DECK = {"title": ("cover", "summary", "methods", "calibration"),
 # guessed" stance) leaves such a region out and says why, same as always.
 OPTIONS = {"sha": ("short", "none"), "dividers": ("auto", "none"),
            "mosaic": ("on", "off"), "page": ("a4", "letter"),
-           "rsf": ("off", "scofield", "kratos_f1s")}
+           "rsf": ("off", "scofield", "scofield_tpp2m", "scofield_ke06",
+                  "kratos_f1s")}
 DEFAULT_OPTIONS = {"sha": "short", "dividers": "auto", "mosaic": "on",
                   "page": "a4", "rsf": "off"}
 # The cover picture (see ``covers``): a design id, the file for the 'image'

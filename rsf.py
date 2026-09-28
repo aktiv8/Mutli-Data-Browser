@@ -34,8 +34,22 @@ DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 LIBRARIES = {"scofield": "Scofield (CasaXPS casaXPS-scofield.lib)",
              "kratos_f1s": "Kratos Axis F1s (CasaXPS "
-                          "casaXPS_KratosAxis-F1s.lib)"}
-LIBRARY_SHORT = {"scofield": "Scofield", "kratos_f1s": "Kratos F1s"}
+                          "casaXPS_KratosAxis-F1s.lib)",
+             "scofield_tpp2m": "Scofield + TPP-2M IMFP "
+                              "(average-matrix approximation)",
+             "scofield_ke06": "Scofield x KE^0.6 "
+                             "(Thermo Avantage's own convention)"}
+LIBRARY_SHORT = {"scofield": "Scofield", "kratos_f1s": "Kratos F1s",
+                 "scofield_tpp2m": "Scofield×TPP-2M",
+                 "scofield_ke06": "Scofield×KE^0.6"}
+
+# "scofield_tpp2m"/"scofield_ke06" (quant.py's own IMFP-corrected tiers,
+# see imfp.py) are not real libraries in this table -- they reuse the
+# "scofield" rows verbatim, then multiply by a kinetic-energy-dependent
+# factor computed from a formula, not looked up. rsf_of() (below) only
+# ever matches an entry's own recorded "library" field, so passing one of
+# these two names straight through would silently find nothing; callers
+# resolve them to "scofield" first (see quant.normalise()'s own mapping).
 AL_HV, MG_HV = 1486.6, 1253.6
 
 

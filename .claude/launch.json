@@ -4,7 +4,7 @@
     {
       "name": "viewer-pages",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-Mutli-Data-Browser/364838e8-b013-4e85-a00e-823a6bddf67d/scratchpad/page"],
+      "runtimeArgs": ["-m", "http.server", "8765", "--directory", "C:/Users/david/AppData/Local/Temp/claude/C--Users-david-Documents-Mutli-Data-Browser/6f36b154-9989-42dd-80fa-d531fc9fd2b2/scratchpad"],
       "port": 8765
     }
   ]

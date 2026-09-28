@@ -342,6 +342,11 @@ class ReportGeneratorDialog(tk.Toplevel):
         for value, text in (("off", "Leave it out and say why (default)"),
                             ("scofield", "Scofield (CasaXPS casaXPS-"
                              "scofield.lib)"),
+                            ("scofield_tpp2m", "Scofield + TPP-2M IMFP "
+                             "(average-matrix approximation)"),
+                            ("scofield_ke06", "Scofield × KE^0.6 (a "
+                             "simpler approximation, Thermo Avantage's "
+                             "own convention)"),
                             ("kratos_f1s", "Kratos Axis F1s (CasaXPS "
                              "casaXPS_KratosAxis-F1s.lib)")):
             ttk.Radiobutton(tab, text=text, value=value, variable=self.rsf,

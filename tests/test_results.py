@@ -256,6 +256,46 @@ class TestNumbers(unittest.TestCase):
         self.assertIn("Pt 4f", s.notes[0])
         self.assertIn("Scofield", s.notes[0])
 
+    def test_rsf_note_mentions_the_tpp2m_mean_free_path(self):
+        table = [{"library": "scofield", "anode": "Al", "line": "Pt 4f",
+                 "rsf": 15.45}]
+        r = row("Pt 4f", 0.0, 100.0)
+        r["photon_energy"] = 1486.6
+        r["be_lo"], r["be_hi"] = 70.0, 80.0
+        s = rp.Sample("f1/S", "S", rsf_table=table,
+                     rsf_library="scofield_tpp2m")
+        lv = rp.Level(None)
+        lv.entries = [{"spectrum": "Pt 4f", "row": r}]
+        s.levels = [lv]
+        rp._settle(lv, "S", s.notes)
+        rp._prefer_lines(lv, "S", s.notes, rsf_table=table,
+                         rsf_library="scofield_tpp2m")
+        self.assertEqual(lv.res[0]["rsf_source"], "scofield_tpp2m")
+        rp._rsf_note(s)
+        self.assertEqual(len(s.notes), 1)
+        self.assertIn("TPP-2M", s.notes[0])
+        self.assertIn("nm", s.notes[0])
+
+    def test_rsf_note_mentions_the_ke06_factor(self):
+        table = [{"library": "scofield", "anode": "Al", "line": "Pt 4f",
+                 "rsf": 15.45}]
+        r = row("Pt 4f", 0.0, 100.0)
+        r["photon_energy"] = 1486.6
+        r["be_lo"], r["be_hi"] = 70.0, 80.0
+        s = rp.Sample("f1/S", "S", rsf_table=table,
+                     rsf_library="scofield_ke06")
+        lv = rp.Level(None)
+        lv.entries = [{"spectrum": "Pt 4f", "row": r}]
+        s.levels = [lv]
+        rp._settle(lv, "S", s.notes)
+        rp._prefer_lines(lv, "S", s.notes, rsf_table=table,
+                         rsf_library="scofield_ke06")
+        self.assertEqual(lv.res[0]["rsf_source"], "scofield_ke06")
+        rp._rsf_note(s)
+        self.assertEqual(len(s.notes), 1)
+        self.assertIn("KE^0.6", s.notes[0])
+        self.assertIn("Avantage", s.notes[0])
+
     def test_component_level_fallback_is_not_noted_as_a_substitute(self):
         # a component-level fix is the file's own data, just read from a
         # different place -- not a substitute, so _rsf_note stays silent

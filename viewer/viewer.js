@@ -252,6 +252,29 @@
     }
     return null;
   };
+  /* JS port of imfp.py's imfp_nm/ke_power_factor (see that module's own
+     docstring for the full provenance/caveats: a correctly-cited TPP-2M
+     equation with fixed "average matrix" constants, never proven in
+     KherveFitting's own quantification; KE^0.6 is Thermo Avantage's own
+     convention, referenced not derived, in KherveFitting's source). Only
+     ever multiplied onto the "scofield" table, never "kratos_f1s" or a
+     file's own recorded RSF -- see V.quantNormalise. */
+  var IMFP_N_V = 4.684, IMFP_RHO = 6.767, IMFP_MOLAR_MASS = 137.51, IMFP_E_GAP = 0;
+  var IMFP_MIN_KE = 50, IMFP_MAX_KE = 2000, KE_POWER_EXPONENT = 0.6;
+  V.imfpNm = function (ke) {
+    if (!ke || ke < IMFP_MIN_KE || ke > IMFP_MAX_KE) return null;
+    var eP = 28.8 * Math.sqrt(IMFP_N_V * IMFP_RHO / IMFP_MOLAR_MASS);
+    var u = IMFP_N_V * IMFP_RHO / IMFP_MOLAR_MASS;
+    var beta = -0.10 + 0.944 / Math.sqrt(eP * eP + IMFP_E_GAP * IMFP_E_GAP) + 0.069 * Math.pow(IMFP_RHO, 0.1);
+    var gamma = 0.191 * Math.pow(IMFP_RHO, -0.5);
+    var c = 1.97 - 0.91 * u, d = 53.4 - 20.8 * u;
+    var imfpAngstrom = ke / (eP * eP * (beta * Math.log(gamma * ke) - c / ke + d / (ke * ke)));
+    return imfpAngstrom / 10.0;
+  };
+  V.kePowerFactor = function (ke) {
+    if (!ke || ke <= 0) return null;
+    return Math.pow(ke, KE_POWER_EXPONENT);
+  };
   /* Suggested defaults for one quantGroups() group's entries: a non-
      preferred line of an element whose preferred line is also (still)
      included gets `false` -- a *default* the user can still re-tick, unlike
@@ -299,10 +322,15 @@
      per whole region); then, only when rsfTable is given (off by default,
      the same "nothing is guessed" stance as the desktop), a reference-table
      lookup by the row's own region name and photon energy. */
+  /* "scofield_tpp2m"/"scofield_ke06" are not real libraries in rsfTable --
+     they reuse the "scofield" rows verbatim, then multiply by a kinetic-
+     energy-dependent factor (see V.imfpNm/V.kePowerFactor above). */
+  var IMFP_LIBRARIES = { scofield_tpp2m: 'scofield', scofield_ke06: 'scofield' };
   V.quantNormalise = function (rows, include, transmission, rsfTable, rsfLibrary) {
     var out = rows.map(function (row, i) {
       var area = transmission && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
-      var res = { corrected: null, at: null, why: '', rsfSource: null, rsfAnode: null, rsfValue: null };
+      var res = { corrected: null, at: null, why: '', rsfSource: null, rsfAnode: null, rsfValue: null,
+                 imfpNm: null, kePowerFactor: null };
       if (include && include[i] === false) { res.why = 'not included'; return res; }
       if (row.rsf && row.rsf > 0) {
         if (area === null || area === undefined || !(area > 0)) res.why = 'no area';
@@ -314,11 +342,27 @@
       }, 0);
       if (compTotal > 0) { res.corrected = compTotal; res.rsfSource = 'component'; return res; }
       if (rsfTable && rsfTable.length) {
-        var value = V.rsfOf(row.region, rsfTable, rsfLibrary || 'scofield', row.photon_energy);
+        var library = rsfLibrary || 'scofield';
+        var baseLibrary = IMFP_LIBRARIES[library] || library;
+        var value = V.rsfOf(row.region, rsfTable, baseLibrary, row.photon_energy);
         if (!value) res.why = 'no RSF';
         else if (area === null || area === undefined || !(area > 0)) res.why = 'no area';
         else {
-          res.corrected = area / value; res.rsfSource = rsfLibrary || 'scofield';
+          var source = baseLibrary;
+          if (IMFP_LIBRARIES[library]) {
+            var ke = (row.photon_energy !== null && row.photon_energy !== undefined
+                     && row.be_lo !== null && row.be_lo !== undefined
+                     && row.be_hi !== null && row.be_hi !== undefined)
+              ? row.photon_energy - (row.be_lo + row.be_hi) / 2 : null;
+            var factor = library === 'scofield_tpp2m' ? V.imfpNm(ke) : V.kePowerFactor(ke);
+            if (factor) {
+              value = value * factor;
+              source = library;
+              if (library === 'scofield_tpp2m') res.imfpNm = factor;
+              else res.kePowerFactor = factor;
+            }
+          }
+          res.corrected = area / value; res.rsfSource = source;
           res.rsfAnode = V.anodeFor(row.photon_energy); res.rsfValue = value;
         }
         return res;
@@ -330,7 +374,8 @@
     out.forEach(function (x) { if (x.corrected !== null && total > 0) x.at = 100 * x.corrected / total; });
     return out;
   };
-  V.RSF_LIBRARY_SHORT = { scofield: 'Scofield', kratos_f1s: 'Kratos F1s' };
+  V.RSF_LIBRARY_SHORT = { scofield: 'Scofield', kratos_f1s: 'Kratos F1s',
+                          scofield_tpp2m: 'Scofield×TPP-2M', scofield_ke06: 'Scofield×KE^0.6' };
   function rsfSourceText(x) {
     if (!x.rsfSource) return '';
     if (x.rsfSource === 'component') return "components' own RSF";
@@ -1744,7 +1789,8 @@
     tcb.checked = q.transmission && hasT; tcb.disabled = !hasT;
     tcb.addEventListener('change', function () { q.transmission = tcb.checked; renderQuant(); });
     var rsel = h('select', { 'aria-label': 'RSF fallback for regions with no recorded sensitivity factor' });
-    [['', 'Off'], ['scofield', 'Scofield'], ['kratos_f1s', 'Kratos Axis F1s']].forEach(function (opt) {
+    [['', 'Off'], ['scofield', 'Scofield'], ['scofield_tpp2m', 'Scofield + TPP-2M'],
+     ['scofield_ke06', 'Scofield × KE^0.6'], ['kratos_f1s', 'Kratos Axis F1s']].forEach(function (opt) {
       var o = h('option', { value: opt[0], text: opt[1] });
       if (opt[0] === q.rsfLibrary) o.selected = true;
       rsel.appendChild(o);

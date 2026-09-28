@@ -211,6 +211,53 @@ function near(a, b, msg, tol) {
                        components: [{ area: 5, rsf: 2 }] };
       eq(V.quantNormalise([compRow], null, false, table, 'scofield')[0].rsfSource, 'component',
         'component tier beats the table fallback');
+
+      // tier: scofield_tpp2m/scofield_ke06 (mirrors test_quant.py's own cases)
+      const mfpRow = { area: 100, rsf: 0, region: 'Pt 4f', photon_energy: 1486.6,
+                      be_lo: 70, be_hi: 80, components: [] };
+      const ke = 1486.6 - 75;
+      const tpp2m = V.quantNormalise([mfpRow], null, false, table, 'scofield_tpp2m')[0];
+      eq(tpp2m.rsfSource, 'scofield_tpp2m', 'scofield_tpp2m rsfSource');
+      near(tpp2m.imfpNm, V.imfpNm(ke), 'scofield_tpp2m imfpNm matches V.imfpNm');
+      near(tpp2m.rsfValue, 15.45 * V.imfpNm(ke), 'scofield_tpp2m rsfValue');
+      eq(tpp2m.kePowerFactor, null, 'scofield_tpp2m leaves kePowerFactor null');
+
+      const ke06 = V.quantNormalise([mfpRow], null, false, table, 'scofield_ke06')[0];
+      eq(ke06.rsfSource, 'scofield_ke06', 'scofield_ke06 rsfSource');
+      near(ke06.kePowerFactor, V.kePowerFactor(ke), 'scofield_ke06 kePowerFactor matches V.kePowerFactor');
+      near(ke06.rsfValue, 15.45 * V.kePowerFactor(ke), 'scofield_ke06 rsfValue');
+      eq(ke06.imfpNm, null, 'scofield_ke06 leaves imfpNm null');
+
+      // out of TPP-2M's valid range (or missing be_lo/be_hi): falls back to
+      // the plain, unmultiplied Scofield value, not a silent extrapolation
+      const lowKeRow = { area: 100, rsf: 0, region: 'Pt 4f', photon_energy: 1486.6,
+                        be_lo: 1440, be_hi: 1442, components: [] };
+      const fallback = V.quantNormalise([lowKeRow], null, false, table, 'scofield_tpp2m')[0];
+      eq(fallback.rsfSource, 'scofield', 'out-of-range TPP-2M falls back to plain scofield');
+      eq(fallback.imfpNm, null, 'out-of-range TPP-2M leaves imfpNm null');
+      near(fallback.rsfValue, 15.45, 'out-of-range TPP-2M value is unmultiplied');
+
+      // the empirical Kratos Axis F1s library must never get an IMFP factor
+      const kratosRow = { area: 100, rsf: 0, region: 'Pt 4f', photon_energy: 1486.6,
+                         be_lo: 70, be_hi: 80, components: [] };
+      const kratosTable = [['kratos_f1s', 'Al', 'Pt 4f', 5.58]];
+      const kr = V.quantNormalise([kratosRow], null, false, kratosTable, 'kratos_f1s')[0];
+      eq(kr.rsfSource, 'kratos_f1s', 'kratos_f1s rsfSource');
+      eq(kr.imfpNm, null, 'kratos_f1s is never IMFP-corrected');
+    }
+
+    // ---- imfpNm / kePowerFactor (mirrors imfp.py, tests/test_imfp.py) ----
+    {
+      // hand-computed from the same formula independently (test_imfp.py's own reference table)
+      const REF = { 50: 0.5066507922262123, 100: 0.577623423099999, 200: 0.7947830339179165,
+                    500: 1.4263303268788368, 1000: 2.368001423854056, 2000: 4.060332098481516 };
+      Object.keys(REF).forEach((k) => near(V.imfpNm(+k), REF[k], 'imfpNm reference KE=' + k, 1e-9));
+      eq(V.imfpNm(49.9), null, 'imfpNm below the valid range');
+      eq(V.imfpNm(2000.1), null, 'imfpNm above the valid range');
+      eq(V.imfpNm(0), null, 'imfpNm with no kinetic energy');
+      near(V.kePowerFactor(1419), Math.pow(1419, 0.6), 'kePowerFactor matches KE^0.6');
+      eq(V.kePowerFactor(0), null, 'kePowerFactor with no kinetic energy');
+      eq(V.kePowerFactor(-5), null, 'kePowerFactor with a negative kinetic energy');
     }
 
     // ---- anodeFor / rsfOf (mirrors rsf.py) ----

@@ -21,10 +21,17 @@ sum of the component areas is used instead and the row says so (``basis``).
 """
 
 import casafit
+import imfp
 import rsf as rsf_lib
 
 SOURCE_SURVEY = "survey"
 SOURCE_HIGH_RES = "high-res"
+
+# "scofield_tpp2m"/"scofield_ke06" (see imfp.py) are not real libraries in
+# rsf.py's table -- they reuse the "scofield" rows verbatim, then multiply
+# by a kinetic-energy-dependent factor computed from a formula. This maps
+# each to the base library its table lookup actually uses.
+_IMFP_LIBRARIES = {"scofield_tpp2m": "scofield", "scofield_ke06": "scofield"}
 
 
 def _trapz(y, x):
@@ -183,11 +190,24 @@ def normalise(rows, include=None, transmission=False, rsf_table=None,
        RSF: only tried when a caller explicitly supplies a table. Looked up
        by the row's own region name and photon energy via ``rsf.rsf_of``;
        when found, ``rsf_source``/``rsf_anode``/``rsf_value`` record exactly
-       which library/anode/number was substituted."""
+       which library/anode/number was substituted. ``rsf_library``
+       ``"scofield_tpp2m"``/``"scofield_ke06"`` look up the base "scofield"
+       value the same way, then multiply it by a kinetic-energy-dependent
+       factor from ``imfp.py`` (``imfp_nm``/``ke_power_factor``, computed
+       from the row's own ``be_lo``/``be_hi``/``photon_energy`` --
+       ``res["imfp_nm"]``/``res["ke_power_factor"]`` record which) --
+       **never** applied to a real recorded RSF or to the Kratos Axis F1s
+       library, both empirical values with their own implicit kinetic-
+       energy dependence already baked in (see ``imfp.py``'s own
+       docstring). When TPP-2M's own kinetic energy is outside its stated
+       validity range, the row honestly falls back to the plain,
+       uncorrected Scofield value and ``rsf_source = "scofield"``, never a
+       silently-wrong extrapolation."""
     out = []
     for i, row in enumerate(rows):
         res = {"corrected": None, "at_pct": None, "why": "",
-               "rsf_source": None, "rsf_anode": None, "rsf_value": None}
+               "rsf_source": None, "rsf_anode": None, "rsf_value": None,
+               "imfp_nm": None, "ke_power_factor": None}
         area = row.get("area_t") if transmission and \
             row.get("area_t") is not None else row.get("area")
         own_rsf = row.get("rsf")
@@ -206,15 +226,32 @@ def normalise(rows, include=None, transmission=False, rsf_table=None,
                 res["corrected"] = comp_total
                 res["rsf_source"] = "component"
             elif rsf_table:
+                base_library = _IMFP_LIBRARIES.get(rsf_library, rsf_library)
                 value = rsf_lib.rsf_of(row.get("region"), rsf_table,
-                                       rsf_library, row.get("photon_energy"))
+                                       base_library, row.get("photon_energy"))
                 if not value:
                     res["why"] = "no RSF"
                 elif area is None or area <= 0:
                     res["why"] = "no area"
                 else:
+                    source = base_library
+                    if rsf_library in _IMFP_LIBRARIES:
+                        be_lo, be_hi = row.get("be_lo"), row.get("be_hi")
+                        hv = row.get("photon_energy")
+                        ke = (hv - (be_lo + be_hi) / 2.0
+                             if hv is not None and be_lo is not None
+                             and be_hi is not None else None)
+                        if rsf_library == "scofield_tpp2m":
+                            factor, factor_key = imfp.imfp_nm(ke), "imfp_nm"
+                        else:
+                            factor, factor_key = (imfp.ke_power_factor(ke),
+                                                  "ke_power_factor")
+                        if factor:
+                            value = value * factor
+                            source = rsf_library
+                            res[factor_key] = factor
                     res["corrected"] = area / value
-                    res["rsf_source"] = rsf_library
+                    res["rsf_source"] = source
                     res["rsf_anode"] = rsf_lib.anode_for(
                         row.get("photon_energy"))
                     res["rsf_value"] = value
