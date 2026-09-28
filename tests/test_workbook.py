@@ -127,6 +127,66 @@ class TestRoundTrip(Tmp):
         self.assertEqual(read(path), before)
 
 
+class TestCsvImportsPersistence(Tmp):
+    """csv_imports/<id>/<name> (a CasaXPS ASCII export matched onto a fit by
+    casacsv.py, see spectradeck.Workspace.import_casaxps_csv): stored
+    verbatim so the match can be redone after reopening."""
+
+    def test_round_trips(self):
+        csv_path = self.write("in/export.csv", b"Cycle 1:S1:C1s Scan\n...")
+        wb = wbk.Workbook(csv_imports=[
+            wbk.FileEntry("csv1", "export.csv", csv_path,
+                          original_path=csv_path)])
+        path = os.path.join(self.dir, "exp" + wbk.EXT)
+        wbk.save(path, wb)
+        out = wbk.load(path, os.path.join(self.dir, "x"))
+        self.assertEqual([f.name for f in out.csv_imports], ["export.csv"])
+        f = out.csv_imports[0]
+        self.assertEqual(f.id, "csv1")
+        self.assertEqual(read(f.path), read(csv_path))
+        self.assertEqual(f.sha256, wbk.sha256_file(csv_path))
+        self.assertEqual(out.warnings, [])
+
+    def test_absent_when_empty(self):
+        wb = wbk.Workbook()
+        path = os.path.join(self.dir, "exp" + wbk.EXT)
+        wbk.save(path, wb)
+        with zipfile.ZipFile(path) as zf:
+            self.assertFalse([n for n in zf.namelist()
+                              if n.startswith("csv_imports/")])
+            manifest = json.loads(zf.read("manifest.json"))
+        self.assertEqual(manifest["csv_imports"], [])
+        out = wbk.load(path, os.path.join(self.dir, "x"))
+        self.assertEqual(out.csv_imports, [])
+        self.assertEqual(out.warnings, [])
+
+    def test_missing_source_is_reported_and_nothing_written(self):
+        csv_path = self.write("in/export.csv")
+        wb = wbk.Workbook(csv_imports=[
+            wbk.FileEntry("csv1", "export.csv", csv_path,
+                          original_path=csv_path)])
+        os.remove(csv_path)
+        path = os.path.join(self.dir, "exp" + wbk.EXT)
+        with self.assertRaises(wbk.WorkbookError) as cm:
+            wbk.save(path, wb)
+        self.assertIn("export.csv", str(cm.exception))
+
+    def test_a_missing_member_is_a_warning_not_an_error(self):
+        """A workbook whose csv_imports member went missing (e.g. a manually
+        edited archive) degrades to a warning: this is a supplementary
+        feature, losing it just falls back to reconstructed curves."""
+        m = {"format": wbk.FORMAT, "format_version": 1, "files": [],
+             "csv_imports": [{"id": "csv1", "member": "csv_imports/csv1/x.csv",
+                              "original_name": "x.csv"}]}
+        path = os.path.join(self.dir, "bad" + wbk.EXT)
+        with zipfile.ZipFile(path, "w") as zf:
+            zf.writestr("manifest.json", json.dumps(m))
+        out = wbk.load(path, os.path.join(self.dir, "x"))
+        self.assertEqual(out.csv_imports, [])
+        self.assertEqual(len(out.warnings), 1)
+        self.assertIn("x.csv", out.warnings[0])
+
+
 class TestCasaQuantPersistence(Tmp):
     """casa_quant.json (CasaXPS's own exported quantification, see
     casaquant.py): optional, ignored by a build that predates it."""

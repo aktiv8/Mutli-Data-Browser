@@ -26,6 +26,10 @@ files is JSON: opening a workbook never executes anything from it.
     data/<id>/<name>/<folders>/<file>   an experiment folder (a session of many
                                         files, e.g. Avantage): same, keeping the
                                         layout the reader needs
+    csv_imports/<id>/<original file name>   optional: CasaXPS ASCII-export CSV
+                            files (casacsv.py) matched onto a region's fit, so
+                            the match can be redone after reopening; a build
+                            that does not know it ignores it
     assets/logo.<ext>                   optional letterhead image
     preview.png                         thumbnail of the plot
 
@@ -90,6 +94,10 @@ class Workbook:
     state: dict = field(default_factory=dict)
     figures: list = field(default_factory=list)     # [{id,name,caption,state}]
     files: list = field(default_factory=list)       # [FileEntry]
+    csv_imports: list = field(default_factory=list)  # [FileEntry] CasaXPS ASCII
+                                 # exports (casacsv.py) matched onto a fit,
+                                 # stored verbatim so the match can be redone
+                                 # after reopening
     logo: str = ""               # local path of the letterhead image
     metadata: dict = field(default_factory=dict)
     annotations: dict = field(default_factory=dict)  # annotations.to_json()
@@ -281,6 +289,8 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> list:
                         if not os.path.isfile(p)]
         elif not os.path.isfile(f.path):
             missing.append(f.name)
+    missing += [f"CSV import: {f.name}" for f in wb.csv_imports
+                if not os.path.isfile(f.path)]
     if missing:
         raise WorkbookError("These data files can no longer be found:\n  "
                             + "\n  ".join(missing[:20]))
@@ -293,6 +303,11 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> list:
         else:
             f.size = os.path.getsize(f.path)
             f.sha256 = sha256_file(f.path)
+    for f in wb.csv_imports:
+        if not _ID_RE.match(f.id):
+            raise WorkbookError(f"Invalid file id {f.id!r}.")
+        f.size = os.path.getsize(f.path)
+        f.sha256 = sha256_file(f.path)
     wb.modified = _now()
     wb.created = wb.created or wb.modified
 
@@ -326,6 +341,11 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> list:
                              "member": f"{base}/{safe_rel(rel)}"}
                             for _p, rel in f.members]}
 
+    def csv_entry_of(f):
+        return {"id": f.id, "member": f"csv_imports/{f.id}/{safe_name(f.name)}",
+                "original_name": f.name, "original_path": f.original_path,
+                "size": f.size, "sha256": f.sha256}
+
     manifest = dict(wb.extra)
     manifest.update({
         "format": FORMAT,
@@ -333,6 +353,7 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> list:
         "created": wb.created, "modified": wb.modified,
         "created_with": appinfo.NAME,
         "files": [entry_of(f) for f in wb.files],
+        "csv_imports": [csv_entry_of(f) for f in wb.csv_imports],
         "logo": logo_member,
     })
     manifest.pop("cache", None)
@@ -369,6 +390,8 @@ def save(path, wb: Workbook, preview_png: bytes | None = None) -> list:
                         zf.write(src, m["member"])
                 else:
                     zf.write(f.path, entry["member"])
+            for f, entry in zip(wb.csv_imports, manifest["csv_imports"]):
+                zf.write(f.path, entry["member"])
             if logo_member:
                 zf.write(wb.logo, logo_member)
             if preview_png:
@@ -425,7 +448,7 @@ def load(path, extract_dir) -> Workbook:
                 f"Please update {appinfo.NAME}.")
 
         known = {"format", "format_version", "created", "modified",
-                 "created_with", "files", "logo", "cache"}
+                 "created_with", "files", "csv_imports", "logo", "cache"}
         wb = Workbook(created=str(manifest.get("created", "")),
                       modified=str(manifest.get("modified", "")),
                       extra={k: v for k, v in manifest.items()
@@ -482,6 +505,35 @@ def load(path, extract_dir) -> Workbook:
                 wb.warnings.append(f"{name}: contents do not match the "
                                    f"hash recorded when it was saved.")
             wb.files.append(fe)
+
+        for entry in manifest.get("csv_imports", []):
+            if not isinstance(entry, dict):
+                continue
+            fid = str(entry.get("id", ""))
+            member = str(entry.get("member", ""))
+            oname = entry.get("original_name", member)
+            if not _ID_RE.match(fid) or member not in names:
+                wb.warnings.append(
+                    f"The imported CasaXPS CSV export '{oname}' is missing "
+                    "from the workbook and could not be reapplied.")
+                continue
+            name = safe_name(oname or member)
+            dest_dir = os.path.join(extract_dir, "csv_imports", fid)
+            os.makedirs(dest_dir, exist_ok=True)
+            dest = os.path.join(dest_dir, name)
+            try:
+                with zf.open(member) as src, open(dest, "wb") as out:
+                    shutil.copyfileobj(src, out)
+            except (zipfile.BadZipFile, OSError, RuntimeError) as exc:
+                wb.warnings.append(
+                    f"Could not read the imported CasaXPS CSV export "
+                    f"'{name}' from the workbook ({exc}).")
+                continue
+            wb.csv_imports.append(FileEntry(
+                id=fid, name=name, path=dest,
+                original_path=str(entry.get("original_path", "")),
+                size=int(entry.get("size") or 0),
+                sha256=str(entry.get("sha256", ""))))
 
         logo = str(manifest.get("logo", ""))
         if (logo and logo in names

@@ -640,6 +640,10 @@ class Workspace:
         self.file_ids = {}          # id(parser) -> workbook file id
         self.file_origin = {}       # id(parser) -> path it was first added from
         self._fid_used = set()      # file ids handed out this session
+        self.casa_csv_imports = []  # [wbk.FileEntry] CasaXPS ASCII exports
+                                    # (casacsv.py) matched onto a fit, kept so
+                                    # they can be saved into the workbook and
+                                    # re-matched after reopening
         self._sha_cache = {}
         self.ann = annotations.Annotations()    # renames, notes, BE shifts...
         self._disp_cache = {}       # id(region) -> region as drawn/exported
@@ -2323,6 +2327,7 @@ class Workspace:
                     or any(r.csv_curves is None for r in report.results)):
                 any_problem = True
             texts.append(f"{name}:\n{summary}")
+            self._remember_csv_import(path)
         self._refresh_csv_curves_availability()
         self._schedule_render()
         title = "Import CasaXPS CSV export"
@@ -2331,6 +2336,36 @@ class Workspace:
             messagebox.showwarning(title, body)
         else:
             messagebox.showinfo(title, body)
+
+    def _remember_csv_import(self, path):
+        """Keep the CasaXPS CSV export so it is saved into the workbook and
+        re-matched after reopening (see ``_reapply_csv_imports``); a re-import
+        of the same file replaces its earlier entry rather than duplicating
+        it."""
+        self.casa_csv_imports = [f for f in self.casa_csv_imports
+                                 if f.original_path != path]
+        existing_ids = {f.id for f in self.casa_csv_imports}
+        self.casa_csv_imports.append(wbk.FileEntry(
+            id=wbk.new_id(existing_ids, "csv"), name=os.path.basename(path),
+            path=path, original_path=path))
+        self.wb_touch()
+
+    def _reapply_csv_imports(self):
+        """Re-run every remembered CasaXPS CSV import against the freshly
+        re-parsed regions after opening a workbook (region identity is never
+        stable across a reopen). Returns a list of problem strings for
+        imports that failed outright."""
+        problems = []
+        regions = [r for p in self.docs for r in p.regions]
+        for f in self.casa_csv_imports:
+            try:
+                csv_import = casacsv.parse(f.path)
+            except Exception as exc:
+                problems.append(f"{f.name}: could not be reapplied ({exc})")
+                continue
+            report = casacsv.match_to_regions(csv_import.blocks, regions)
+            casacsv.apply_matches(report)
+        return problems
 
     def _any_csv_curves(self):
         return any(fr.csv_curves is not None
@@ -2461,6 +2496,7 @@ class Workspace:
     def close_all(self):
         for p in list(self.docs):
             self._remove_doc(p)
+        self.casa_csv_imports = []
 
     # -- tree -----------------------------------------------------------
     def _populate_tree(self):
@@ -3355,6 +3391,7 @@ class Workspace:
             "colour_reverse": bool(self.colrev_var.get()),
             "fit_show": {k: bool(v.get()) for k, v in self.fit_vars.items()},
             "csv_curves": bool(self.csv_curves_var.get()),
+            "quant_rsf": self.quant_panel.rsf_choice(),
             "ident_show": {k: bool(v.get())
                           for k, v in self.ident_vars.items()},
             "axis_colour": self.axis_choice,
@@ -3402,10 +3439,15 @@ class Workspace:
                     v.set(fs[k])
         if isinstance(st.get("csv_curves"), bool):
             self.csv_curves_var.set(st["csv_curves"])
-        self._refresh_csv_curves_availability()   # a reopened workbook never
-            # carries a matched csv_curves (workbook.py doesn't serialise
-            # Region.fit at all), so this falls back to disabled/off rather
-            # than claim a stale "on" state
+        self._refresh_csv_curves_availability()   # open_workbook re-matches
+            # any remembered CasaXPS CSV imports (_reapply_csv_imports)
+            # before this runs, so a workbook saved with the checkbox on
+            # stays on when its imports still match; otherwise this falls
+            # back to disabled/off rather than claim a stale "on" state
+        rsf = st.get("quant_rsf")
+        if rsf in quant_ui.RSF_CHOICES:
+            self.quant_panel.rsf_var.set(quant_ui.RSF_LABELS[rsf])
+            self.quant_panel.refresh()
         ids = st.get("ident_show")
         if isinstance(ids, dict):
             for k, v in self.ident_vars.items():
@@ -3467,8 +3509,11 @@ class Workspace:
         st.pop("trace_start", None)
         files = sorted(f"{self.file_ids.get(id(p))}:{os.path.basename(p.path)}"
                        for p in self.docs)
+        csv_imports = sorted(f"{f.id}:{os.path.basename(f.path)}"
+                             for f in self.casa_csv_imports)
         return json.dumps({"d": self.details, "l": self.logo,
                            "f": self.figures, "s": st, "files": files,
+                           "csv": csv_imports,
                            "a": self.ann.to_json(), "c": self.calib,
                            "r": self.report_spec,
                            "cq": casaquant.to_json(self.casa_quant)},
@@ -3519,6 +3564,7 @@ class Workspace:
         self.calib = holder.sanitise(load_calibration())
         self.casa_quant = None
         self._casa_quant_scanned = set()
+        self.casa_csv_imports = []
         self._refresh_info()
 
     def new_workbook(self):
@@ -3581,6 +3627,7 @@ class Workspace:
         book = wbk.Workbook(
             details=dict(self.details), state=self.capture_state(),
             figures=copy.deepcopy(self.figures), files=entries,
+            csv_imports=list(self.casa_csv_imports),
             logo=self.logo, metadata=self._metadata_snapshot(),
             annotations=self.ann.to_json(),
             holder={"calibration": self.calib} if self.calib else {},
@@ -3661,6 +3708,8 @@ class Workspace:
         for f in book.files:
             problems += self._add_file(f.path, file_id=f.id,
                                        origin=f.original_path)
+        self.casa_csv_imports = list(book.csv_imports)
+        problems += self._reapply_csv_imports()
         self.details, self.logo = book.details, book.logo
         self.figures = book.figures
         if book.report:
