@@ -152,51 +152,96 @@ the time but pushed the `Metal Depth Profile` file's 8-component region's
 overshoot from 8.8 % to 16.3 % -- always check the *busiest*, most
 overlapping real region available, not just the cleanest ones.
 
-**A finite tail cutoff (generalising ``LF``'s ``w`` to plain ``LA``) does not
-help either, and makes most real files worse.** The obvious-looking fix for a
-tall, narrow component's tail visibly outrunning the real data (also seen on
-the PET file: ``C 1s (Ring)``, ``LA(0.8,1.5,243)``, contributes 51.7 counts
-~2.8 eV past its own peak where the real background-subtracted signal is only
-~17) is to taper the raw shape to zero at some multiple of its width. Tried
-and rejected: ``component_curve`` always rescales a component so its
-*analytic* integral equals CasaXPS's stored area (this is what
-``test_a_narrow_window_does_not_inflate_the_peak`` protects), so cutting the
-tail removes area that the rescaling then has to put back into the peak,
-making the peak itself taller. Swept against every real ``LA``/``LF`` file
-this codebase has (titanium, vanadium, copper, HOPG, ``DS Variations``, PET --
-18 fitted regions): every taper width tried (from 15 down to 3 times the
-component's own FWHM) made more real regions' overshoot worse than it made
-PET's better -- e.g. at a 3-FWHM cutoff, PET's own C 1s overshoot went from
-7.6% to 26% (the inflated Ring peak now overshoots its neighbours instead).
-The tail's visible extent is fixed in ``plots.draw_fit`` instead (a display
-choice, not a change to the shape or its stored area -- see
-``_COMPONENT_VISIBLE_FLOOR`` there).
+**The 1-argument ``LA(m)`` shorthand's residual overshoot is not a
+``GAUSS_K``/``GAUSS_P`` calibration gap -- it is intrinsic to ``a=b=1`` and
+cannot be tuned away.** Checked directly against real data, not a synthetic
+sweep, thanks to a file built specifically for the comparison:
+``D:\Temp\for claude files\PtCl2_new\PtCl2_refitted.vms`` refits the *same*
+Cl 2p / Pt 4d / Pt 4f data twice -- once with the shorthand (``LA(70)``,
+``LA(90)``), once with the explicit form (``LA(1.52,43)``, ``LA(1.2,43)``) --
+so the two reconstructions can be measured against the same raw counts.
+Sweeping ``GAUSS_K["LA"]`` from today's ``0.41`` down to ``0`` (no Gaussian
+broadening at all -- a bare, unconvolved ``a=b=1`` Lorentzian) moves the
+shorthand's overshoot by well under half a percentage point (Cl 2p 4.51% ->
+4.50%, Pt 4d 4.82% -> 4.79%, Pt 4f 4.42% -> 4.32%): the convolution width is
+not the cause. Printing the residual point by point shows two distinct
+effects. First, a slow, low-level excess that persists tens of eV past the
+peak (e.g. Pt 4f's high-BE tail, ~700-1800 counts above a ~7000-count flat
+continuum from BE 78-88 eV) -- but this is present, at similar magnitude, in
+the *explicit*-form reconstruction of the same data too (which plots well),
+so it is a generic property of summing large-area Lorentzian tails, not
+something specific to the shorthand. Second, and the larger effect: a
+**valley-bridging excess between the doublet's two main components**
+(Pt 4f's biggest single residual, ~2200 counts on a ~50000-count peak, sits
+in the dip between the two spin-orbit lines, not in either peak's own tail).
+Raising a Lorentzian's power above 1 narrows it and suppresses exactly this
+kind of inter-peak bridging (this is the whole reason the explicit
+``LA(1.2,43)``/``LA(1.52,43)`` refit of the same components measures lower
+overshoot, 3.49%/2.70%, than the ``a=b=1`` shorthand's 4.42%/4.51%) -- but
+CasaXPS's own shorthand definition (Fairley et al. 2023, *Cookbook* 2026, both
+cited above) is ``a=b=1`` by construction, so there is no calibration
+constant that can narrow it without changing what ``LA(m)`` means. **Do not
+retune ``GAUSS_K``/``GAUSS_P`` to chase this again without evidence beyond
+what produced this result** (the sweep above already covers the full range
+either constant could plausibly take).
 
-**A third-party independent reconstruction (Kiwi AI, retrieved 2026-09-27,
-``D:\Temp\for claude files\lineshapes with cliping.txt``) was reviewed against
-this module.** Its kernels match the same published forms already used here
-(no new information). Its treatment of CasaXPS's fit-region window hard-clips
-each shape and **renormalizes by the clipped area** -- the same family of idea
-as the rejected tail cutoff above, and wrong for the same reason (confirmed
-again here, not just inferred): our own display-only clip in
-``casafit.curves`` (NaN outside the region, no renormalization) is what real
-files need. Its ``LF`` finite tail, though, uses a **logistic sigmoid** damping
-function rather than this module's polynomial ``(1 - r^2)^2`` window -- a
-genuinely different, previously untried idea, checked here: swapping in a
-same-convention sigmoid (cutoff centred at the same ``r = |x-pos|/fwhm/w = 1``)
-and re-running ``casafit.curves`` on every real ``LF``-fitted component
-available (5, across ``Titanium Metal Depth Profile - INSTRUCTORS.vms`` and
-``D:\Temp\for claude files\PtCl2\PtCl2_quantified.vms``) moved
-``residual_rms``/overshoot by under half a percentage point either way
-(``residual_rms`` very slightly worse on all 5, overshoot very slightly better
-on 3 of 5) -- noise, not an improvement. Expected: every real ``w`` seen there
-(45-75) puts the taper's own cutoff radius (57-274 eV) far outside any of
-these files' fit-region windows (a few to a few tens of eV), so in every real
-file available ``LF`` is numerically indistinguishable from plain ``LA`` (bar
-the ``m``/Gaussian-width term) regardless of which taper shape is used -- this
-comparison cannot tell the two forms apart without a file whose ``w`` is small
-enough to produce a visible cutoff inside its own window. Not adopted; do not
-retune the taper's functional form again without one.
+**The LF finite tail was reconstructed with the wrong functional form
+entirely -- found and fixed from a primary source, not a retune.** The two
+"tried and rejected" investigations that used to be recorded in this
+paragraph (a polynomial ``(1 - r^2)^2`` hard cutoff at ``r = |x-pos|/fwhm/w``,
+and a same-shaped logistic-sigmoid alternative from a third-party
+reconstruction) were both variations on the same wrong idea: a taper
+*multiplying* the plain ``LA(a,b)`` curve down to (or towards) zero at some
+radius. Both failed for the same reason -- ``component_curve`` rescales a
+component so its analytic integral equals CasaXPS's stored area
+(``test_a_narrow_window_does_not_inflate_the_peak`` protects this), so any
+tail removed by a multiplicative taper has to come back as extra height at
+the peak. The actual formula, confirmed directly from CasaXPS's own primary
+description with runnable reference code -- Major, Shah, Avval, Fernandez,
+Fairley, Linford, "Advanced Line Shapes in X-Ray Photoelectron Spectroscopy
+II. The Finite Lorentzian (LF) Line Shape" (with MATLAB code), *Vacuum
+Technology & Coating*, April 2020, cross-checked against Part I (the same
+authors, March 2020, which independently confirms the plain ``LA(alpha,beta)``
+equation and its exponent-side convention -- low-KE side -> alpha, high-KE
+side -> beta -- exactly matching this module's ``t < 0 -> a`` split) -- is
+not a taper on the *curve* at all: it is a smoothly *varying exponent*.
+``ex(x) = 3.0 - (3.0 - a) / (1 + 4*((x-pos)/w)**2)`` on the low-KE side (and
+the analogous expression with ``b`` on the high-KE side), with the base
+Lorentzian raised to ``ex(x)`` instead of a fixed ``a``/``b``: at ``x = pos``,
+``ex = a`` (unchanged); as ``|x-pos|`` grows past ``w`` (used directly, in
+eV -- **not** scaled by ``fwhm``, unlike the removed taper), ``ex`` rises
+towards a fixed ceiling of ``3.0`` (a value the source states outright, not a
+fitted constant), so the tail decays by an ever-steeper power law rather than
+being clipped to exactly zero. The source's own reference code also uses the
+base Lorentzian's width as a plain, fixed ``F`` (``F = 1; %peak width``, used
+directly, with no rescaling formula given anywhere in either article) --
+implemented here as plain ``fwhm``, not the ``_shared_width`` rescale plain
+``LA`` uses (checked separately: removing ``_shared_width`` from plain,
+explicit ``LA(a,b,n)`` -- no ``w`` -- regresses badly on the wider corpus,
+e.g. ``assigned.vms``'s W 4f overshoot jumping from 4.6% to 54%, so that fix
+stays; it is specifically the ``w>0`` LF branch that had the wrong mechanism).
+Checked against every real ``LF``-fitted region available (5, across
+``Titanium Metal Depth Profile - INSTRUCTORS.vms``'s Ti 2p and
+``D:\Temp\for claude files\PtCl2\PtCl2_quantified.vms``'s Cl 2p / Pt 4d /
+Pt 4f x2): ``residual_rms`` improves on every single region, substantially --
+Pt 4d 0.1499 -> 0.0686 (more than halved), Ti 2p 0.0410 -> 0.0307, Cl 2p
+0.0629 -> 0.0523, Pt 4f 0.0592 -> 0.0491, Pt 4f (area2) 0.0718 -> 0.0607.
+Overshoot (a single worst-point metric, unlike ``residual_rms``'s whole-curve
+average) moves in mixed directions region to region -- expected, and not a
+sign the fix is wrong, since a better whole-curve fit can still have a
+slightly different single peak excursion. The tail's visible extent in
+``plots.draw_fit`` (``_COMPONENT_VISIBLE_FLOOR``) is unaffected -- still a
+display choice, not a change to the shape or its stored area.
+
+One further real form was found but not adopted: ``PtCl2_quantified.vms``'s
+Pt 4d region uses a genuine 5-argument string, ``LF(0.5,0.6,45,180,1)`` /
+``LF(0.5,0.6,45,180,3)`` -- a 5th number ``parse_shape`` still drops. The
+obvious guess (the 5th number overrides the ``3.0`` ceiling per component)
+was tried and made the reconstruction measurably worse (``residual_rms``
+0.069 -> 0.091), so it is wrong; the 5th argument is left unreconstructed and
+honestly unflagged rather than guessed again, the same precedent as this
+module's other "not enough evidence" cases (``QF``, ``H``/``F``, the Tougaard
+region line's unused leading numbers).
 
 **A(a,b,n)GL(m) / A(a,b,n)SGL(m): the Gelius asymmetric shape.** Sourced
 from CasaXPS's own "Peak Fitting in XPS" (Casa Software Ltd, 2006, p.20 --
@@ -610,10 +655,10 @@ def _voigt_values(x, pos, fwhm, fraction):
 def _raw_values(x, sp, pos, fwhm):
     """The lineshape before any Gaussian broadening (GL/SGL/VOIGT have their
     own convolution already folded in): the GL product, the SGL sum, the
-    true Voigt, the Gelius asymmetric shape, the TLA shape, or the raw
-    asymmetric Lorentzian (with its LF finite-tail taper) on grid ``x``.
-    Used both for the values a caller asked for and, on a separate wide
-    grid, for area normalisation."""
+    true Voigt, the Gelius asymmetric shape, the TLA shape, the raw
+    asymmetric Lorentzian, or (when ``w > 0``) its LF finite-tail variant, on
+    grid ``x``. Used both for the values a caller asked for and, on a
+    separate wide grid, for area normalisation."""
     np = _np()
     if sp["kind"] in ("GL", "SGL"):
         return _gl_sgl_values(x, sp["kind"], sp["mix"], pos, fwhm)
@@ -629,14 +674,29 @@ def _raw_values(x, sp, pos, fwhm):
         return base + _gelius_tail(x, pos, fwhm, sp["a"], sp["b"])
     if sp["kind"] == "TLA":
         return _tla_values(x, pos, fwhm, sp["a"], sp["b"])
+    if sp["kind"] == "LF" and sp["w"] > 0:
+        # The finite tail (see the module docstring): CasaXPS's own formula
+        # (Major, Shah, Avval, Fernandez, Fairley, Linford, "Advanced Line
+        # Shapes in XPS II: The Finite Lorentzian (LF) Line Shape", VT&C,
+        # April 2020, MATLAB listing) is not a hard cutoff -- the base
+        # Lorentzian's own exponent smoothly rises from a/b at the centre
+        # towards a fixed ceiling of 3.0 as |x - pos| grows relative to w
+        # (used directly, in eV -- not scaled by fwhm), so the tail decays
+        # by a power law rather than being clipped to exactly zero. The base
+        # Lorentzian itself uses plain fwhm here, not the shared-width
+        # rescale plain LA/LF(w=0) use below (the source's own MATLAB uses a
+        # single fixed "F = 1; %peak width" with no rescaling formula).
+        t = (x - pos) / fwhm
+        lor = 1.0 / (1.0 + 4.0 * t * t)
+        u = (x - pos) / sp["w"]
+        suppress = 1.0 / (1.0 + 4.0 * u * u)
+        exL = 3.0 - (3.0 - sp["a"]) * suppress
+        exR = 3.0 - (3.0 - sp["b"]) * suppress
+        return np.where(t < 0, lor ** exL, lor ** exR)
     F = _shared_width(fwhm, sp["a"], sp["b"])
     t = (x - pos) / F
     lor = 1.0 / (1.0 + 4.0 * t * t)
-    v = np.where(t < 0, lor ** sp["a"], lor ** sp["b"])
-    if sp["w"] > 0:                              # finite tail (LF): the
-        r = np.abs((x - pos) / fwhm) / sp["w"]    # taper stays on the
-        v = np.where(r < 1, v * (1 - r * r) ** 2, 0.0)  # nominal fwhm
-    return v
+    return np.where(t < 0, lor ** sp["a"], lor ** sp["b"])
 
 
 # How far a component's own area is measured, in FWHM either side of its
@@ -666,7 +726,23 @@ def component_curve(ke, shape, pos, fwhm, area):
             if sp["m"] else 0.0)
         conv = gauss_conv(ke, v, gw)
     span = _NORM_HALF_WIDTH * fwhm
-    wide = np.linspace(pos - span, pos + span, _NORM_POINTS)
+    n_points = _NORM_POINTS
+    if sp["kind"] == "LF" and sp["w"] > 0 and 20.0 * sp["w"] > span:
+        # A real LF's w (an eV-scale width, not a multiple of fwhm -- see
+        # _raw_values) can exceed _NORM_HALF_WIDTH*fwhm for a narrow peak
+        # with a wide tail (w up to ~280 eV seen on real files against a
+        # fwhm of a few eV); widen the normalisation grid so it still spans
+        # well past where the exponent has settled near its 3.0 ceiling --
+        # and grow the point count in proportion, or the (much sparser)
+        # wide grid under-resolves the still-narrow peak at its centre and
+        # silently mis-normalises the whole component (checked: at a fixed
+        # 4001 points, widening the span alone from 130 to 1500 eV for a
+        # fwhm=1.3 component leaves only ~2 points across the peak's own
+        # FWHM, giving a component ~1.3% too tall).
+        newspan = 20.0 * sp["w"]
+        n_points = min(200001, int(_NORM_POINTS * newspan / span))
+        span = newspan
+    wide = np.linspace(pos - span, pos + span, n_points)
     wstep = wide[1] - wide[0]
     s = float(_raw_values(wide, sp, pos, fwhm).sum()) * wstep
     return conv * (area / s if s > 0 else 0.0)

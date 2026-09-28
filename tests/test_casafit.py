@@ -76,9 +76,14 @@ class TestShapes(unittest.TestCase):
         # normalised against its own extent, not the window it happens to
         # be drawn on, so a narrower window is allowed to show less than
         # the stored area (see test_a_narrow_window_does_not_inflate_the_peak).
-        wide = np.linspace(1005.0 - 200 * 1.3, 1005.0 + 200 * 1.3, 8001)
         for shape in ("GL(0)", "GL(30)", "GL(100)", "SGL(30)",
-                      "LA(1.1,1.9,7)", "LA(50)", "LF(1.1,1.2,75,200)"):
+                      "LA(1.1,1.9,7)", "LA(50)", "LF(1.1,1.2,75,200)",
+                      "LF(0.5,0.6,45,180)"):
+            # LF's w is an eV-scale width, not a multiple of fwhm (see
+            # lineshapes.py's module docstring), so its tail can reach
+            # further than 200*fwhm for a narrow peak with a wide w.
+            span = max(200 * 1.3, 20 * ls.parse_shape(shape)["w"])
+            wide = np.linspace(1005.0 - span, 1005.0 + span, 16001)
             y = ls.component_curve(wide, shape, 1005.0, 1.3, 1234.5)
             area = float(np.trapezoid(y, wide) if hasattr(np, "trapezoid")
                          else np.trapz(y, wide))
@@ -159,9 +164,39 @@ class TestShapes(unittest.TestCase):
         self.assertLess(soft.max(), sharp.max())
         self.assertAlmostEqual(self.area(soft), self.area(sharp), 3)
 
-    def test_lf_tail_is_cut_off(self):
-        y = ls.component_curve(self.ke, "LF(1.0,1.0,5,0)", 1005.0, 1.0, 1.0)
-        self.assertEqual(float(y[0]), 0.0)         # beyond 5 FWHM: zero
+    def test_lf_tail_is_suppressed_relative_to_plain_la(self):
+        # The real LF formula (see the module docstring: Major, Shah, Avval,
+        # Fernandez, Fairley, Linford, VT&C April 2020, MATLAB listing) is a
+        # smoothly-rising exponent, not a hard cutoff to exactly zero -- far
+        # from the peak (well past w) the tail is heavily suppressed
+        # relative to plain LA with the same a/b, but never exactly zero.
+        # Checked on the raw (pre-area-normalisation) shape: component_curve
+        # itself rescales LA and LF to the same stored area even though
+        # their raw shapes differ, so its two outputs are not directly
+        # comparable at the peak centre the way the raw shapes are.
+        la_sp = ls.parse_shape("LA(1.0,1.0,0)")
+        lf_sp = ls.parse_shape("LF(1.0,1.0,5,0)")
+        la = ls._raw_values(self.ke, la_sp, 1005.0, 1.0)
+        lf = ls._raw_values(self.ke, lf_sp, 1005.0, 1.0)
+        self.assertGreater(float(lf[0]), 0.0)             # not clipped to 0
+        self.assertLess(float(lf[0]), float(la[0]) * 0.01)  # heavily damped
+        # at the centre (pos), both reduce to the same plain Lorentzian
+        i = int(np.argmin(np.abs(self.ke - 1005.0)))
+        self.assertAlmostEqual(float(lf[i]), float(la[i]), 6)
+
+    def test_lf_exponent_matches_the_matlab_source_at_a_known_point(self):
+        # Hand-computed from the primary source's own formula (see the
+        # module docstring): ex(x) = 3 - (3-a)/(1 + 4*((x-pos)/w)**2), then
+        # v = L(x)**ex(x), with L on plain fwhm (no shared-width rescale).
+        a, b, w, fwhm, pos = 0.8, 2.0, 10.0, 1.0, 1005.0
+        x = pos - 6.0                                     # low-KE side -> a
+        u = (x - pos) / w
+        ex = 3.0 - (3.0 - a) / (1.0 + 4.0 * u * u)
+        t = (x - pos) / fwhm
+        want = (1.0 / (1.0 + 4.0 * t * t)) ** ex
+        y = ls._raw_values(np.array([x]), ls.parse_shape("LF(0.8,2,10,0)"),
+                           pos, fwhm)
+        self.assertAlmostEqual(float(y[0]), want, 9)
 
     def test_degenerate_inputs_do_not_blow_up(self):
         y = ls.component_curve(self.ke, "GL(30)", 1005.0, 0.0, 10.0)
@@ -890,6 +925,133 @@ class TestLA2ArgumentForm(unittest.TestCase):
             self.assertLess(cv.residual_rms, self.CEILING,
                             f"{r.sample}: {cv.residual_rms:.4f}")
         self.assertEqual(n, 5)
+
+
+PTCL2_QUANTIFIED = os.environ.get(
+    "XPS_PTCL2_QUANTIFIED_VMS",
+    r"D:\Temp\for claude files\PtCl2\PtCl2_quantified.vms")
+
+
+def _ptcl2_quantified_file():
+    return PTCL2_QUANTIFIED if os.path.isfile(PTCL2_QUANTIFIED) else None
+
+
+@unittest.skipUnless(HAVE_NP, "numpy not installed")
+class TestLFFiniteTailFormula(unittest.TestCase):
+    """The LF finite-tail mechanism used to be a hard polynomial cutoff
+    invented for this codebase; it is now the real CasaXPS formula (a
+    smoothly-rising exponent towards a fixed ceiling of 3.0 -- see the
+    module docstring and Major, Shah, Avval, Fernandez, Fairley, Linford,
+    "Advanced Line Shapes in XPS II: The Finite Lorentzian (LF) Line
+    Shape," VT&C, April 2020, with its own MATLAB listing). This pins the
+    measured ``residual_rms`` improvement on every real ``LF``-fitted
+    region available so it cannot silently regress back towards the old,
+    worse numbers."""
+
+    # (sample, region name) -> residual_rms ceiling, comfortably above the
+    # value measured with the real formula but well below the old hard-
+    # cutoff mechanism's value (in parens): Ti 2p 0.0307 (was 0.0410),
+    # Cl 2p 0.0523 (0.0629), Pt 4d 0.0686 (0.1499), Pt 4f 0.0491 (0.0592),
+    # Pt 4f area2 0.0607 (0.0718).
+    TITANIUM_CEILING = 0.036
+    PTCL2_CEILINGS = {
+        ("PtCl2", "Cl 2p"): 0.060,
+        ("PtCl2", "Pt 4d"): 0.080,
+        ("PtCl2", "Pt 4f"): 0.056,
+        ("PtCl2 area2", "Pt 4f"): 0.068,
+    }
+
+    def test_titanium_depth_profile_ti2p(self):
+        path = _real("Titanium Metal Depth Profile - INSTRUCTORS.vms")
+        if not path:
+            self.skipTest("depth profile sample not present")
+        doc = readers.load_file(path)
+        r = next(r for r in doc.regions
+                 if r.fit is not None and r.name == "Ti 2p"
+                 and any(ls.parse_shape(c.shape)["kind"] == "LF"
+                        for c in r.fit.components))
+        cv = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                            r.dwell, r.extra.get("n_scans", 1))[0]
+        self.assertLess(cv.residual_rms, self.TITANIUM_CEILING)
+
+    def test_ptcl2_quantified_lf_regions(self):
+        path = _ptcl2_quantified_file()
+        if not path:
+            self.skipTest("PtCl2_quantified.vms not present")
+        doc = readers.load_file(path)
+        n = 0
+        for r in doc.regions:
+            key = (r.sample, r.name)
+            if key not in self.PTCL2_CEILINGS or r.fit is None:
+                continue
+            if not any(ls.parse_shape(c.shape)["kind"] == "LF"
+                      for c in r.fit.components):
+                continue
+            cv = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                                r.dwell, r.extra.get("n_scans", 1))[0]
+            n += 1
+            self.assertLess(cv.residual_rms, self.PTCL2_CEILINGS[key],
+                            f"{key}: {cv.residual_rms:.4f}")
+        self.assertEqual(n, 4)
+
+
+PTCL2_REFITTED_VMS = os.environ.get(
+    "XPS_PTCL2_REFITTED_VMS",
+    r"D:\Temp\for claude files\PtCl2_new\PtCl2_refitted.vms")
+
+
+def _ptcl2_refitted_file():
+    return PTCL2_REFITTED_VMS if os.path.isfile(PTCL2_REFITTED_VMS) else None
+
+
+@unittest.skipUnless(HAVE_NP and _ptcl2_refitted_file(),
+                     "PtCl2_refitted.vms (LA(m) vs LA(a,m) comparison) not "
+                     "present")
+class TestLAShorthandOvershootIsIntrinsic(unittest.TestCase):
+    """``PtCl2_refitted.vms`` refits the same real Cl 2p / Pt 4d / Pt 4f data
+    twice -- once with the 1-argument ``LA(m)`` shorthand (sample
+    ``"PtCl2 LA(m)"``), once with the explicit ``LA(a,m)`` form (sample
+    ``"PtCl2 LA(a,m)"``) -- specifically to compare the two reconstructions
+    against the same raw counts. See the module docstring: sweeping
+    ``GAUSS_K["LA"]``/``GAUSS_P["LA"]`` from today's values down to zero
+    moves the shorthand's overshoot by well under half a percentage point,
+    so it is not a calibration gap -- it is intrinsic to the shorthand's
+    fixed ``a=b=1``. This pins the real numbers as a canary (not a target to
+    chase): a future change should not make the shorthand's overshoot climb
+    well past where it sits today, and the explicit form should stay
+    measurably better on the same real components."""
+
+    def _overshoot(self, cv, counts):
+        env = np.array(cv.envelope, dtype=float)
+        data = np.array(counts, dtype=float)
+        keep = ~np.isnan(env)
+        over = float((env[keep] - data[keep]).max())
+        peak = float(data[keep].max())
+        return 100.0 * over / peak if peak > 0 else 0.0
+
+    def _overshoot_of(self, doc, sample, name):
+        r = next(r for r in doc.regions
+                 if r.sample == sample and r.name == name)
+        cv = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                            r.dwell, r.extra.get("n_scans", 1))[0]
+        return self._overshoot(cv, r.counts)
+
+    def test_shorthand_overshoot_stays_in_its_known_range(self):
+        doc = readers.load_file(_ptcl2_refitted_file())
+        for name, lo, hi in (("Cl 2p", 3.5, 6.0), ("Pt 4d", 3.5, 6.5),
+                              ("Pt 4f", 3.5, 6.0)):
+            pct = self._overshoot_of(doc, "PtCl2 LA(m)", name)
+            self.assertTrue(lo <= pct <= hi,
+                            f"{name}: {pct:.2f}% (expected {lo}-{hi}%)")
+
+    def test_explicit_form_measurably_beats_the_shorthand(self):
+        doc = readers.load_file(_ptcl2_refitted_file())
+        for name in ("Cl 2p", "Pt 4f"):
+            short = self._overshoot_of(doc, "PtCl2 LA(m)", name)
+            explicit = self._overshoot_of(doc, "PtCl2 LA(a,m)", name)
+            self.assertLess(explicit, short - 0.5,
+                            f"{name}: explicit {explicit:.2f}% vs "
+                            f"shorthand {short:.2f}%")
 
 
 DS_DIR = os.environ.get("XPS_DS_DIR", r"D:\Temp\for claude files")
