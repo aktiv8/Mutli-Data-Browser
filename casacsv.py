@@ -454,18 +454,27 @@ def match_to_regions(blocks, regions):
                     reason="no usable data in this CSV block"))
                 continue
             b_lo, b_hi = min(b_be), max(b_be)
+            # Match by the REGION's own full acquisition span (Region.energy
+            # is already binding energy), not any single FitRegion's own
+            # narrower fit window -- a CSV block (any layout) always covers
+            # the whole scan, while start_ke/end_ke only bounds the portion
+            # CasaXPS fit a background/components over inside it. Which
+            # specific FitRegion applies (when a region has more than one,
+            # e.g. a Survey with several narrow background windows) is
+            # resolved separately, below.
             hits = []
             for r in candidates:
-                if not r.fit or r.photon_energy is None:
+                if not r.fit or not r.energy:
                     continue
-                for fr in r.fit.regions:
-                    r_lo = r.photon_energy - fr.end_ke
-                    r_hi = r.photon_energy - fr.start_ke
-                    if (abs(r_lo - b_lo) <= 0.3 and abs(r_hi - b_hi) <= 0.3
-                            and abs(len(r.energy) - len(b_be)) <= 2):
-                        hits.append((r, fr))
+                r_be = [v for v in r.energy if v is not None]
+                if not r_be:
+                    continue
+                if (abs(min(r_be) - b_lo) <= 0.3
+                        and abs(max(r_be) - b_hi) <= 0.3
+                        and abs(len(r_be) - len(b_be)) <= 2):
+                    hits.append(r)
             if len(hits) == 1:
-                region, fit_region = hits[0]
+                region = hits[0]
             elif not hits:
                 report.results.append(MatchResult(block=block,
                     reason="no matching region found by BE range + point "

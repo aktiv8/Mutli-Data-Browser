@@ -286,6 +286,51 @@ class TestRealEndToEndMatch(unittest.TestCase):
         self.assertLess(via_csv.residual_rms, recon.residual_rms)
 
 
+@unittest.skipUnless(HAVE_NP and _rows_csv() and _refitted_vms(),
+                     "PtCl2_refitted.vms + its rows CSV export not present")
+class TestRealEndToEndMatchRowsLayout(unittest.TestCase):
+    """The "rows" layout has no raw K.E./Counts, so it relies entirely on
+    the BE-range + point-count fallback -- this used to compare the CSV
+    block's full-scan range against a FitRegion's own narrower fit window
+    and so matched nothing at all (a real bug the user hit). Mirrors
+    TestRealEndToEndMatch's own columns-layout checks to confirm the fix
+    brings rows up to the same result."""
+
+    def test_every_fitted_region_component_aligns(self):
+        doc = readers.load_file(_refitted_vms())
+        imp = casacsv.parse(_rows_csv())
+        report = casacsv.match_to_regions(imp.blocks, doc.regions)
+        fitted_names = {"C 1s", "Cl 2p", "Pt 4d", "Pt 4f", "Pt 4p"}
+        checked = 0
+        for res in report.results:
+            if res.region is None or res.region.name not in fitted_names:
+                continue
+            if res.block.scan_name.endswith("Scan2"):
+                continue
+            self.assertEqual(res.reason, "",
+                             f"{res.region.sample}/{res.region.name}: "
+                             f"{res.reason}")
+            self.assertEqual(res.n_components_aligned,
+                             res.n_components_total)
+            checked += 1
+        self.assertEqual(checked, 10)     # 5 fitted regions x 2 samples
+
+    def test_curves_prefer_csv_beats_reconstruction(self):
+        doc = readers.load_file(_refitted_vms())
+        imp = casacsv.parse(_rows_csv())
+        report = casacsv.match_to_regions(imp.blocks, doc.regions)
+        casacsv.apply_matches(report)
+        r = next(r for r in doc.regions
+                 if r.sample == "PtCl2 LA(m)" and r.name == "Cl 2p")
+        dwell, scans = r.dwell_and_scans()
+        recon = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                               dwell, scans, prefer_csv=False)[0]
+        via_csv = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                                 dwell, scans, prefer_csv=True)[0]
+        self.assertFalse(via_csv.approximate)
+        self.assertLess(via_csv.residual_rms, recon.residual_rms)
+
+
 # ------------------------------------------------------------- matching
 def _mk_region(name, sample, be, counts, hv, dwell=0.1, scans=1, fit=None):
     r = Region(name=name, index=0, offset=0, energy=list(be),
@@ -345,6 +390,35 @@ class TestMatchToRegions(unittest.TestCase):
         report = casacsv.match_to_regions([block], [region_a, region_b])
         self.assertIsNone(report.results[0].region)
         self.assertTrue(report.results[0].reason.startswith("ambiguous"))
+
+    def test_rows_layout_matches_by_full_region_span_not_fit_window(self):
+        """Regression for the real bug: a rows-layout block (no raw K.E./
+        Counts) has to fall back to BE range + point count, and that
+        fallback must compare against the REGION's own full acquisition
+        span, not a FitRegion's own narrower fit window -- a real CSV
+        export always covers the whole scan, while start_ke/end_ke only
+        bounds the portion CasaXPS fit a background over inside it (e.g.
+        the real Cl 2p region: fit window 194.4-209.0 eV, full scan
+        185.1-215.1 eV). Comparing against the fit window instead (the
+        original bug) made every rows-layout block match nothing."""
+        hv = 1000.0
+        be = [20.0 - i for i in range(21)]           # full scan: 20..0 eV
+        fc = casafit.FitComponent(name="A", pos_ke=hv - 12.0, region="R")
+        fit = _mk_fit("R", [fc])
+        fit.regions[0].start_ke = hv - 12.0           # narrow fit window:
+        fit.regions[0].end_ke = hv - 8.0              # BE 8..12, not 0..20
+        region = _mk_region("R", "S", be, [1.0] * 21, hv, fit=fit)
+        block = casacsv.CsvBlock(
+            source="x.csv", block_index=0, layout="rows", cycle=0,
+            sample="S", scan_name="R Scan", hv=None, dwell_total=None,
+            ke=None, counts=None, be=tuple(be), cps=tuple([1.0] * 21),
+            background_cps=None, envelope_cps=None, components=[
+                casacsv.CsvComponent(name="A", position_be=12.0, fwhm=1.0,
+                                     area=1.0, lineshape="GL(30)",
+                                     curve_cps=tuple([0.1] * 21))])
+        report = casacsv.match_to_regions([block], [region])
+        self.assertIs(report.results[0].region, region)
+        self.assertEqual(report.results[0].reason, "")
 
     def test_unmatched_sample_reported(self):
         block = casacsv.CsvBlock(
