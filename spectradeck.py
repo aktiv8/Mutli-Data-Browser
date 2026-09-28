@@ -99,6 +99,7 @@ import calibration
 import casafit
 import casaquant
 import casaquant_ui
+import quant_ui
 import elements
 import handover
 import htmlbrowser
@@ -1501,12 +1502,16 @@ class Workspace:
         self.tab_images = ttk.Frame(self.nb)
         self.tab_map = ttk.Frame(self.nb)
         self.tab_casaquant = ttk.Frame(self.nb)
+        self.tab_quant = ttk.Frame(self.nb)
         self.nb.add(self.tab_images, text="Images")
         self.nb.add(self.tab_map, text="Stage map")
         self.nb.add(self.tab_casaquant, text="CasaXPS quant")
+        self.nb.add(self.tab_quant, text="Quantification")
         self.casaquant_panel = casaquant_ui.CasaQuantPanel(
             self.tab_casaquant, self)
         self.casaquant_panel.pack(fill="both", expand=True)
+        self.quant_panel = quant_ui.QuantPanel(self.tab_quant, self)
+        self.quant_panel.pack(fill="both", expand=True)
 
         # images: horizontal thumbnail strip on top, viewer below
         strip = ttk.Frame(self.tab_images)
@@ -2764,6 +2769,7 @@ class Workspace:
                 self.panel_sb.set(0, 1)
         self._update_status()
         self._refresh_side()
+        self._refresh_info()
         self._update_title()
 
     def _draw_page(self, fig, chunk, limit=None, start=0, pal=None,
@@ -4515,13 +4521,14 @@ class Workspace:
 
     # -- images tab -----------------------------------------------------
     def _refresh_info(self):
-        """Show the Images / Stage-map / CasaXPS-quant notebook only when
-        the loaded files (or folder) have something for it; otherwise
-        Details gets the full height."""
+        """Show the Images / Stage-map / CasaXPS-quant / Quantification
+        notebook only when the loaded files (or ticks) have something for
+        it; otherwise Details gets the full height."""
         has_img = any(p.images for p in self.docs)
         has_pos = any(p.sample_positions() for p in self.docs)
         has_quant = bool(self.casa_quant)
-        show = has_img or has_pos or has_quant
+        has_fit = any(getattr(r, "fit", None) for r in self._ticked_regions())
+        show = has_img or has_pos or has_quant or has_fit
         on = str(self.nb) in [str(x) for x in self.info_pane.panes()]
         if show and not on:
             self.info_pane.add(self.nb, weight=2)
@@ -4531,13 +4538,17 @@ class Workspace:
         self.nb.tab(self.tab_map, state="normal" if has_pos else "hidden")
         self.nb.tab(self.tab_casaquant,
                    state="normal" if has_quant else "hidden")
+        self.nb.tab(self.tab_quant, state="normal" if has_fit else "hidden")
         self.casaquant_panel.refresh()
+        self.quant_panel.refresh()
         if has_pos and not has_img:
             self.nb.select(self.tab_map)
         elif has_img:
             self.nb.select(self.tab_images)
         elif has_quant:
             self.nb.select(self.tab_casaquant)
+        elif has_fit:
+            self.nb.select(self.tab_quant)
 
     def _refresh_images(self):
         if getattr(self, "_thumb_job", None):
