@@ -1,5 +1,5 @@
 {
- "comment": "Literature-derived chemical-state binding energies, curated from KherveFitting's Peaks Library JSON files (github.com/KherveFitting/KherveFitting) -- each row's own 'source' cites the underlying paper when its containing folder names one (mostly the Biesinger group's Applied Surface Science handbook papers), else credits the Peaks Library file itself. 'be' is the position from the file's own worked example fit, not a guaranteed universal constant -- treat as a starting point for identification, not ground truth. Edit or extend this file freely.",
+ "comment": "Literature-derived chemical-state binding energies, curated from KherveFitting's Peaks Library JSON files (github.com/KherveFitting/KherveFitting) -- each row's own 'source' cites the underlying paper when its containing folder names one (mostly the Biesinger group's Applied Surface Science handbook papers), else credits the Peaks Library file itself. 'be' is the position from the file's own worked example fit, not a guaranteed universal constant -- treat as a starting point for identification, not ground truth. Edit or extend this file freely. 'range' (present on states with 2+ independent worked-example observations in this table) is the min-max spread THIS APP'S OWN corpus shows for that exact state -- not an independently reported literature range; states with only one observation have no range and fall back to a caller-supplied window, as before.",
  "states": [
   {
    "core_level": "Br 3d",
@@ -7,7 +7,11 @@
    "be": 68.05,
    "fwhm": 0.98,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Br3d_Iperov_1doublet_Voigt_GK_2412"
+   "source": "KherveFitting Peaks Library: Br3d_Iperov_1doublet_Voigt_GK_2412",
+   "range": [
+    68.05,
+    68.14
+   ]
   },
   {
    "core_level": "Br 3d",
@@ -15,7 +19,11 @@
    "be": 68.14,
    "fwhm": 0.94,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Br3d_Cs4d_Iperov_1doublet_Voigt_GK_2501"
+   "source": "KherveFitting Peaks Library: Br3d_Cs4d_Iperov_1doublet_Voigt_GK_2501",
+   "range": [
+    68.05,
+    68.14
+   ]
   },
   {
    "core_level": "Br 3d",
@@ -23,7 +31,11 @@
    "be": 69.09,
    "fwhm": 0.98,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Br3d_Iperov_1doublet_Voigt_GK_2412"
+   "source": "KherveFitting Peaks Library: Br3d_Iperov_1doublet_Voigt_GK_2412",
+   "range": [
+    69.09,
+    69.18
+   ]
   },
   {
    "core_level": "Br 3d",
@@ -31,7 +43,11 @@
    "be": 69.18,
    "fwhm": 0.95,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Br3d_Cs4d_Iperov_1doublet_Voigt_GK_2501"
+   "source": "KherveFitting Peaks Library: Br3d_Cs4d_Iperov_1doublet_Voigt_GK_2501",
+   "range": [
+    69.09,
+    69.18
+   ]
   },
   {
    "core_level": "Br 3d",
@@ -63,7 +79,11 @@
    "be": 284.78,
    "fwhm": 1.12,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511"
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511",
+   "range": [
+    284.78,
+    285.75
+   ]
   },
   {
    "core_level": "C 1s",
@@ -71,7 +91,11 @@
    "be": 284.8,
    "fwhm": 1.13,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505"
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505",
+   "range": [
+    284.78,
+    285.75
+   ]
   },
   {
    "core_level": "C 1s",
@@ -79,7 +103,11 @@
    "be": 285.75,
    "fwhm": 1.47,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_3peaks_Voigt_GK_2412"
+   "source": "KherveFitting Peaks Library: C1s_C-C_3peaks_Voigt_GK_2412",
+   "range": [
+    284.78,
+    285.75
+   ]
   },
   {
    "core_level": "C 1s",
@@ -87,7 +115,11 @@
    "be": 285.88,
    "fwhm": 1.12,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511"
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511",
+   "range": [
+    285.88,
+    287.05
+   ]
   },
   {
    "core_level": "C 1s",
@@ -95,7 +127,11 @@
    "be": 286.09,
    "fwhm": 1.13,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505"
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505",
+   "range": [
+    285.88,
+    287.05
+   ]
   },
   {
    "core_level": "C 1s",
@@ -103,7 +139,11 @@
    "be": 286.3,
    "fwhm": 1.9,
    "model": "GL (Area)",
-   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412"
+   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412",
+   "range": [
+    285.88,
+    287.05
+   ]
   },
   {
    "core_level": "C 1s",
@@ -111,7 +151,11 @@
    "be": 286.77,
    "fwhm": 1.12,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511"
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511",
+   "range": [
+    286.77,
+    289.65
+   ]
   },
   {
    "core_level": "C 1s",
@@ -119,7 +163,11 @@
    "be": 287.05,
    "fwhm": 1.47,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_3peaks_Voigt_GK_2412"
+   "source": "KherveFitting Peaks Library: C1s_C-C_3peaks_Voigt_GK_2412",
+   "range": [
+    285.88,
+    287.05
+   ]
   },
   {
    "core_level": "C 1s",
@@ -127,7 +175,11 @@
    "be": 287.7,
    "fwhm": 1.9,
    "model": "GL (Area)",
-   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412"
+   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412",
+   "range": [
+    286.77,
+    289.65
+   ]
   },
   {
    "core_level": "C 1s",
@@ -135,7 +187,11 @@
    "be": 287.95,
    "fwhm": 1.13,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505"
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505",
+   "range": [
+    286.77,
+    289.65
+   ]
   },
   {
    "core_level": "C 1s",
@@ -143,7 +199,11 @@
    "be": 288.37,
    "fwhm": 1.23,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511"
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_SGL_GK_2511",
+   "range": [
+    288.37,
+    289.5
+   ]
   },
   {
    "core_level": "C 1s",
@@ -151,7 +211,11 @@
    "be": 288.74,
    "fwhm": 1.13,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505"
+   "source": "KherveFitting Peaks Library: C1s_C-C_4peaks_Voigt_GK_2505",
+   "range": [
+    288.37,
+    289.5
+   ]
   },
   {
    "core_level": "C 1s",
@@ -159,7 +223,11 @@
    "be": 289.5,
    "fwhm": 1.9,
    "model": "GL (Area)",
-   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412"
+   "source": "KherveFitting Peaks Library: C1s_C=C_21_LA_GK_2412",
+   "range": [
+    288.37,
+    289.5
+   ]
   },
   {
    "core_level": "C 1s",
@@ -167,7 +235,11 @@
    "be": 289.65,
    "fwhm": 1.47,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: C1s_C-C_3peaks_Voigt_GK_2412"
+   "source": "KherveFitting Peaks Library: C1s_C-C_3peaks_Voigt_GK_2412",
+   "range": [
+    286.77,
+    289.65
+   ]
   },
   {
    "core_level": "C 1s",
@@ -183,7 +255,11 @@
    "be": 880.92,
    "fwhm": 2.0,
    "model": "LA (Area, σ, γ)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505",
+   "range": [
+    880.92,
+    882.45
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -199,7 +275,11 @@
    "be": 881.79,
    "fwhm": 3.25,
    "model": "GL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_GL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_GL_GK_2505",
+   "range": [
+    881.79,
+    881.81
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -207,7 +287,11 @@
    "be": 881.81,
    "fwhm": 3.23,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_SGL_GK_2505",
+   "range": [
+    881.79,
+    881.81
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -215,7 +299,11 @@
    "be": 882.45,
    "fwhm": 1.85,
    "model": "LA (Area, σ, γ)",
-   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505",
+   "range": [
+    880.92,
+    882.45
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -239,7 +327,11 @@
    "be": 887.71,
    "fwhm": 3.45,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505",
+   "range": [
+    887.71,
+    888.93
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -247,7 +339,11 @@
    "be": 888.93,
    "fwhm": 3.45,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505",
+   "range": [
+    887.71,
+    888.93
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -255,7 +351,11 @@
    "be": 896.88,
    "fwhm": 1.93,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505",
+   "range": [
+    896.88,
+    898.47
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -263,7 +363,11 @@
    "be": 898.47,
    "fwhm": 1.81,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505",
+   "range": [
+    896.88,
+    898.47
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -279,7 +383,11 @@
    "be": 899.42,
    "fwhm": 2.0,
    "model": "LA (Area, σ, γ)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505",
+   "range": [
+    899.42,
+    900.91
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -287,7 +395,11 @@
    "be": 900.15,
    "fwhm": 3.54,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_SGL_GK_2505",
+   "range": [
+    900.15,
+    900.22
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -295,7 +407,11 @@
    "be": 900.22,
    "fwhm": 3.55,
    "model": "GL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_GL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce3+_GL_GK_2505",
+   "range": [
+    900.15,
+    900.22
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -303,7 +419,11 @@
    "be": 900.91,
    "fwhm": 1.85,
    "model": "LA (Area, σ, γ)",
-   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505",
+   "range": [
+    899.42,
+    900.91
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -327,7 +447,11 @@
    "be": 906.21,
    "fwhm": 3.28,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505",
+   "range": [
+    906.21,
+    907.43
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -335,7 +459,11 @@
    "be": 907.43,
    "fwhm": 3.29,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505",
+   "range": [
+    906.21,
+    907.43
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -343,7 +471,11 @@
    "be": 910.61,
    "fwhm": 5.0,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505",
+   "range": [
+    910.61,
+    912.13
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -351,7 +483,11 @@
    "be": 912.13,
    "fwhm": 3.7,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505",
+   "range": [
+    910.61,
+    912.13
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -359,7 +495,11 @@
    "be": 915.32,
    "fwhm": 1.93,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_Ce4+_LA_SGL_GK_2505",
+   "range": [
+    915.32,
+    916.81
+   ]
   },
   {
    "core_level": "Ce 3d",
@@ -367,7 +507,11 @@
    "be": 916.81,
    "fwhm": 1.81,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505"
+   "source": "KherveFitting Peaks Library: Ce3d_CeMix_LA_SGL_GK_2505",
+   "range": [
+    915.32,
+    916.81
+   ]
   },
   {
    "core_level": "Co 2p",
@@ -559,7 +703,11 @@
    "be": 575.36,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    575.36,
+    575.52
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -567,7 +715,11 @@
    "be": 575.52,
    "fwhm": 0.94,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    575.36,
+    575.52
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -591,7 +743,11 @@
    "be": 576.37,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    576.37,
+    576.53
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -599,7 +755,11 @@
    "be": 576.53,
    "fwhm": 0.94,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    576.37,
+    576.53
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -631,7 +791,11 @@
    "be": 577.18,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    577.18,
+    577.31
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -639,7 +803,11 @@
    "be": 577.31,
    "fwhm": 0.94,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    577.18,
+    577.31
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -663,7 +831,11 @@
    "be": 578.11,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    578.11,
+    578.31
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -671,7 +843,11 @@
    "be": 578.31,
    "fwhm": 0.94,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    578.11,
+    578.31
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -679,7 +855,11 @@
    "be": 578.56,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    578.56,
+    578.72
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -695,7 +875,11 @@
    "be": 578.72,
    "fwhm": 0.94,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    578.56,
+    578.72
+   ]
   },
   {
    "core_level": "Cr 2p",
@@ -727,7 +911,11 @@
    "be": 933.11,
    "fwhm": 2.07,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898",
+   "range": [
+    933.11,
+    934.67
+   ]
   },
   {
    "core_level": "Cu 2p",
@@ -735,7 +923,11 @@
    "be": 934.48,
    "fwhm": 3.05,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898",
+   "range": [
+    934.48,
+    939.3
+   ]
   },
   {
    "core_level": "Cu 2p",
@@ -743,7 +935,11 @@
    "be": 934.67,
    "fwhm": 2.85,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898",
+   "range": [
+    933.11,
+    934.67
+   ]
   },
   {
    "core_level": "Cu 2p",
@@ -751,7 +947,11 @@
    "be": 939.3,
    "fwhm": 2.8,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898",
+   "range": [
+    934.48,
+    939.3
+   ]
   },
   {
    "core_level": "Cu 2p",
@@ -759,7 +959,11 @@
    "be": 940.52,
    "fwhm": 1.03,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898",
+   "range": [
+    940.52,
+    942.2
+   ]
   },
   {
    "core_level": "Cu 2p",
@@ -767,7 +971,11 @@
    "be": 941.66,
    "fwhm": 3.55,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898",
+   "range": [
+    941.66,
+    944.12
+   ]
   },
   {
    "core_level": "Cu 2p",
@@ -775,7 +983,11 @@
    "be": 942.2,
    "fwhm": 3.66,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898",
+   "range": [
+    940.52,
+    942.2
+   ]
   },
   {
    "core_level": "Cu 2p",
@@ -791,7 +1003,11 @@
    "be": 944.12,
    "fwhm": 1.76,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898"
+   "source": "Biesinger et al., Applied Surface Science 257 (2010) 887–898",
+   "range": [
+    941.66,
+    944.12
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -831,7 +1047,11 @@
    "be": 709.2,
    "fwhm": 1.1,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    709.2,
+    709.71
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -855,7 +1075,11 @@
    "be": 709.71,
    "fwhm": 1.1,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    709.2,
+    709.71
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -895,7 +1119,11 @@
    "be": 710.2,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    710.2,
+    710.71
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -935,7 +1163,11 @@
    "be": 710.71,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    710.2,
+    710.71
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -967,7 +1199,11 @@
    "be": 711.0,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    711.0,
+    711.51
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -1023,7 +1259,11 @@
    "be": 711.51,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    711.0,
+    711.51
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -1047,7 +1287,11 @@
    "be": 712.1,
    "fwhm": 1.4,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    712.1,
+    712.61
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -1095,7 +1339,11 @@
    "be": 712.61,
    "fwhm": 1.4,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    712.1,
+    712.61
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -1111,7 +1359,11 @@
    "be": 713.1,
    "fwhm": 2.0,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    713.1,
+    713.61
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -1159,7 +1411,11 @@
    "be": 713.61,
    "fwhm": 2.0,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    713.1,
+    713.61
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -1223,7 +1479,11 @@
    "be": 718.7,
    "fwhm": 2.6,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    718.7,
+    719.21
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -1239,7 +1499,11 @@
    "be": 719.21,
    "fwhm": 2.6,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    718.7,
+    719.21
+   ]
   },
   {
    "core_level": "Fe 2p",
@@ -1303,7 +1567,11 @@
    "be": 61.71,
    "fwhm": 1.92,
    "model": "LA (Area, σ, γ)",
-   "source": "KherveFitting Peaks Library: Ir4f_IrO2_LA_2511"
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_LA_2511",
+   "range": [
+    61.71,
+    62.22
+   ]
   },
   {
    "core_level": "Ir 4f",
@@ -1311,7 +1579,11 @@
    "be": 62.22,
    "fwhm": 1.6,
    "model": "LA (Area, σ, γ)",
-   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511"
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511",
+   "range": [
+    61.71,
+    62.22
+   ]
   },
   {
    "core_level": "Ir 4f",
@@ -1319,7 +1591,11 @@
    "be": 63.81,
    "fwhm": 1.92,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ir4f_IrO2_LA_2511"
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_LA_2511",
+   "range": [
+    63.81,
+    64.12
+   ]
   },
   {
    "core_level": "Ir 4f",
@@ -1327,7 +1603,11 @@
    "be": 64.12,
    "fwhm": 1.6,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511"
+   "source": "KherveFitting Peaks Library: Ir4f_IrO2_Ir0_Mix_LA_2511",
+   "range": [
+    63.81,
+    64.12
+   ]
   },
   {
    "core_level": "Ir 4f",
@@ -1431,7 +1711,11 @@
    "be": 638.6,
    "fwhm": 0.79,
    "model": "LA (Area, σ, γ)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    638.6,
+    641.0
+   ]
   },
   {
    "core_level": "Mn 2p",
@@ -1439,7 +1723,11 @@
    "be": 639.6,
    "fwhm": 0.79,
    "model": "LA (Area, σ, γ)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    639.6,
+    641.7
+   ]
   },
   {
    "core_level": "Mn 2p",
@@ -1447,7 +1735,11 @@
    "be": 641.0,
    "fwhm": 1.35,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    638.6,
+    641.0
+   ]
   },
   {
    "core_level": "Mn 2p",
@@ -1471,7 +1763,11 @@
    "be": 641.7,
    "fwhm": 1.35,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    639.6,
+    641.7
+   ]
   },
   {
    "core_level": "Mn 2p",
@@ -1655,7 +1951,11 @@
    "be": 204.03,
    "fwhm": 1.33,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501",
+   "range": [
+    204.03,
+    204.37
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1663,7 +1963,11 @@
    "be": 204.37,
    "fwhm": 0.96,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0",
+   "range": [
+    204.03,
+    204.37
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1671,7 +1975,11 @@
    "be": 205.44,
    "fwhm": 1.71,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0",
+   "range": [
+    205.44,
+    205.45
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1679,7 +1987,11 @@
    "be": 205.45,
    "fwhm": 1.55,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501",
+   "range": [
+    205.44,
+    205.45
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1687,7 +1999,11 @@
    "be": 206.81,
    "fwhm": 1.33,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501",
+   "range": [
+    206.81,
+    207.24
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1695,7 +2011,11 @@
    "be": 207.24,
    "fwhm": 0.96,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0",
+   "range": [
+    206.81,
+    207.24
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1703,7 +2023,11 @@
    "be": 207.38,
    "fwhm": 1.6,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0",
+   "range": [
+    207.38,
+    207.39
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1711,7 +2035,11 @@
    "be": 207.39,
    "fwhm": 2.52,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501",
+   "range": [
+    207.38,
+    207.39
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1719,7 +2047,11 @@
    "be": 208.08,
    "fwhm": 1.71,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0",
+   "range": [
+    208.08,
+    208.24
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1727,7 +2059,11 @@
    "be": 208.24,
    "fwhm": 1.55,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501",
+   "range": [
+    208.08,
+    208.24
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1735,7 +2071,11 @@
    "be": 210.14,
    "fwhm": 2.52,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501",
+   "range": [
+    210.14,
+    210.16
+   ]
   },
   {
    "core_level": "Nb 3d",
@@ -1743,7 +2083,11 @@
    "be": 210.16,
    "fwhm": 1.6,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0"
+   "source": "KherveFitting Peaks Library: Nb3d_NbN_3doublet_Voigt_GK_2501_0",
+   "range": [
+    210.14,
+    210.16
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1767,7 +2111,11 @@
    "be": 853.7576,
    "fwhm": 1.3,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    853.7576,
+    854.51
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1775,7 +2123,11 @@
    "be": 854.51,
    "fwhm": 1.36,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    853.7576,
+    854.51
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1823,7 +2175,11 @@
    "be": 855.7576,
    "fwhm": 1.96,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    855.7576,
+    856.01
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1839,7 +2195,11 @@
    "be": 856.01,
    "fwhm": 2.98,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    855.7576,
+    856.01
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1855,7 +2215,11 @@
    "be": 856.4576,
    "fwhm": 3.81,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    856.4576,
+    861.41
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1911,7 +2275,11 @@
    "be": 860.9576,
    "fwhm": 1.43,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    860.9576,
+    864.71
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1927,7 +2295,11 @@
    "be": 861.2576,
    "fwhm": 4.41,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    861.2576,
+    867.01
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1935,7 +2307,11 @@
    "be": 861.41,
    "fwhm": 4.5,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    856.4576,
+    861.41
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1967,7 +2343,11 @@
    "be": 864.71,
    "fwhm": 3.01,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    860.9576,
+    864.71
+   ]
   },
   {
    "core_level": "Ni 2p",
@@ -1999,7 +2379,11 @@
    "be": 867.01,
    "fwhm": 2.66,
    "model": "GL (Area)",
-   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717"
+   "source": "Biesinger et al., Applied Surface Science 257 (2011) 2717",
+   "range": [
+    861.2576,
+    867.01
+   ]
   },
   {
    "core_level": "O 1s",
@@ -2007,7 +2391,11 @@
    "be": 529.73,
    "fwhm": 0.99,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: O1s_O-Lat_C=O_3peaks_Voigt_GK_2412"
+   "source": "KherveFitting Peaks Library: O1s_O-Lat_C=O_3peaks_Voigt_GK_2412",
+   "range": [
+    529.73,
+    530.09
+   ]
   },
   {
    "core_level": "O 1s",
@@ -2015,7 +2403,11 @@
    "be": 530.09,
    "fwhm": 1.37,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: O1s_O-Lat_3peaks_Voigt_GK_2412"
+   "source": "KherveFitting Peaks Library: O1s_O-Lat_3peaks_Voigt_GK_2412",
+   "range": [
+    529.73,
+    530.09
+   ]
   },
   {
    "core_level": "O 1s",
@@ -2103,7 +2495,11 @@
    "be": 71.07,
    "fwhm": 1.02,
    "model": "LA (Area, σ/γ, γ)",
-   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502",
+   "range": [
+    71.07,
+    71.15
+   ]
   },
   {
    "core_level": "Pt 4f",
@@ -2111,7 +2507,11 @@
    "be": 71.15,
    "fwhm": 1.08,
    "model": "LA (Area, σ, γ)",
-   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502"
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502",
+   "range": [
+    71.07,
+    71.15
+   ]
   },
   {
    "core_level": "Pt 4f",
@@ -2119,7 +2519,11 @@
    "be": 72.54,
    "fwhm": 1.25,
    "model": "GL (Area)",
-   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502"
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_LA-GL_GK_2502",
+   "range": [
+    72.54,
+    74.22
+   ]
   },
   {
    "core_level": "Pt 4f",
@@ -2135,7 +2539,11 @@
    "be": 74.22,
    "fwhm": 1.2,
    "model": "SGL (Area)",
-   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502"
+   "source": "KherveFitting Peaks Library: Pt4f_PtO2_PtO_LA-GL_GK_2502",
+   "range": [
+    72.54,
+    74.22
+   ]
   },
   {
    "core_level": "Pt 4f",
@@ -2223,7 +2631,11 @@
    "be": 132.49,
    "fwhm": 0.96,
    "model": "LA (Area, σ/γ, γ)",
-   "source": "KherveFitting Peaks Library: Sr3d_STO_1doublets_LA_GK_2412"
+   "source": "KherveFitting Peaks Library: Sr3d_STO_1doublets_LA_GK_2412",
+   "range": [
+    132.49,
+    133.54
+   ]
   },
   {
    "core_level": "Sr 3d",
@@ -2239,7 +2651,11 @@
    "be": 133.54,
    "fwhm": 1.23,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Sr3d_STO_2doublets_Voigt_GK_2412"
+   "source": "KherveFitting Peaks Library: Sr3d_STO_2doublets_Voigt_GK_2412",
+   "range": [
+    132.49,
+    133.54
+   ]
   },
   {
    "core_level": "Sr 3d",
@@ -2255,7 +2671,11 @@
    "be": 134.25,
    "fwhm": 0.96,
    "model": "LA (Area, σ/γ, γ)",
-   "source": "KherveFitting Peaks Library: Sr3d_STO_1doublets_LA_GK_2412"
+   "source": "KherveFitting Peaks Library: Sr3d_STO_1doublets_LA_GK_2412",
+   "range": [
+    134.25,
+    135.32
+   ]
   },
   {
    "core_level": "Sr 3d",
@@ -2271,7 +2691,11 @@
    "be": 135.32,
    "fwhm": 1.23,
    "model": "Voigt (Area, L/G, σ)",
-   "source": "KherveFitting Peaks Library: Sr3d_STO_2doublets_Voigt_GK_2412"
+   "source": "KherveFitting Peaks Library: Sr3d_STO_2doublets_Voigt_GK_2412",
+   "range": [
+    134.25,
+    135.32
+   ]
   },
   {
    "core_level": "Sr 3d",

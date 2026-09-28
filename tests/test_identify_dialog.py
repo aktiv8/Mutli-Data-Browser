@@ -138,6 +138,17 @@ class TestIdentifyDialog(unittest.TestCase):
         self.assertEqual(
             [k for k, _d, _e in dlg.rows if k == "state"], [])
 
+    def test_a_ranged_state_shows_its_range_in_the_row(self):
+        with mock.patch.object(chemstates, "load_states", return_value=[
+                {"core_level": "Fe 2p", "state": "Fe2p3/2 aFe2O3 peak 1",
+                 "be": 709.83, "fwhm": 1.0, "model": "GL (Area)",
+                 "source": "Biesinger et al.", "range": [709.5, 710.2]}]):
+            dlg = self.dialog()
+            dlg._on_click(709.9)
+        texts = [dlg.cand_list.get(i) for i in range(dlg.cand_list.size())]
+        row = next(t for t in texts if "aFe2O3" in t)
+        self.assertIn("[709.5–710.2]", row)
+
 
 if __name__ == "__main__":
     unittest.main()

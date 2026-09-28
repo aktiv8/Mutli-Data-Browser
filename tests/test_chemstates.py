@@ -37,6 +37,28 @@ class TestTable(unittest.TestCase):
             self.assertTrue(0 < e["be"] < 1500, e)
             self.assertTrue(e["source"])
 
+    def test_bundled_ranges_are_sane_and_empirical(self):
+        # every 'range' is a real [lo, hi] that actually brackets every
+        # observed 'be' of that exact (core_level, state) group -- i.e. it
+        # was computed from the table's own data, not asserted separately
+        by_key = {}
+        for e in STATES:
+            by_key.setdefault((e["core_level"], e["state"]), []).append(e)
+        found_one = False
+        for key, rows in by_key.items():
+            ranges = {tuple(e["range"]) for e in rows if "range" in e}
+            if not ranges:
+                self.assertEqual(len(rows), 1, key)   # only lone states lack one
+                continue
+            found_one = True
+            self.assertEqual(len(ranges), 1, key)     # same range on every row
+            lo, hi = next(iter(ranges))
+            self.assertLessEqual(lo, hi, key)
+            bes = [e["be"] for e in rows]
+            self.assertEqual(lo, min(bes), key)
+            self.assertEqual(hi, max(bes), key)
+        self.assertTrue(found_one)
+
     def test_core_levels_are_canonicalised(self):
         # no raw "Fe2p"/"Fe2p4"-style sheet key should have leaked through
         for lv in cs.core_levels(STATES):
@@ -55,6 +77,26 @@ class TestTable(unittest.TestCase):
                     {"core_level": "Fe 2p", "state": "Y"},   # no be: dropped
                     "junk"]}, fh)
             self.assertEqual(len(cs.load_states(p)), 1)
+
+    def test_a_malformed_range_is_dropped_not_the_whole_entry(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = os.path.join(d, "x.json")
+            with open(p, "w") as fh:
+                json.dump({"states": [
+                    {"core_level": "Fe 2p", "state": "A", "be": 710.0,
+                     "range": [710.0]},               # wrong length
+                    {"core_level": "Fe 2p", "state": "B", "be": 711.0,
+                     "range": [712.0, 710.0]},          # lo > hi
+                    {"core_level": "Fe 2p", "state": "C", "be": 712.0,
+                     "range": "not a list"},
+                    {"core_level": "Fe 2p", "state": "D", "be": 713.0,
+                     "range": [712.5, 713.5]},          # valid: kept
+                ]}, fh)
+            got = {e["state"]: e for e in cs.load_states(p)}
+            self.assertEqual(len(got), 4)
+            for state in "ABC":
+                self.assertNotIn("range", got[state], state)
+            self.assertEqual(got["D"]["range"], [712.5, 713.5])
 
 
 class TestCandidates(unittest.TestCase):
@@ -82,6 +124,30 @@ class TestCandidates(unittest.TestCase):
         self.assertEqual(cs.state_candidates(600.0, 2.0, FIXTURE), [])
         self.assertEqual(
             cs.state_candidates(709.9, 0.01, FIXTURE, core_level="Fe 2p"), [])
+
+    def test_a_state_s_own_range_admits_it_beyond_the_window(self):
+        ranged = FIXTURE + [
+            {"core_level": "Fe 2p", "state": "Fe2p3/2 Broad state",
+             "be": 705.0, "fwhm": 1.0, "model": "GL (Area)",
+             "source": "Biesinger et al.", "range": [703.0, 707.0]}]
+        # 703.5 is inside the state's own range but 1.5 eV from its point
+        # be, well outside a 0.5 eV window -- it must still be offered
+        got = cs.state_candidates(703.5, 0.5, ranged, core_level="Fe 2p")
+        self.assertEqual([cs.label_of(e) for _d, e in got],
+                         ["Fe2p3/2 Broad state"])
+        # a state without a range still needs to be inside the window
+        self.assertEqual(cs.state_candidates(703.5, 0.5, FIXTURE,
+                                             core_level="Fe 2p"), [])
+
+    def test_range_admitted_candidates_sort_after_true_near_matches(self):
+        ranged = FIXTURE + [
+            {"core_level": "Fe 2p", "state": "Fe2p3/2 Broad state",
+             "be": 705.0, "fwhm": 1.0, "model": "GL (Area)",
+             "source": "Biesinger et al.", "range": [703.0, 710.5]}]
+        got = cs.state_candidates(709.9, 2.0, ranged, core_level="Fe 2p")
+        labels = [cs.label_of(e) for _d, e in got]
+        self.assertEqual(labels[-1], "Fe2p3/2 Broad state")
+        self.assertIn("Fe2p3/2 aFe2O3 peak 1", labels)
 
 
 if __name__ == "__main__":

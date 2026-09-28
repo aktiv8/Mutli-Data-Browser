@@ -924,9 +924,11 @@ class IdentifyDialog(tk.Toplevel):
                     "end", f"{self.xl.label_of(e):<12} "
                            f"{self.xl.line_be(e, hv):8.1f} eV   ({d:+.1f})")
             else:
+                rng = e.get("range")
+                tail = f"   [{rng[0]:.1f}–{rng[1]:.1f}]" if rng else ""
                 self.cand_list.insert(
                     "end", f"{self.STATE_MARK}{self.cs.label_of(e):<24} "
-                           f"{e['be']:7.1f} eV   ({d:+.1f})")
+                           f"{e['be']:7.1f} eV   ({d:+.1f}){tail}")
         if self.rows:
             self.cand_list.selection_set(0)
         self._on_select()
