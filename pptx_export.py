@@ -13,8 +13,9 @@ adds the **divider** slides (before a section of ``DIVIDER_MIN`` slides or more,
 unless the spec says never) and the **contents** slide(s) (sections and their
 slide numbers, where the spec puts them), moves them into place, and stamps
 every slide but the title and the dividers with "title | section | n of N", so
-the numbers on the contents slide are the real ones. The accent colour is the
-cover's. Needs python-pptx; no Tk here.
+the numbers on the contents slide are the real ones and each entry jumps to
+its slide on click. The accent colour is the cover's. Needs python-pptx; no
+Tk here.
 """
 
 from __future__ import annotations
@@ -59,11 +60,12 @@ def _modules():
         from pptx.dml.color import RGBColor
         from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
         from pptx.enum.shapes import MSO_SHAPE
+        from pptx.action import ActionSetting
     except ImportError:
         raise PptxError("PowerPoint export needs python-pptx "
                         "(pip install python-pptx).")
     return (Presentation, Inches, Pt, RGBColor, MSO_ANCHOR, PP_ALIGN,
-            MSO_SHAPE)
+            MSO_SHAPE, ActionSetting)
 
 
 # -- pure helpers ----------------------------------------------------------------
@@ -167,7 +169,7 @@ def pack_items(items, budget):
 class _Deck:
     def __init__(self, title, accent=""):
         (self.Presentation, self.Inches, self.Pt, self.RGB, self.ANCHOR,
-         self.ALIGN, self.SHAPE) = _modules()
+         self.ALIGN, self.SHAPE, self.Action) = _modules()
         self.prs = self.Presentation()
         self.prs.slide_width = self.Inches(SLIDE_W)
         self.prs.slide_height = self.Inches(SLIDE_H)
@@ -717,13 +719,14 @@ def _divider_slide(deck, sid, count):
 
 
 def _contents_slide(deck, rows, first):
-    """One slide of the contents: ``rows`` is ``[(level, title, number)]``."""
+    """One slide of the contents: ``rows`` is ``[(level, title, number,
+    target_slide)]``; the title cell jumps to ``target_slide`` on click."""
     slide = deck.titled_slide("Contents" + ("" if first else " (continued)"))
     cells = [[("    " if lvl == 2 else "") + title, str(num)]
-             for lvl, title, num in rows]
+             for lvl, title, num, _target in rows]
     shape = deck.table(slide, MARGIN, TABLE_TOP, BODY_W, [11.0, 1.0], None,
                        cells, size=12, row_h=0.32)
-    for ri, (lvl, _title, _num) in enumerate(rows):
+    for ri, (lvl, _title, _num, target) in enumerate(rows):
         for ci in (0, 1):
             cell = shape.table.cell(ri, ci)
             cell.fill.solid()
@@ -736,12 +739,15 @@ def _contents_slide(deck, rows, first):
                     r.font.bold = lvl == 1
                     r.font.size = deck.Pt(12 if lvl == 1 else 11)
                     r.font.color.rgb = deck.rgb(deck.ink if lvl == 1 else INK)
+                    if ci == 0 and target is not None:
+                        deck.Action(r.font._rPr, r).target_slide = target
     return slide
 
 
 def _assemble(deck, dividers="auto"):
     """Add the divider and contents slides, put every slide in its place and
-    stamp the footers. The slide numbers on the contents are the final ones."""
+    stamp the footers. The slide numbers on the contents are the final ones,
+    and each entry jumps to its slide on click."""
     main = len(deck.slides)
     entries = _entries(deck)
     counts = {}
@@ -768,12 +774,20 @@ def _assemble(deck, dividers="auto"):
     for sid in divided.values():
         made.append((("divider", sid),
                      _divider_slide(deck, sid, counts[sid])))
+
+    # every slide a contents entry could jump to (an ordinary slide, or a
+    # divided section's own divider -- never a contents slide itself, since
+    # one is never among ``entries``); built now, before the contents
+    # slide(s) exist, so their own table can carry the links
+    target_of = {("slide", i): slide
+                for i, (slide, _m) in enumerate(deck.slides)}
+    target_of.update(dict(made))
+
     rows = []
     for sid, lvl, title, i in entries:
         own = ("divider", sid)
-        rows.append((lvl, title,
-                     number[own] if lvl == 1 and own in number
-                     else number[("slide", i)]))
+        item = own if (lvl == 1 and own in number) else ("slide", i)
+        rows.append((lvl, title, number[item], target_of[item]))
     for j in range(pages):
         chunk = rows[j * CONTENTS_ROWS:(j + 1) * CONTENTS_ROWS]
         made.append((("contents", j), _contents_slide(deck, chunk, j == 0)))

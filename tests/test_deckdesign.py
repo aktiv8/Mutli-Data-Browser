@@ -188,6 +188,71 @@ class TestDeck(unittest.TestCase):
         self.assertFalse(any(t.startswith("Contents") for t in titles))
         self.assertTrue(re.match(r"Figure 1", titles[3]))
 
+    # -- clickable contents entries ------------------------------------------
+    def _title_action(self, slide, row_index):
+        """The ``ActionSetting`` on a contents row's title-cell run."""
+        from pptx.action import ActionSetting
+        for sh in slide.shapes:
+            if sh.has_table:
+                cell = sh.table.rows[row_index].cells[0]
+                run = cell.text_frame.paragraphs[0].runs[0]
+                return ActionSetting(run.font._rPr, run)
+        raise AssertionError("no table on this slide")
+
+    def _number_action(self, slide, row_index):
+        """The ``ActionSetting`` on a contents row's number-cell run."""
+        from pptx.action import ActionSetting
+        for sh in slide.shapes:
+            if sh.has_table:
+                cell = sh.table.rows[row_index].cells[1]
+                run = cell.text_frame.paragraphs[0].runs[0]
+                return ActionSetting(run.font._rPr, run)
+        raise AssertionError("no table on this slide")
+
+    def test_an_ordinary_entry_jumps_to_its_own_slide(self):
+        from pptx.enum.action import PP_ACTION
+        slides = self.build()
+        contents = next(s for s in slides if self.title(s) == "Contents")
+        rows = self.contents_rows(slides)
+        ri = next(i for i, (t, _n) in enumerate(rows) if t == "Methods")
+        num = rows[ri][1]
+        action = self._title_action(contents, ri)
+        self.assertEqual(action.action, PP_ACTION.NAMED_SLIDE)
+        self.assertIs(action.target_slide, slides[num - 1])
+
+    def test_a_divided_section_s_entry_jumps_to_its_divider(self):
+        from pptx.enum.action import PP_ACTION
+        slides = self.build()          # default 6 figures: Figures divides
+        contents = next(s for s in slides if self.title(s) == "Contents")
+        rows = self.contents_rows(slides)
+        ri = next(i for i, (t, _n) in enumerate(rows) if t == "Figures")
+        num = rows[ri][1]
+        target = slides[num - 1]
+        self.assertIn("6 slides", " ".join(self.texts(target)))  # the divider
+        action = self._title_action(contents, ri)
+        self.assertEqual(action.action, PP_ACTION.NAMED_SLIDE)
+        self.assertIs(action.target_slide, target)
+
+    def test_a_child_entry_jumps_to_its_own_figure_slide(self):
+        from pptx.enum.action import PP_ACTION
+        slides = self.build()
+        contents = next(s for s in slides if self.title(s) == "Contents")
+        rows = self.contents_rows(slides)
+        ri = next(i for i, (t, _n) in enumerate(rows)
+                 if t.strip().startswith("Figure 3"))
+        num = rows[ri][1]
+        action = self._title_action(contents, ri)
+        self.assertEqual(action.action, PP_ACTION.NAMED_SLIDE)
+        self.assertIs(action.target_slide, slides[num - 1])
+
+    def test_the_page_number_column_is_not_clickable(self):
+        from pptx.enum.action import PP_ACTION
+        slides = self.build()
+        contents = next(s for s in slides if self.title(s) == "Contents")
+        for ri in range(len(self.contents_rows(slides))):
+            self.assertEqual(self._number_action(contents, ri).action,
+                             PP_ACTION.NONE)
+
 
 if __name__ == "__main__":
     unittest.main()
