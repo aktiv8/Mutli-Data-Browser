@@ -6,19 +6,23 @@ integrated over energy).
 
 * ``GL(m)``  product Gaussian/Lorentzian, ``m`` = % Lorentzian
 * ``SGL(m)`` sum Gaussian/Lorentzian
-* ``LA(a,b,m)`` (also ``LA(m)``) asymmetric Lorentzian, Gaussian-broadened
+* ``LA(a,b,m)`` (also ``LA(a,m)`` = ``LA(a,a,m)``, or ``LA(m)``) asymmetric
+  Lorentzian, Gaussian-broadened
 * ``LF(a,b,w,m)`` as LA with a finite tail of width ``w``
 
-GL and SGL are exact. **LA and LF are reconstructions**: CasaXPS does not
-publish their kernels, so they use the standard asymmetric-Lorentzian forms
-(Major et al., *Surf. Interface Anal.* 53 (2021) 689, Eq. 6; the LA line
-shape's own write-up by Major, Shah, Fernandez, Fairley (Casa Software Ltd.)
-and Linford, *Vacuum Technology & Coating*, March 2020, Eq. 3 -- both give
-``LA(a,b) = L(x)**a`` on the low-KE side and ``L(x)**b`` on the high-KE side
-of one shared Lorentzian, matching this module's formula exactly), with a
-Gaussian broadening whose scale was calibrated on real CasaXPS fits
-(``tests/`` and the validation notes in the README give the residuals). The
-stored areas, positions and widths are CasaXPS's own numbers.
+GL and SGL are exact. **LA and LF are reconstructions**: their Gaussian
+broadening scale is still an empirical calibration (below), but the base
+kernel itself is no longer a third-party guess -- CasaXPS's own *Cookbook*
+(Casa Software Ltd., 2026, pp.65-66) gives ``LA(x: alpha,beta,w) = N *
+INTEGRAL(lg(tau; alpha,beta) * g(x-tau; w) dtau)`` with ``lg(x: alpha,beta)
+= l(x)**alpha`` for ``x <= 0`` and ``l(x)**beta`` for ``x > 0`` -- matching
+this module's formula exactly, and matching the independent third-party
+write-up this was originally reconstructed from (Major et al., *Surf.
+Interface Anal.* 53 (2021) 689, Eq. 6; Major, Shah, Fernandez, Fairley (Casa
+Software Ltd.) and Linford, *Vacuum Technology & Coating*, March 2020,
+Eq. 3). The Gaussian broadening's own scale was calibrated on real CasaXPS
+fits (``tests/`` and the validation notes in the README give the residuals).
+The stored areas, positions and widths are CasaXPS's own numbers.
 
 **The shared Lorentzian width.** Raising a Lorentzian to a power ``p != 1``
 shrinks its own half-max distance by ``sqrt(2**(1/p) - 1)`` relative to
@@ -49,7 +53,7 @@ from 18.3 % to 8.7 %, this file's vanadium example from 9.85 % to 4.70 %, and
 one percentage point). ``TestLAAsymmetryAccuracy`` in ``tests/test_casafit.py``
 is a canary against this getting worse.
 
-**The 2-argument ``LA(m)`` shorthand is not ``LA(1,1,m)``.** Every finding
+**The 1-argument ``LA(m)`` shorthand is not ``LA(1,1,m)``.** Every finding
 above this paragraph, and two rejected leads that used to be recorded here
 (a "corrected direction" retune, and a claim that no ``GAUSS_K`` can round out
 a symmetric ``LA(m)`` component's own apex), were all tested by feeding the
@@ -57,16 +61,44 @@ shorthand's ``m`` (0-100) straight into the same formula the explicit
 ``LA(a,b,m)`` form uses -- which is wrong. CasaXPS's own definition (Fairley
 et al., "Practical guide to understanding goodness-of-fit metrics ... using
 nylon as an example," *J. Vac. Sci. Technol. A* 41(1) 2023, supplementary
-information, Eq. 4-6) is ``LA(x: alpha,beta,n) = N * INTEGRAL(lg(tau;
-alpha,beta) * g(x-tau; f_G(n)) dtau)`` (a generalised Lorentzian convolved
-with a Gaussian whose width is controlled by ``n``) and, separately,
-``LA(x,m) = LA(x: 1,1, 1401 - (m/100)*1401)``: the shorthand's ``m`` and the
-explicit form's ``n`` run in **opposite directions** (``LA(0)`` -> ``n =
-1401``, ``LA(100)`` -> ``n = 0``), not the same variable. ``parse_shape`` used
-to set ``m = ps[0]`` for the shorthand directly; it now applies this
-conversion, so every real ``LA(m)``-shorthand file (PET's ``LA(50)`` among
-them) is now evaluated at its true ``n = 1401 - 14.01*m``, and the explicit
-3-argument form is unaffected (it was already using ``n`` correctly).
+information, Eq. 4-6; also *Cookbook* 2026 p.19, Figure 15's caption) is
+``LA(x: alpha,beta,n) = N * INTEGRAL(lg(tau; alpha,beta) * g(x-tau; f_G(n))
+dtau)`` (a generalised Lorentzian convolved with a Gaussian whose width is
+controlled by ``n``) and, separately, ``LA(x,m) = LA(x: 1,1, 1401 -
+(m/100)*1401)``: the shorthand's ``m`` and the explicit form's ``n`` run in
+**opposite directions** (``LA(0)`` -> ``n = 1401``, ``LA(100)`` -> ``n =
+0``), not the same variable. ``parse_shape`` used to set ``m = ps[0]`` for
+the shorthand directly; it now applies this conversion, so every real
+``LA(m)``-shorthand file (PET's ``LA(50)`` among them) is now evaluated at
+its true ``n = 1401 - 14.01*m``, and the explicit 3-argument form is
+unaffected (it was already using ``n`` correctly).
+
+**The 2-argument ``LA(a,n)`` form is a separate case, and was not
+distinguished from the 1-argument shorthand above at all** -- a second,
+independent bug, found while reading the *Cookbook* itself (2026 p.66):
+*"Abbreviation for LA lineshape: LA(x: alpha, w) = LA(x: alpha, alpha, w)"*
+-- ``b`` is implicitly ``a`` (a symmetric-but-non-unity Lorentzian power),
+and the trailing number is the explicit form's own ``n``, used directly --
+*not* run through the 1-argument shorthand's ``m``-to-``n`` conversion
+above. ``parse_shape`` used to fall into the same ``else`` branch as the
+1-argument case for *any* fewer-than-3-argument string, taking only
+``ps[0]`` through the wrong (1-argument) formula regardless of whether a
+second number was present at all -- so a real ``LA(1.53,243)`` file was
+silently evaluated as ``a=b=1, n=1401-14.01*1.53 approx 1380`` instead of
+the correct ``a=b=1.53, n=243``, both the exponent and the Gaussian width
+wrong.
+Confirmed on the one real file with this form found across the full local
+corpus (~700 files, ``D:\Temp`` and ``~\Downloads``):
+``~\Downloads\assigned.vms``, a 5-sample Mo 3d/S 2s fit (MoS2/MoO2/MoO3/WS2
+mixed system, ~10 ``LA(1.53,243)`` components per region). Comparing
+``casafit.curves()``'s reconstruction against this file's own raw data,
+before/after the fix, ``residual_rms`` / ``chi2_red`` per region:
+``RW_WS2_MoS2_thicker`` 8.86% / 139.3 -> 5.32% / 54.9,
+``RW_Tha_MoS2`` 7.23% / 930.2 -> 3.98% / 329.8,
+``RW_sonic_MoS2`` 7.73% / 2339.2 -> 4.39% / 917.5,
+``RW_WS2_MoS2`` 8.59% / 129.8 -> 5.38% / 52.6,
+``RW_Nb_MoS2`` 10.81% / 455.3 -> 6.84% / 209.7 -- both metrics roughly halve
+across every region.
 
 This was found the same way the ``DS`` calibration below was: two new
 synthetic files built specifically to sweep ``m`` in a controlled way against
@@ -209,48 +241,67 @@ not a calibrated value. Retune when a real fitted file becomes available,
 the same way DS's own calibration was redone once real ``(a, n)`` coverage
 appeared.
 
-**TLA: substantially less certain than the Gelius shape above.** No CasaXPS
-document defining ``TLA`` could be found anywhere (only a passing example
-value, ``TLA(1,2.86,28)``, on a third-party support page, with no formula).
-The only source for this shape is KherveFitting's own reconstruction
-(``Peak_Functions.py``, ``TLA``/``_tla_unit_profile``/``_tla_width_scale``),
-which itself cites an unlocatable "CasaXPS Cookbook (2026), Line shapes
-section" -- unlike the Gelius shape above, this cannot be cross-checked
-against a primary CasaXPS source, so it carries the same "third party might
-be wrong" risk the ``LA(m)`` shorthand bug earlier in this file was a
-cautionary tale about, without the real files that eventually caught that
-one. Implemented anyway (flagged, at the user's explicit direction) as: a
-Lorentzian raised to a power ``alpha`` (``sp["a"]``), modulated by an
-arctangent tail factor ``pi/2 - atan(2u) + pi/mu`` (``mu = sp["b"]``, larger
-``mu`` = weaker asymmetry) on this module's own ascending-KE grid, its width
-rescaled so the stated ``fwhm`` is the shape's own measured FWHM (no
-closed-form relation exists, so ``_tla_width_scale`` measures it numerically
-off a wide grid, mirroring KherveFitting's own approach) -- then Gaussian-
-convolved by the existing ``component_curve``/``gauss_conv`` machinery using
-the shape string's third number as an ``n`` code, the same ``(25/n)``
-convention as DS/``A`` above (``GAUSS_K["TLA"] = GAUSS_P["TLA"] = 1.0``,
-equally uncalibrated). **The shape string's parameter order
-(``TLA(alpha, mu, n)``) is inferred, not confirmed**: KherveFitting's own
-function signature groups ``(mu, wg, alpha)`` for its *fitting grid columns*
-only, which says nothing about the on-disk string's left-to-right order.
-KherveFitting's own ``wg`` is documented as a literal eV Gaussian width, but
-the one real example available (``TLA(1,2.86,28)``) has ``28`` for its third
-number -- implausibly large as an eV width for a typical XPS peak, but
-ordinary as a ``0-499`` code, which is why this module reads it that way
-instead (consistent with ``DS``/``A`` above) rather than as a literal eV
-value. Retune or reorder when a primary source or a real fitted file
-surfaces; until then treat any ``TLA``-reconstructed component as
-illustrative, not quantitatively reliable.
+**TLA: formula and parameter order now confirmed from a primary source; the
+Gaussian-convolution calibration is not.** Originally implemented (flagged,
+at the user's explicit direction) from KherveFitting's own reconstruction
+alone (``Peak_Functions.py``, ``TLA``/``_tla_unit_profile``/
+``_tla_width_scale``), which itself cited an unlocatable "CasaXPS Cookbook
+(2026), Line shapes section" -- no way at the time to cross-check it against
+a primary CasaXPS source, the same "third party might be wrong" risk the
+``LA(m)`` shorthand bug above was a cautionary tale about. That Cookbook has
+since been located (Casa Software Ltd., 2026, p.66) and checked term by
+term: ``TLA(x: alpha,mu,w) = N * INTEGRAL(T(tau; alpha,mu) * g(x-tau; w)
+dtau)``, ``T(x: alpha,mu) = [1/(1+4x^2)]**alpha * [pi/2 - atan(2x) + pi/mu]``
+for ``mu > 0, alpha > 0`` -- an exact match to this module's own
+``_tla_values`` (Lorentzian raised to ``alpha`` = ``sp["a"]``, modulated by
+the same arctangent tail factor with ``mu`` = ``sp["b"]``, larger ``mu`` =
+weaker asymmetry), **and** confirms the shape string's parameter order is
+``TLA(alpha, mu, n)`` as this module already assumed (KherveFitting's own
+function signature groups ``(mu, wg, alpha)`` for its *fitting grid
+columns* only, which said nothing about the on-disk string's own order --
+this was a guess that turned out right, not something the Cookbook itself
+was needed to get the code working, but it removes the doubt). What the
+Cookbook does *not* give is a numeric Gaussian-convolution width: the width
+``w``/``n`` has no closed form connecting the shape string's ``0-499`` code
+to an actual eV width for a given ``fwhm``, so ``GAUSS_K["TLA"] =
+GAUSS_P["TLA"] = 1.0`` remains the same neutral, uncalibrated reference
+point DS/``A`` above use (``gw = fwhm`` at ``n = 25``) -- retune only when a
+real ``TLA``-fitted file becomes available, the same way DS's and the
+2-argument ``LA`` bug above were. ``_tla_width_scale`` measuring the base
+shape's FWHM numerically (no closed form exists for that either) is
+unaffected by any of this. Until a real file calibrates the convolution
+width, treat a ``TLA``-reconstructed component's overall breadth as
+illustrative even though its underlying asymmetric-Lorentzian shape and
+parameter order are now on solid ground.
 
-**Tail suffix.** CasaXPS also lets a ``GL``/``SGL`` shape string carry a
-trailing ``T(k)`` tail modifier (``GL(30)T(1.5)``), used for asymmetric
-metallic peaks. ``parse_shape`` recognises and strips this suffix so the base
-shape's own parameters parse correctly, but the tail itself is not
-reconstructed: no real CasaXPS-fitted file using this syntax has been
-available to validate a curve against, unlike LA/LF above. A tailed
-component is therefore drawn as its plain ``GL``/``SGL`` base shape and
-flagged ``approximate`` by ``is_exact`` (same signal as LA/LF and an
-unreproduced background) rather than silently misread.
+**Tail suffix -- formula now known, still unvalidated.** CasaXPS also lets a
+``GL``/``SGL`` shape string carry a trailing ``T(k)`` tail modifier
+(``GL(30)T(1.5)``), used for asymmetric metallic peaks. ``parse_shape``
+recognises and strips this suffix so the base shape's own parameters parse
+correctly, but the tail itself is not reconstructed. Unlike when this was
+first written, the formula is no longer unpublished: the *Cookbook* (2026,
+p.67) gives it in full -- ``E(x: j,k) = j*exp(k*x)`` for ``x < 0`` else
+``0``, and ``SGL(x,m,n)T(k) = (SGL(x,m) + (1-SGL(x,m))*E(x: 1,k)) * G(n)``
+(``T(k)`` is the ``j=1`` case of a more general ``PHI(j,k)``; ``GL`` has the
+same two variants). The Cookbook also documents two further mechanisms not
+implemented here: a general ``ST(mu,gamma)`` asymmetry prefix applicable to
+*any* line shape (p.66: ``S(mu)F(x) = N*F(x)*[INTEGRAL(F(phi)dphi, x, inf) +
+A/mu]``, ``ST(mu,gamma)F(x) = S(mu)F convolved with a Gaussian of width
+gamma`` -- distinct from both ``T(k)``/``PHI(j,k)`` above and the Gelius
+``A(a,b,n)`` shape below), and a plain 3-argument extension of ``GL``/
+``SGL`` themselves, ``GL(x,m,n) = GL(x,m) * G(n)`` (p.67) -- a second
+Gaussian convolution on top of the base pseudo-Voigt that this module's own
+``GL``/``SGL``/``VOIGT`` branch of ``parse_shape`` would today silently
+truncate to plain ``GL(m)``, reading only ``ps[0]``, if a string like that
+ever appeared. None of ``T(k)``/``PHI(j,k)``, ``ST(mu,gamma)``, or a
+2-argument ``GL(m,n)``/``SGL(m,n)`` turned up anywhere in the ~700-file
+local corpus scan that found the real 2-argument ``LA`` file above, nor in
+any of the individually-named real files elsewhere in this module -- so
+none of the three is implemented; an affected component still draws as its
+plain base shape and is flagged ``approximate`` by ``is_exact`` (honestly
+unreconstructed, the same treatment ``QF``/``H``/``F`` get below), rather
+than silently wrong. Implement whichever one a real fitted file turns up
+first.
 
 **Unrecognised shape names.** A shape name CasaXPS writes that this module
 does not implement (``QF``, or CasaXPS's own undocumented ``H``/``F``
@@ -379,11 +430,19 @@ def parse_shape(text) -> dict:
     elif kind == "LA":
         if len(ps) >= 3:
             out.update(a=ps[0], b=ps[1], m=ps[2])
+        elif len(ps) == 2:
+            # CasaXPS Cookbook 2026, p.66: "Abbreviation for LA lineshape:
+            # LA(x: alpha, w) = LA(x: alpha, alpha, w)" -- the 2-argument
+            # form's own w/n is used directly, unlike the 1-argument
+            # shorthand below (see module docstring: this used to be
+            # conflated with that shorthand, a real bug on a real file).
+            out.update(a=ps[0], b=ps[0], m=ps[1])
         else:
-            # The 2-argument shorthand's m (0-100) is NOT the explicit form's
+            # The 1-argument shorthand's m (0-100) is NOT the explicit form's
             # own m/n -- CasaXPS defines LA(m) = LA(1,1, 1401 - (m/100)*1401)
-            # (Fairley et al., JVST A 41(1) 2023 supplementary, Eq. 6): the two
-            # run in opposite directions (LA(0) -> n=1401, LA(100) -> n=0).
+            # (Cookbook 2026 p.19/66; Fairley et al., JVST A 41(1) 2023
+            # supplementary, Eq. 6): the two run in opposite directions
+            # (LA(0) -> n=1401, LA(100) -> n=0).
             raw = ps[0] if ps else 0.0
             out.update(m=1401.0 - 14.01 * raw)
     elif kind == "DS":

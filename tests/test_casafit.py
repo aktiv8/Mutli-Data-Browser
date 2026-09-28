@@ -188,6 +188,30 @@ class TestShapes(unittest.TestCase):
         self.assertTrue(ls.is_exact("GL(30)") and ls.is_exact("SGL(50)"))
         self.assertFalse(ls.is_exact("LA(1,1,1)") or ls.is_exact("LF(1,1,1,1)"))
 
+    def test_parse_shape_la_2_argument_form(self):
+        """CasaXPS Cookbook 2026 p.66: "Abbreviation for LA lineshape:
+        LA(x: alpha, w) = LA(x: alpha, alpha, w)" -- b is implicitly a, and
+        the trailing number is n used directly, NOT the 1-argument
+        shorthand's m-to-n conversion. This used to fall into the same
+        branch as the 1-argument shorthand (only ps[0], through the wrong
+        formula) regardless of a second number being present at all."""
+        p = ls.parse_shape("LA(1.53,243)")
+        self.assertEqual((p["kind"], p["a"], p["b"], p["m"]),
+                         ("LA", 1.53, 1.53, 243.0))
+        # equivalent to the explicit 3-argument form with b repeated
+        p3 = ls.parse_shape("LA(1.53,1.53,243)")
+        self.assertEqual((p["kind"], p["a"], p["b"], p["m"]),
+                         (p3["kind"], p3["a"], p3["b"], p3["m"]))
+        # a=1 case: numerically close to (not run through) the 1-argument
+        # shorthand's own m-formula value for the same trailing number
+        self.assertEqual(ls.parse_shape("LA(1,701)")["m"], 701.0)
+        self.assertNotAlmostEqual(ls.parse_shape("LA(1,701)")["m"],
+                                  ls.parse_shape("LA(701)")["m"], delta=1.0)
+        # the 1-argument and 3-argument forms are unaffected
+        self.assertEqual(ls.parse_shape("LA(50)")["m"], 700.5)
+        p3 = ls.parse_shape("LA(1.1,1.9,7)")
+        self.assertEqual((p3["a"], p3["b"], p3["m"]), (1.1, 1.9, 7.0))
+
     def test_parse_shape_with_tail_suffix(self):
         """CasaXPS's GL/SGL tail suffix (GL(30)T(1.5)) must not corrupt the
         base shape's own mix -- the greedy single-regex parser used to
@@ -823,6 +847,49 @@ class TestLAAsymmetryAccuracy(unittest.TestCase):
         if n == 0:
             self.skipTest("no real LA/LF-fitted spectrum found on this "
                           "machine")
+
+
+LA2ARG_DIR = os.environ.get(
+    "XPS_LA2ARG_DIR", os.path.join(os.path.expanduser("~"), "Downloads"))
+
+
+def _la2arg_file():
+    path = os.path.join(LA2ARG_DIR, "assigned.vms")
+    return path if os.path.isfile(path) else None
+
+
+@unittest.skipUnless(HAVE_NP and _la2arg_file(),
+                     "the real 2-argument LA(a,n) sample is not present")
+class TestLA2ArgumentForm(unittest.TestCase):
+    """The one real file found (across a ~700-file local corpus scan) using
+    CasaXPS's 2-argument ``LA(a,n)`` form -- a 5-sample Mo 3d/S 2s fit, every
+    component ``LA(1.53,243)``. Before this shape's ``parse_shape`` branch
+    distinguished 2 arguments from 1 (2026-09-28, prompted by finding
+    CasaXPS's own Cookbook 2026 p.66: ``LA(x: a, w) = LA(x: a, a, w)``), this
+    file's components were silently evaluated at ``a=b=1, n approx 1380``
+    instead of the correct ``a=b=1.53, n=243`` -- both residual_rms and
+    chi2_red roughly halve with the fix; this pins that improvement so it
+    cannot silently regress."""
+
+    # residual_rms ceiling per sample, comfortably above the fixed value
+    # (~4-7%) but well below the pre-fix value (~7-11%) -- catches a
+    # regression back toward the old (wrong) parsing without being so tight
+    # a harmless future GAUSS_K/GAUSS_P retune elsewhere breaks this test
+    CEILING = 0.075
+
+    def test_residual_is_close_to_the_fixed_value_not_the_old_wrong_one(self):
+        doc = readers.load_file(_la2arg_file())
+        n = 0
+        for r in doc.regions:
+            if r.fit is None or not any(
+                    "LA(1.53,243)" in c.shape for c in r.fit.components):
+                continue
+            cv = casafit.curves(r.fit, r.energy, r.counts, r.photon_energy,
+                                r.dwell, r.extra.get("n_scans", 1))[0]
+            n += 1
+            self.assertLess(cv.residual_rms, self.CEILING,
+                            f"{r.sample}: {cv.residual_rms:.4f}")
+        self.assertEqual(n, 5)
 
 
 DS_DIR = os.environ.get("XPS_DS_DIR", r"D:\Temp\for claude files")
