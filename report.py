@@ -25,6 +25,7 @@ import datetime
 import io
 import os
 import tempfile
+from collections import Counter
 from xml.sax.saxutils import escape as xml_escape
 
 import appinfo
@@ -38,6 +39,10 @@ _FLOW = ("cover", "summary", "results", "methods", "calibration", "files",
          "metadata")
 FOOTER_SIZE = 7.5
 FOOTER_MARGIN = 36                       # points from the page edge
+DIVIDER_MIN = 5                          # report pages in a section that earn
+                                          # a divider page (the deck's own
+                                          # DIVIDER_MIN, same "a handful or
+                                          # more" intent for a different unit)
 
 
 class ReportError(Exception):
@@ -516,6 +521,71 @@ def _page_sections(parts):
     return out
 
 
+# -- divider pages (before a section that has grown long) ------------------------
+def _divider_layout(page_sids, dividers):
+    """Which sections earn a divider page before them (``dividers`` "auto":
+    ``DIVIDER_MIN`` report pages or more; the cover has no heading of its own
+    to count and the contents page never divides itself) and the renumbering
+    that follows: ``number[("page", i)]`` is old page ``i``'s new number,
+    ``number[("divider", sid)]`` a divider's own new number, and ``sections``
+    has one entry per *final* page (``None`` on a divider page, for the
+    footer to skip). Pure: no PDF I/O, so the contents-settling loop can call
+    it on every try."""
+    total = len(page_sids)
+    divided = {}
+    if dividers == "auto":
+        heads = {}
+        for i, sid in enumerate(page_sids, 1):
+            heads.setdefault(sid, i)
+        counts = Counter(page_sids)
+        divided = {sid: heads[sid] for sid in heads
+                   if sid != "contents" and counts[sid] >= DIVIDER_MIN}
+    before = {pos: sid for sid, pos in divided.items()}
+    layout = []
+    for i in range(1, total + 1):
+        if i in before:
+            layout.append(("divider", before[i]))
+        layout.append(("page", i))
+    number = {item: k for k, item in enumerate(layout, 1)}
+    sections = [None if kind == "divider" else page_sids[val - 1]
+                for kind, val in layout]
+    return divided, number, sections
+
+
+def _renumber(entries, divided, number):
+    """``entries`` (see ``_entries``) with every page moved past the divider
+    pages ``_divider_layout`` inserted; a divided section's own heading
+    points at its divider instead of its first real page, the same way the
+    deck's contents rows repoint to a divider slide."""
+    out = []
+    for sid, lvl, title, at in entries:
+        item = ("divider", sid) if (lvl == 1 and sid in divided) \
+            else ("page", at)
+        out.append((sid, lvl, title, number[item]))
+    return out
+
+
+def _draw_divider(out, mu, sid, count, look, pagesize):
+    """A full-bleed page naming a section and how many report pages it has,
+    the PDF equivalent of ``pptx_export._divider_slide``."""
+    w, h = pagesize
+    page = out.new_page(width=w, height=h)
+    page.draw_rect(page.rect, color=None, fill=pdfstyle.rgb(look.ink))
+    path = pdfstyle.font_file()
+    bold_path = pdfstyle.font_file(bold=True)
+    x = 54
+    title_kw = {"fontfile": bold_path} if bold_path else {}
+    page.insert_text((x, h * 0.42), reportspec.LABELS[sid], fontsize=28,
+                     fontname="plexbold" if bold_path else "helv",
+                     color=(1, 1, 1), **title_kw)
+    hint_kw = {"fontfile": path} if path else {}
+    page.insert_text(
+        (x, h * 0.42 + 26), f"{reportspec.HINTS[sid]}  •  {count} pages",
+        fontsize=11, fontname="plex" if path else "helv",
+        color=pdfstyle.rgb(look.tint(0.8)), **hint_kw)
+    return page
+
+
 def _footer(out, mu, title, sections, look, skip_first):
     """Stamp the title, the section and 'report page x of y' on every page."""
     total = out.page_count
@@ -541,7 +611,7 @@ def _footer(out, mu, title, sections, look, skip_first):
     muted = pdfstyle.rgb(pdfstyle.MUTED)
     ink = pdfstyle.rgb(look.ink)
     for i, page in enumerate(out, 1):
-        if i == 1 and skip_first:
+        if (i == 1 and skip_first) or sections[i - 1] is None:
             continue
         y, right = page.rect.height - 16, page.rect.width - FOOTER_MARGIN
         put(page, FOOTER_MARGIN, y, title, muted)
@@ -571,6 +641,7 @@ def build_report(path, details, logo, file_rows, docs, figures,
     if spec is None:
         spec = reportspec.spec_from_sections(sections, "pdf")
     sha = reportspec.option(spec, "sha")
+    dividers = reportspec.option(spec, "dividers")
     items = reportspec.active(spec)
     try:
         import reportlab  # noqa: F401
@@ -633,11 +704,15 @@ def build_report(path, details, logo, file_rows, docs, figures,
 
         contents = next((p for p in parts if p["kind"] == "contents"), None)
         if contents is not None:
-            # the page numbers depend on how many pages the contents take, and
-            # that on how many lines there are: settle it (it does not move)
+            # the page numbers depend on how many pages the contents take
+            # (and, with dividers, where they land too), and that on how
+            # many lines there are: settle it (it does not move)
             for _try in range(3):
+                divided, number, _sections = _divider_layout(
+                    _page_sections(parts), dividers)
                 listed = [(lvl, text, at) for sid, lvl, text, at
-                          in _entries(parts) if sid != "contents"]
+                          in _renumber(_entries(parts), divided, number)
+                          if sid != "contents"]
                 if not listed:
                     parts.remove(contents)
                     break
@@ -650,17 +725,33 @@ def build_report(path, details, logo, file_rows, docs, figures,
         if not parts:
             raise ReportError("Nothing to put in the report: choose at "
                               "least one section that has content.")
+        page_sids = _page_sections(parts)
+        divided, number, final_sections = _divider_layout(page_sids, dividers)
+        entries = _renumber(_entries(parts), divided, number)
+        counts = Counter(page_sids)
+        before = {pos: sid for sid, pos in divided.items()}
         out = mu.open()
-        for part in parts:
+        for part, start in zip(parts, _starts(parts)):
+            local = 0
             with mu.open(part["path"]) as src:
-                out.insert_pdf(src)
-        outline = [[lvl, text, at] for _sid, lvl, text, at in _entries(parts)]
+                for offset in range(part["pages"]):
+                    old_p = start + offset
+                    if old_p in before:
+                        if offset > local:
+                            out.insert_pdf(src, from_page=local,
+                                           to_page=offset - 1)
+                        sid = before[old_p]
+                        _draw_divider(out, mu, sid, counts[sid], look,
+                                     pagesize)
+                        local = offset
+                out.insert_pdf(src, from_page=local, to_page=part["pages"] - 1)
+        outline = [[lvl, text, at] for _sid, lvl, text, at in entries]
         if outline and outline[0][0] == 1:
             try:
                 out.set_toc(outline)
             except Exception:                # noqa: BLE001 - bookmarks are extra
                 pass
-        _footer(out, mu, title, _page_sections(parts), look,
+        _footer(out, mu, title, final_sections, look,
                 skip_first=bool(items) and items[0][0] == "cover")
         out.set_metadata({"title": title, "creator": appinfo.NAME})
         total = out.page_count

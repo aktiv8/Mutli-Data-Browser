@@ -54,9 +54,12 @@ def register_fonts():
     return _registered
 
 
-def font_file():
-    """The regular typeface's file, for PyMuPDF (page footers); '' = none."""
-    return _font_file(fonts.FILES[0]) if register_fonts()[0] == REGULAR else ""
+def font_file(bold=False):
+    """The regular (or, ``bold``, bold) typeface's file, for PyMuPDF (page
+    footers, divider pages); '' = none."""
+    if register_fonts()[0] != REGULAR:
+        return ""
+    return _font_file(fonts.FILES[1] if bold else fonts.FILES[0])
 
 
 def page_size(option="a4"):

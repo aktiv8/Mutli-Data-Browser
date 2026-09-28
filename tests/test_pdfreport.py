@@ -210,6 +210,50 @@ class TestReport(unittest.TestCase):
         toc = {t: p for _l, t, p in self.doc.get_toc()}
         self.assertIn("Contents", pages[toc["Contents"] - 1])
 
+    # -- divider pages (the deck already had these): a full-bleed page naming
+    # a section, before a section that has grown long -----------------------
+    def sixfigs(self):
+        return [{"name": f"Fig {i}", "caption": "", "state": {}}
+                for i in range(1, 7)]
+
+    def test_a_divider_comes_before_a_long_section_only(self):
+        pages = self.build(figs=self.sixfigs())
+        toc = {t: p for _l, t, p in self.doc.get_toc()}
+        divider = pages[toc["Figures"] - 1]
+        self.assertIn("Figures", divider)
+        self.assertIn("6 pages", divider)
+        self.assertNotIn("report page", divider)      # dividers have no footer
+        self.assertIn("figure 1 Fig 1", pages[toc["Figures"]])   # right after
+        # methods is one page: no divider, the entry is the page itself
+        self.assertIn("Spectra were recorded", pages[toc["Methods"] - 1])
+
+    def test_dividers_can_be_switched_off(self):
+        spec = rs.with_option(rs.default_spec(), "dividers", "none")
+        pages = self.build(spec, figs=self.sixfigs())
+        self.assertFalse(any("pages" in p and "•" in p for p in pages))
+        toc = {t: p for _l, t, p in self.doc.get_toc()}
+        self.assertIn("figure 1 Fig 1", pages[toc["Figures"] - 1])
+
+    def test_a_divider_still_leaves_contents_and_bookmarks_true(self):
+        pages = self.build(figs=self.sixfigs())
+        toc = self.doc.get_toc()
+        printed = pages[1]
+        for level, title, page in toc:
+            if title == "Data files":
+                self.assertRegex(printed, rf"Data files\s*\n?\s*{page}\b")
+            if title.startswith("Figure "):
+                n, name = re.match(r"Figure (\d+) — (.*)", title).groups()
+                self.assertIn(f"figure {n} {name}", pages[page - 1], title)
+            elif title not in ("Contents", "Figures") \
+                    and not title.endswith(".vgd"):
+                self.assertIn(title, pages[page - 1], title)
+
+    def test_a_short_report_gets_no_divider(self):
+        # the default fixtures (3 figures, 1-2 metadata pages) never reach
+        # DIVIDER_MIN, so this is opt-in behaviour, not a default page cost
+        pages = self.build()
+        self.assertFalse(any("•" in p and "pages" in p for p in pages))
+
 
 if __name__ == "__main__":
     unittest.main()
