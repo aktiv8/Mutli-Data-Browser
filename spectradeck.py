@@ -80,6 +80,7 @@ from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
                      UnsupportedFormat, ThermoExperiment, LoadCancelled,
                      looks_like_experiment, experiment_roots)
 from readers import khervefitting_kfit
+from readers.base import canon_region_name
 import about_ui
 import fonts
 import holder
@@ -2408,6 +2409,14 @@ class Workspace:
         self._ann_changed(relabel=False)
         return len(found)
 
+    def identify_from_casa(self, r):
+        found = [(be, canon_region_name(name)) for be, name in
+                 casafit.region_windows(r.fit, r.photon_energy)]
+        for be, label in found:
+            self.ann.add_marker(*self._marker_key(r), be, label)
+        self._ann_changed(relabel=False)
+        return len(found)
+
     def rename_selected(self):
         sel = self.tree.selection() or (self.tree.focus(),)
         self._rename(sel[0] if sel else "")
@@ -3090,25 +3099,37 @@ class Workspace:
                     cur = self.cursors[key] = (e[0] + e[-1]) / 2.0
             marks = []
             if vis:
-                shift0 = self._marker_shift(vis[0])
-                prim = self.identify_markers(vis[0])
-                marks = [(m["be"] + (0.0 if m.get("kin") else shift0),
-                          m["label"], bool(m.get("kin")))
-                         for m in prim]
+                seen = set()
                 ident_show = look.get("ident_show", {})
-                if prim and (ident_show.get("secondary")
-                             or ident_show.get("auger")):
-                    hv = vis[0].photon_energy
-                    lines = self.element_lines()
+                want_nearby = bool(ident_show.get("secondary")
+                                   or ident_show.get("auger"))
+                lines = self.element_lines() if want_nearby else None
+                for reg in vis:
+                    shift_r = self._marker_shift(reg)
+                    prim = self.identify_markers(reg)
                     for m in prim:
-                        if m.get("kin"):
+                        be = m["be"] + (0.0 if m.get("kin") else shift_r)
+                        mkey = (round(be, 3), m["label"], bool(m.get("kin")))
+                        if mkey in seen:
                             continue
-                        for be, lbl, tier in xpslines.nearby_lines(
-                                m["be"], self.IDENT_NEARBY_WINDOW, lines,
-                                hv=hv, exclude=m["label"],
-                                secondary=bool(ident_show.get("secondary")),
-                                auger=bool(ident_show.get("auger"))):
-                            marks.append((be + shift0, lbl, False, tier))
+                        seen.add(mkey)
+                        marks.append((be, m["label"], bool(m.get("kin"))))
+                    if prim and want_nearby:
+                        hv_r = reg.photon_energy
+                        for m in prim:
+                            if m.get("kin"):
+                                continue
+                            for be, lbl, tier in xpslines.nearby_lines(
+                                    m["be"], self.IDENT_NEARBY_WINDOW, lines,
+                                    hv=hv_r, exclude=m["label"],
+                                    secondary=bool(ident_show.get("secondary")),
+                                    auger=bool(ident_show.get("auger"))):
+                                pos = be + shift_r
+                                nkey = (round(pos, 3), lbl, False, tier)
+                                if nkey in seen:
+                                    continue
+                                seen.add(nkey)
+                                marks.append((pos, lbl, False, tier))
             reels_arg = (self.ann.reels_for(*self._marker_key(vis[0]))
                          if len(vis) == 1 else None)
             fit_arg = self._fit_overlay(vis, disp, base, notes,

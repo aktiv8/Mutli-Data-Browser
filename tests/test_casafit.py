@@ -1591,5 +1591,49 @@ class TestTrueVoigtShape(unittest.TestCase):
         self.assertGreater(lor[far], gau[far] * 5)
 
 
+class TestRegionWindows(unittest.TestCase):
+    """A Fit's own named regions (CasaXPS's Regions tool) as ground-truth
+    (be, name) labels, whether or not each region has fitted components."""
+
+    def test_named_regions_with_no_components(self):
+        hv = 1486.6
+        c1s = casafit.FitRegion(name="C1s", background="none",
+                                start_ke=hv - 292.0, end_ke=hv - 280.0)
+        o1s = casafit.FitRegion(name="O1s", background="none",
+                                start_ke=hv - 540.0, end_ke=hv - 525.0)
+        fit = casafit.Fit(regions=[c1s, o1s], components=[])
+
+        found = casafit.region_windows(fit, hv)
+
+        self.assertEqual(len(found), 2)
+        by_name = {name: be for be, name in found}
+        self.assertEqual(set(by_name), {"C1s", "O1s"})
+        self.assertAlmostEqual(by_name["C1s"], 286.0, places=6)
+        self.assertAlmostEqual(by_name["O1s"], 532.5, places=6)
+
+    def test_region_shift_is_applied(self):
+        hv = 1486.6
+        reg = casafit.FitRegion(name="Fe2p", background="none",
+                                start_ke=hv - 720.0, end_ke=hv - 700.0)
+        fit = casafit.Fit(regions=[reg], components=[], calib_shift=1.0)
+
+        [(be, name)] = casafit.region_windows(fit, hv)
+
+        self.assertEqual(name, "Fe2p")
+        # shift_of_regions() falls back to calib_shift when region_shift is
+        # None; region_windows adds it to the raw KE before converting to BE.
+        self.assertAlmostEqual(be, 710.0 - 1.0, places=6)
+
+    def test_empty_without_fit_or_regions_or_hv(self):
+        hv = 1486.6
+        reg = casafit.FitRegion(name="C1s", start_ke=1000.0, end_ke=1010.0)
+        fit = casafit.Fit(regions=[reg], components=[])
+
+        self.assertEqual(casafit.region_windows(None, hv), [])
+        self.assertEqual(casafit.region_windows(casafit.Fit(), hv), [])
+        self.assertEqual(casafit.region_windows(fit, None), [])
+        self.assertEqual(casafit.region_windows(fit, 0), [])
+
+
 if __name__ == "__main__":
     unittest.main()

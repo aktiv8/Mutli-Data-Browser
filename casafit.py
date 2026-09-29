@@ -120,6 +120,20 @@ class Fit:
         return f"i{comp.index}" if comp.index >= 0 else f"c{id(comp)}"
 
 
+def region_windows(fit, hv):
+    """``[(be, name)]`` for a Fit's own named regions (CasaXPS's Regions
+    tool), whether or not each has fitted components -- the file's own
+    recorded core-level names and positions, not a guessed line-energy
+    table. ``name`` is the raw CasaXPS region name; the caller applies any
+    display cleanup (e.g. ``readers.base.canon_region_name``)."""
+    if not fit or not fit.regions or not hv:
+        return []
+    shift = fit.shift_of_regions()
+    out = [(hv - ((reg.start_ke + reg.end_ke) / 2.0 + shift), reg.name)
+           for reg in fit.regions]
+    return sorted(out)
+
+
 def _floats(text):
     return [float(t) for t in text.split() if _NUM.match(t)]
 

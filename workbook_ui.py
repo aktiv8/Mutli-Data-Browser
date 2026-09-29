@@ -865,6 +865,9 @@ class IdentifyDialog(tk.Toplevel):
             side="left")
         ttk.Button(row, text="Auto-label all peaks",
                    command=self._auto).pack(side="left", padx=(6, 0))
+        self.casa_btn = ttk.Button(row, text="Label from CasaXPS regions",
+                                   command=self._casa_label)
+        self.casa_btn.pack(side="left", padx=(6, 0))
         ttk.Label(body, text="Markers on this spectrum").grid(
             row=7, column=0, sticky="w")
         self.mark_list = tk.Listbox(body, height=6, exportselection=False,
@@ -961,12 +964,25 @@ class IdentifyDialog(tk.Toplevel):
         self.hint.config(text=f"{n} peak(s) labelled.")
         self._refresh_markers()
 
+    def _casa_label(self):
+        total = labelled = 0
+        for r in self.regions:
+            if r.fit and r.fit.regions:
+                n = self.app.identify_from_casa(r)
+                total += n
+                labelled += bool(n)
+        self.hint.config(text=f"{total} region(s) labelled from CasaXPS "
+                              f"across {labelled} spectrum/spectra.")
+        self._refresh_markers()
+
     def _refresh_markers(self):
         self.mark_list.delete(0, "end")
         for m in self.app.identify_markers(self._region()):
             self.mark_list.insert(
                 "end", f"{m['label']:<12} @ {m['be']:.2f} eV"
                        f"{' (KE)' if m.get('kin') else ''}")
+        has_casa_any = any(r.fit and r.fit.regions for r in self.regions)
+        self.casa_btn.configure(state="normal" if has_casa_any else "disabled")
 
     def _remove(self):
         sel = self.mark_list.curselection()
