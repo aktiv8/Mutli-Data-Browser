@@ -1,0 +1,2973 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Demonstration experiment</title>
+<style>:root {
+  --bg: #F6F8FA; --panel: #FFFFFF; --fg: #1A2127; --muted: #56636E;
+  --border: #D3DAE0; --accent: #0F6B8C; --accent-fg: #FFFFFF;
+  --select: #DCEBF2; --hint: #A11A1A;
+  --plot-bg: #FFFFFF; --plot-fg: #222222; --plot-muted: #56636E;
+  --plot-grid: #E3E8EC;
+  color-scheme: light;
+}
+:root[data-eff="dark"] {
+  --bg: #14181C; --panel: #1C2227; --fg: #E6EBEF; --muted: #9AA7B2;
+  --border: #323B43; --accent: #4FB3D9; --accent-fg: #0B1116;
+  --select: #26414F; --hint: #FF8A8A;
+  --plot-bg: #0F1317; --plot-fg: #E6EBEF; --plot-muted: #9AA7B2;
+  --plot-grid: #262E35;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 16px; margin: 18px 0 8px; }
+h3 { font-size: 14px; margin: 14px 0 6px; }
+button, select, input[type="search"] {
+  font: inherit; color: var(--fg); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px;
+}
+button { cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:focus-visible, select:focus-visible, input:focus-visible,
+.lbl:focus-visible, .tab-btn:focus-visible, .tw:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+.boot { padding: 40px; text-align: center; color: var(--muted); }
+.boot.error { color: var(--hint); }
+
+.top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; padding: 12px 20px; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.badge { font-size: 11px; padding: 2px 9px; border: 1px solid var(--border); border-radius: 12px; color: var(--muted); }
+.field { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.field select, .field input[type="range"] { color: var(--fg); }
+
+.layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); min-height: calc(100vh - 110px); }
+.side { border-right: 1px solid var(--border); background: var(--panel); padding: 12px; overflow: auto; }
+.side-tools { display: flex; gap: 6px; margin-bottom: 10px; }
+.side-tools input { flex: 1; min-width: 0; }
+main { padding: 14px 20px 30px; min-width: 0; }
+
+.tree { font-size: 13px; }
+.tree ul { list-style: none; margin: 0; padding-left: 18px; }
+.tree > ul { padding-left: 0; }
+.row { display: flex; align-items: center; gap: 4px; padding: 2px 0; }
+.row:hover { background: var(--select); }
+.row.selected { background: var(--select); font-weight: 600; }
+.tw { width: 20px; padding: 0; border: 0; background: none; color: var(--muted); }
+.tw.leaf { visibility: hidden; }
+.lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.cnt { color: var(--muted); font-size: 11px; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+li.hidden { display: none; }
+li.collapsed > ul { display: none; }
+
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 12px; flex-wrap: wrap; }
+.tab-btn { border: 0; border-bottom: 3px solid transparent; border-radius: 0; background: none; color: var(--muted); padding: 8px 14px; }
+.tab-btn[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); font-weight: 600; }
+.tab[hidden] { display: none; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 8px; }
+.levelbar input[type="range"] { flex: 1; min-width: 160px; max-width: 420px; }
+.panels { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 14px; }
+.panels.one { grid-template-columns: minmax(0, 1fr); }
+.panel { background: var(--plot-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px; min-width: 0; }
+.panel canvas { display: block; width: 100%; height: 320px; cursor: crosshair; }
+.panels.one .panel canvas { height: 460px; }
+.panel-foot { display: flex; align-items: center; gap: 8px; }
+.panel-foot .readout { flex: 1; min-width: 0; }
+.pngbtn { font-size: 11px; padding: 1px 8px; border-radius: 4px; flex: none; }
+.readout { min-height: 18px; padding: 2px 6px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fitbox { padding: 4px 6px 6px; color: var(--plot-fg); }
+.fitbox .fit-head { margin: 2px 0 6px; font-size: 12px; color: var(--muted); }
+.fitbox table.grid { width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; background: var(--plot-bg); }
+.fitbox table.grid td.num, .fitbox table.grid th.num { text-align: right; }
+.fitbox table.grid tr.off td { opacity: 0.45; }
+.fitbox .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px; vertical-align: -1px; }
+button[aria-pressed="true"] { border-color: var(--accent); background: var(--select); }
+.identifying .panel canvas { cursor: cell; }
+.idbox { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px; }
+.idbox p { margin: 6px 0; }
+.idwin { width: 5em; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; padding: 2px 8px; border-radius: 12px; }
+.depth-panel canvas { display: block; width: 100%; height: 360px; cursor: pointer; }
+.depth-panel { margin-bottom: 12px; }
+table.quant { font-variant-numeric: tabular-nums; }
+table.quant td.num, table.quant th.num { text-align: right; }
+table.quant tr.off td { opacity: 0.45; }
+table.quant tr.state td { color: var(--muted); border-top-style: dotted; }
+.empty { color: var(--muted); padding: 40px 10px; text-align: center; }
+.empty[hidden] { display: none; }
+
+figure { margin: 0 0 22px; }
+figure img { max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+figcaption { margin-top: 6px; white-space: pre-wrap; }
+table.kv, table.grid { border-collapse: collapse; font-size: 13px; }
+table.kv th { text-align: left; font-weight: 600; color: var(--muted); padding: 3px 18px 3px 0; vertical-align: top; white-space: nowrap; }
+table.kv td { padding: 3px 0; }
+table.grid th, table.grid td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; white-space: nowrap; }
+table.grid th { background: var(--panel); color: var(--muted); }
+.scroll { overflow: auto; max-width: 100%; }
+.prose { white-space: pre-wrap; max-width: 78ch; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin: 0 0 10px; font: inherit; }
+.holder-wrap canvas { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; display: block; }
+.holder-info { margin-top: 10px; min-height: 30px; }
+.cam-wrap canvas { max-width: 100%; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; display: block; }
+.mapbtn { font-size: 11px; padding: 0 6px; border-radius: 4px; }
+.maps-view { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; }
+.maps-view canvas { display: block; width: 100%; background: var(--plot-bg); border: 1px solid var(--border); border-radius: 6px; }
+#mapCanvas { cursor: crosshair; }
+#specCanvas { cursor: col-resize; }
+.map-read { min-height: 20px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.swatch-bar { display: inline-block; width: 90px; height: 10px; border-radius: 3px; vertical-align: middle; border: 1px solid var(--border); }
+.foot { padding: 10px 20px 24px; }
+.note { margin: 6px 0; }
+
+@media (max-width: 820px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .side { border-right: 0; border-bottom: 1px solid var(--border); max-height: 260px; }
+  .panels { grid-template-columns: minmax(0, 1fr); }
+  .maps-view { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media print {
+  :root, :root[data-eff="dark"] {
+    --bg: #FFFFFF; --panel: #FFFFFF; --fg: #000000; --muted: #444444;
+    --border: #BBBBBB; --plot-bg: #FFFFFF; --plot-fg: #000000;
+    --plot-muted: #444444; --plot-grid: #DDDDDD; color-scheme: light;
+  }
+  body { font-size: 11pt; }
+  .side, .actions, .controls, .pngbtn, .tabs, .foot .noprint, .holder-info button,
+  .empty, #notes, .idbox { display: none !important; }
+  .layout { display: block; }
+  main { padding: 0; }
+  .top { border: 0; padding: 0 0 8px; }
+  .panels { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8mm; }
+  .panels.one { grid-template-columns: minmax(0, 1fr); }
+  .panel, figure, table { break-inside: avoid; }
+  .panel canvas { height: 62mm; }
+  .panels.one .panel canvas { height: 110mm; }
+}
+</style>
+</head>
+<body>
+<div id="boot" class="boot" role="status">Loading the data&hellip;</div>
+<div id="app" hidden>
+  <header class="top">
+    <div class="ident">
+      <h1 id="title"></h1>
+      <p id="subtitle" class="muted"></p>
+    </div>
+    <div class="actions">
+      <span class="badge" title="This page shows the data. Nothing you do here changes the files or is saved back.">Read-only</span>
+      <label class="field">Theme
+        <select id="theme">
+          <option value="auto">Auto</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <button type="button" id="zipall" title="One ZIP with a CSV per spectrum, the quantification table and the text notes">Download everything</button>
+      <button type="button" id="print">Print</button>
+    </div>
+  </header>
+  <div class="layout">
+    <aside class="side" aria-label="Samples and spectra">
+      <div class="side-tools">
+        <input id="filter" type="search" placeholder="Filter samples and spectra"
+               aria-label="Filter samples and spectra" autocomplete="off">
+        <button type="button" id="untick" title="Untick every spectrum">Clear</button>
+      </div>
+      <div id="tree" class="tree" role="tree"></div>
+      <p id="tickcount" class="muted small"></p>
+    </aside>
+    <main>
+      <nav class="tabs" role="tablist" id="tabs"></nav>
+      <section id="tab-plot" class="tab" role="tabpanel">
+        <div class="controls" id="controls">
+          <label class="field">View
+            <select id="mode"><option value="stack">Stack</option><option value="overlay">Overlay</option></select>
+          </label>
+          <label class="field">Normalise
+            <select id="norm"><option value="none">None</option><option value="max">Max = 1</option><option value="area">Area = 1</option></select>
+          </label>
+          <label class="field" id="offsetField">Offset
+            <input type="range" id="offset" min="0" max="3" step="0.05" value="0.6">
+          </label>
+          <label class="field">Energy
+            <select id="scale"><option value="Binding">Binding</option><option value="Kinetic">Kinetic</option></select>
+          </label>
+          <button type="button" id="resetzoom" title="Undo zooming on every panel">Reset zoom</button>
+          <button type="button" id="csv" title="Download the ticked spectra as CSV">Download CSV</button>
+          <button type="button" id="identify" aria-pressed="false" title="Click a peak on a plot to see which element lines lie near it">Identify peaks</button>
+          <label class="field" id="autoField" hidden title="Automatic labels from approximate line positions: check them before relying on them"><input type="checkbox" id="autolabel"> Label survey peaks</label>
+          <span id="nearbyField" hidden>
+            <label class="field" title="Another candidate photoelectron line near an identified peak (up to 2, nearest first), in a different colour, to help confirm speciation"><input type="checkbox" id="nearbySecondary"> Secondary</label>
+            <label class="field" title="A candidate Auger line near an identified peak, in a different colour"><input type="checkbox" id="nearbyAuger"> Auger</label>
+          </span>
+        </div>
+        <div class="idbox" id="idbox" hidden></div>
+        <div class="controls levelbar" id="levelbar" hidden>
+          <label class="field"><input type="checkbox" id="levelOn"> One depth level at a time</label>
+          <button type="button" id="levPrev" title="Previous level (left arrow)" aria-label="Previous level">&#9664;</button>
+          <input type="range" id="level" min="0" max="0" step="1" aria-label="Depth level">
+          <button type="button" id="levNext" title="Next level (right arrow)" aria-label="Next level">&#9654;</button>
+          <button type="button" id="levPlay" aria-pressed="false" title="Step through the levels">Play</button>
+          <span id="levelText" class="muted"></span>
+        </div>
+        <div class="controls fitbar" id="fitbar" hidden>
+          <span class="muted">Fit</span>
+          <label class="field"><input type="checkbox" id="fit-components" checked> Components</label>
+          <label class="field"><input type="checkbox" id="fit-envelope" checked> Envelope</label>
+          <label class="field"><input type="checkbox" id="fit-background" checked> Background</label>
+          <label class="field"><input type="checkbox" id="fit-residual"> Residual</label>
+        </div>
+        <p id="notes" class="muted small"></p>
+        <div id="panels" class="panels"></div>
+        <p id="empty" class="empty">Tick spectra in the list to plot them. Spectra with the same element name share a panel.
+          Drag on a plot to zoom, double-click to reset.</p>
+      </section>
+      <section id="tab-quant" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-depth" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-figures" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-meta" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-notes" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-methods" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-holder" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-cameras" class="tab" role="tabpanel" hidden></section>
+      <section id="tab-maps" class="tab" role="tabpanel" hidden></section>
+    </main>
+  </div>
+  <footer class="foot muted small" id="foot"></footer>
+</div>
+<script id="xps-data" type="application/octet-stream">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</script>
+<script>'use strict';
+/* eXPoSe SpectraDeck - offline data browser.
+   No libraries, no network. The first half is pure logic (decoding, axes,
+   ticks, normalising, grouping, CSV) and is unit-tested under Node; the
+   second half builds the page and only runs where there is a document. */
+(function (G) {
+  var V = {};
+
+  /* ------------------------------------------------------------ decoding */
+  V.b64ToBytes = function (b64) {
+    var s = atob(b64.replace(/\s+/g, '')), a = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
+    return a;
+  };
+  V.decode = function (b64) {
+    if (typeof DecompressionStream === 'undefined') {
+      return Promise.reject(new Error('This browser has no DecompressionStream'));
+    }
+    var stream = new Blob([V.b64ToBytes(b64)]).stream()
+      .pipeThrough(new DecompressionStream('gzip'));
+    return new Response(stream).text().then(JSON.parse);
+  };
+  /* an energy axis is stored as {x0, dx, n} when regular, else as a list */
+  V.axisValues = function (e) {
+    if (Array.isArray(e)) return e;
+    var out = new Array(e.n);
+    for (var i = 0; i < e.n; i++) out[i] = e.x0 + e.dx * i;
+    return out;
+  };
+
+  /* --------------------------------------------------------------- maths */
+  V.niceFloor = function (x) {              /* down to 1, 2 or 5 x 10^n */
+    if (!(x > 0) || !isFinite(x)) return 1;
+    var e = Math.floor(Math.log10(x)), m = x / Math.pow(10, e);
+    return (m >= 5 ? 5 : m >= 2 ? 2 : 1) * Math.pow(10, e);
+  };
+  V.niceStep = function (range, target) {   /* a round step, ~target ticks */
+    var raw = range / Math.max(1, target), mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    var m = raw / mag;
+    return (m < 1.5 ? 1 : m < 3 ? 2 : m < 7 ? 5 : 10) * mag;
+  };
+  V.niceTicks = function (lo, hi, target) {
+    if (!(hi > lo) || !isFinite(lo) || !isFinite(hi)) return [];
+    var step = V.niceStep(hi - lo, target || 6), out = [];
+    for (var k = Math.ceil(lo / step - 1e-9); k * step <= hi + step * 1e-9; k++) {
+      out.push(+(k * step).toPrecision(12));
+    }
+    return out;
+  };
+  V.decimals = function (step) {
+    if (!(step > 0)) return 0;
+    return Math.max(0, Math.min(6, -Math.floor(Math.log10(step) + 1e-9)));
+  };
+  V.fmtY = function (v) {
+    var a = Math.abs(v);
+    if (a === 0) return '0';
+    if (a >= 1e5 || a < 1e-2) return v.toExponential(1).replace('e+', 'e');
+    if (a >= 100) return String(Math.round(v));
+    return String(+v.toPrecision(3));
+  };
+  V.normFactor = function (y, mode) {
+    var i, m, s;
+    if (mode === 'max') {
+      m = -Infinity;
+      for (i = 0; i < y.length; i++) if (y[i] > m) m = y[i];
+      return m ? m : 1;
+    }
+    if (mode === 'area') {
+      s = 0;
+      for (i = 0; i < y.length; i++) s += Math.abs(y[i]);
+      s /= y.length;
+      return s ? s : 1;
+    }
+    return 1;
+  };
+  /* nudge label positions apart (order kept); positions are pixels, y down */
+  V.dodge = function (ys, gap) {
+    var order = ys.map(function (_v, i) { return i; })
+      .sort(function (a, b) { return ys[a] - ys[b]; });
+    var out = ys.slice();
+    for (var k = 1; k < order.length; k++) {
+      var a = order[k - 1], b = order[k];
+      if (out[b] - out[a] < gap) out[b] = out[a] + gap;
+    }
+    return out;
+  };
+  V.interp = function (xs, ys, x) {        /* linear, either direction */
+    var n = xs.length;
+    if (!n) return null;
+    var asc = xs[n - 1] >= xs[0], lo = 0, hi = n - 1;
+    if ((asc && (x < xs[0] || x > xs[n - 1])) || (!asc && (x > xs[0] || x < xs[n - 1]))) return null;
+    while (hi - lo > 1) {
+      var mid = (lo + hi) >> 1;
+      if ((xs[mid] <= x) === asc) lo = mid; else hi = mid;
+    }
+    var d = xs[hi] - xs[lo];
+    return d === 0 ? ys[lo] : ys[lo] + (ys[hi] - ys[lo]) * (x - xs[lo]) / d;
+  };
+
+  /* -------------------------------------------------------------- colour */
+  V.hexToRgb = function (h) {
+    h = h.replace('#', '');
+    return [0, 2, 4].map(function (i) { return parseInt(h.substr(i, 2), 16); });
+  };
+  V.rgbToHex = function (c) {
+    return '#' + c.map(function (v) {
+      v = Math.max(0, Math.min(255, Math.round(v)));
+      return (v < 16 ? '0' : '') + v.toString(16);
+    }).join('').toUpperCase();
+  };
+  V.mix = function (a, b, t) {
+    var ra = V.hexToRgb(a), rb = V.hexToRgb(b);
+    return V.rgbToHex(ra.map(function (x, i) { return x + (rb[i] - x) * t; }));
+  };
+  V.ramp = function (colour, n, background) {   /* one hue fading out */
+    if (n <= 1) return [colour];
+    var top = Math.min(0.62, 0.10 * (n - 1)), out = [];
+    for (var i = 0; i < n; i++) out.push(V.mix(colour, background, top * i / (n - 1)));
+    return out;
+  };
+  /* colours of one panel from each trace's slot: categorical, or a ramp of
+     one hue when every trace shares a slot (the levels of a depth profile) */
+  V.stackColours = function (slots, cycle, background) {
+    var same = slots.length > 1 && slots.every(function (s) { return s === slots[0]; });
+    if (same) return V.ramp(cycle[slots[0] % cycle.length], slots.length, background);
+    return slots.map(function (s) { return cycle[s % cycle.length]; });
+  };
+
+  /* --------------------------------------------------------------- axes */
+  V.energyAxis = function (reg, x, scale) {
+    var label = reg.elabel || 'Binding Energy', low = label.toLowerCase();
+    var native = { x: x, invert: !!reg.binding, ok: true, units: reg.eunits || 'eV',
+                   label: low.charAt(0).toUpperCase() + low.slice(1) };
+    if (scale !== 'Kinetic') return native;
+    if (reg.binding && reg.hv) {
+      return { x: x.map(function (v) { return reg.hv - v; }), invert: false, ok: true,
+               units: 'eV', label: 'Kinetic energy' };
+    }
+    if (!reg.binding) { native.invert = false; return native; }   /* native KE */
+    native.ok = false;                                            /* no photon energy */
+    return native;
+  };
+  V.normName = function (n) { return String(n || '').replace(/\s+/g, ' ').trim().toLowerCase(); };
+  /* spectra with the same element name share a panel; first appearance order */
+  V.groupSpectra = function (specs) {
+    var groups = [], by = {};
+    specs.forEach(function (s) {
+      var k = V.normName(s.name);
+      if (!by[k]) { by[k] = { key: k, name: s.name, items: [] }; groups.push(by[k]); }
+      by[k].items.push(s);
+    });
+    return groups;
+  };
+  V.traceLabel = function (s, multiFile) {
+    var base;
+    if (s.reg.level !== null && s.reg.level !== undefined) {
+      base = 'L' + s.reg.level + (s.reg.etch !== null && s.reg.etch !== undefined ? ' (' + +s.reg.etch.toPrecision(6) + ' s)' : '');
+    } else {
+      base = s.sample.name || (multiFile ? s.fileName.replace(/\.[^.]*$/, '') : s.name);
+    }
+    return base.length <= 24 ? base : base.slice(0, 22) + '…';
+  };
+
+  /* ------------------------------------------------------------------ CSV */
+  V.csvField = function (v) {
+    var t = String(v);
+    return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  /* wide format: an energy and an intensity column per spectrum, as the
+     desktop app's own CSV export */
+  V.buildCsv = function (specs) {
+    var cols = [], maxlen = 0;
+    specs.forEach(function (s) {
+      var pre = s.sample.name ? s.sample.name + ' ' : '';
+      var tag = s.reg.level !== null && s.reg.level !== undefined ? ' L' + s.reg.level : '';
+      cols.push([pre + s.name + tag + ' ' + (s.reg.elabel || 'Binding Energy') + ' (' + (s.reg.eunits || 'eV') + ')', s.x]);
+      cols.push([pre + s.name + tag + ' ' + s.reg.ylabel + ' (' + s.reg.yunits + ')', s.y]);
+      V.fitCsvColumns(s, pre).forEach(function (c) { cols.push(c); });
+      maxlen = Math.max(maxlen, s.y.length);
+    });
+    var lines = [cols.map(function (c) { return V.csvField(c[0]); }).join(',')];
+    for (var i = 0; i < maxlen; i++) {
+      lines.push(cols.map(function (c) {
+        var v = c[1][i];
+        return i < c[1].length && v !== null && v !== undefined && v === v ? String(v) : '';
+      }).join(','));
+    }
+    return lines.join('\r\n') + '\r\n';
+  };
+
+  /* ------------------------------------------------------------ CasaXPS fits */
+  /* A fit arrives as rows (one per fit region: RSF, area, limits, components)
+     and, per row, curves from the region's first point on (`i0`): background,
+     envelope and one curve per component, in the spectrum's own counts. The
+     numbers were worked out by the desktop app; the page only draws them. */
+  V.FIT_LAYERS = ['components', 'envelope', 'background', 'residual'];
+  V.curveFull = function (cur, curve, n) {      /* a curve on every point, null outside */
+    if (!cur || !curve) return null;
+    var out = new Array(n);
+    for (var i = 0; i < n; i++) out[i] = null;
+    for (var k = 0; k < curve.length && cur.i0 + k < n; k++) out[cur.i0 + k] = curve[k];
+    return out;
+  };
+  V.fitRows = function (reg) { return reg && reg.fit ? reg.fit.rows : []; };
+  /* the chemical states of a spectrum's fit, by display name, in
+     first-appearance order (what the app's legend shows): two components
+     with the same name -- even from different fit regions of this
+     spectrum -- are one state here, mirroring plots.draw_fit. Colour is a
+     page-level concern (redrawFit/fitLegend/updateFitBox), not this. */
+  V.fitStates = function (reg) {
+    var out = [], seen = {};
+    V.fitRows(reg).forEach(function (row) {
+      row.components.forEach(function (c) {
+        if (!(c.state in seen)) { seen[c.state] = out.length; out.push({ name: c.state, slot: out.length }); }
+      });
+    });
+    return out;
+  };
+  V.residual = function (y, env) {              /* data - envelope, null where there is no envelope */
+    return y.map(function (v, i) { return env && env[i] !== null && env[i] !== undefined ? v - env[i] : null; });
+  };
+  /* ------------------------------------------------------- quantification */
+  /* Atomic percent from CasaXPS's own areas and RSFs; mirrors quant.py (the
+     tests compare both on the same rows). Rows of one sample (and one depth
+     level) are normalised together. */
+  V.QUANT_HEADER = ['Sample', 'Level', 'Spectrum', 'Region', 'Background', 'RSF', 'Area (counts/s.eV)',
+                    'Area / RSF', 'at %', 'State', 'State at %', 'Note', 'Source', 'RSF Source'];
+  /* The standard "workhorse" line for an element with a real, commonly-fitted
+     choice between more than one core level (hand-copied from
+     resultspages.py's own _PREFERRED_LINE -- see that module for why Pd/Ag
+     are deliberately not here). */
+  V.PREFERRED_LINE = { Pt: '4f', Au: '4f', Ir: '4f', Os: '4f', Re: '4f', W: '4f',
+                       Ta: '4f', Hf: '4f', Hg: '4f', Tl: '4f', Pb: '4f', Bi: '4f' };
+  /* JS port of resultspages.element_of: the element of a core-level name
+     ("Ti 2p" -> "Ti"), else ''. */
+  var ELEMENT_OF_RE = /^([A-Z][a-z]?)\s*\d+\s*[spdf]/;
+  V.elementOf = function (region) {
+    var m = ELEMENT_OF_RE.exec(String(region || '').trim());
+    return m ? m[1] : '';
+  };
+  /* JS port of rsf.py's anode_for/rsf_of: AL_HV/MG_HV match rsf.py exactly. */
+  V.AL_HV = 1486.6; V.MG_HV = 1253.6;
+  V.anodeFor = function (hv) {
+    if (hv && Math.abs(hv - V.MG_HV) < Math.abs(hv - V.AL_HV)) return 'Mg';
+    return 'Al';
+  };
+  V.rsfOf = function (line, table, library, hv) {
+    var anode = V.anodeFor(hv);
+    for (var i = 0; i < table.length; i++) {
+      var e = table[i];
+      if (e[0] === library && e[1] === anode && e[2] === line) return e[3];
+    }
+    return null;
+  };
+  /* JS port of imfp.py's imfp_nm/ke_power_factor (see that module's own
+     docstring for the full provenance/caveats: a correctly-cited TPP-2M
+     equation with fixed "average matrix" constants, never proven in
+     KherveFitting's own quantification; KE^0.6 is Thermo Avantage's own
+     convention, referenced not derived, in KherveFitting's source). Only
+     ever multiplied onto the "scofield" table, never "kratos_f1s" or a
+     file's own recorded RSF -- see V.quantNormalise. */
+  var IMFP_N_V = 4.684, IMFP_RHO = 6.767, IMFP_MOLAR_MASS = 137.51, IMFP_E_GAP = 0;
+  var IMFP_MIN_KE = 50, IMFP_MAX_KE = 2000, KE_POWER_EXPONENT = 0.6;
+  V.imfpNm = function (ke) {
+    if (!ke || ke < IMFP_MIN_KE || ke > IMFP_MAX_KE) return null;
+    var eP = 28.8 * Math.sqrt(IMFP_N_V * IMFP_RHO / IMFP_MOLAR_MASS);
+    var u = IMFP_N_V * IMFP_RHO / IMFP_MOLAR_MASS;
+    var beta = -0.10 + 0.944 / Math.sqrt(eP * eP + IMFP_E_GAP * IMFP_E_GAP) + 0.069 * Math.pow(IMFP_RHO, 0.1);
+    var gamma = 0.191 * Math.pow(IMFP_RHO, -0.5);
+    var c = 1.97 - 0.91 * u, d = 53.4 - 20.8 * u;
+    var imfpAngstrom = ke / (eP * eP * (beta * Math.log(gamma * ke) - c / ke + d / (ke * ke)));
+    return imfpAngstrom / 10.0;
+  };
+  V.kePowerFactor = function (ke) {
+    if (!ke || ke <= 0) return null;
+    return Math.pow(ke, KE_POWER_EXPONENT);
+  };
+  /* Suggested defaults for one quantGroups() group's entries: a non-
+     preferred line of an element whose preferred line is also (still)
+     included gets `false` -- a *default* the user can still re-tick, unlike
+     resultspages.py's own hard exclusion for the static report. `include`
+     is only consulted to see which entries currently still count (so an
+     already-excluded entry isn't treated as "the surviving line"); applying
+     the result is the caller's job (renderFitQuant seeds q.include[key]
+     only where the key is not already present, so a user's own explicit
+     tick is never overridden). */
+  V.preferredDefaults = function (entries, include) {
+    var byElement = {};
+    entries.forEach(function (e) {
+      if (include[e.key] === false) return;
+      var el = V.elementOf(e.row.region);
+      if (el) { (byElement[el] = byElement[el] || {})[e.row.region] = e.key; }
+    });
+    var seed = {};
+    Object.keys(byElement).forEach(function (el) {
+      var orbital = V.PREFERRED_LINE[el], regions = byElement[el];
+      if (!orbital || Object.keys(regions).length < 2) return;
+      var preferred = el + ' ' + orbital;
+      if (!(preferred in regions)) return;
+      Object.keys(regions).forEach(function (name) {
+        if (name !== preferred) seed[regions[name]] = false;
+      });
+    });
+    return seed;
+  };
+  /* the fit rows of these spectra grouped by sample and level, in order of appearance;
+     an entry's key is stable, so a page can remember which rows are ticked */
+  V.quantGroups = function (specs) {
+    var groups = [], by = {};
+    specs.forEach(function (s) {
+      V.fitRows(s.reg).forEach(function (row, ri) {
+        var lv = s.reg.level === undefined ? null : s.reg.level, k = s.sample.id + '|' + lv;
+        if (!by[k]) { by[k] = { sample: s.sample.name || '', sid: s.sample.id, level: lv, etch: s.reg.etch, entries: [] }; groups.push(by[k]); }
+        by[k].entries.push({ key: s.id + ':' + ri, spectrum: s.name, row: row, spec: s });
+      });
+    });
+    return groups;
+  };
+  /* Tiered exactly like quant.normalise: a row's own recorded RSF first;
+     then each component's own RSF summed (area_i/rsf_i -- a KherveFitting
+     fit can carry a different one per component, unlike CasaXPS's one RSF
+     per whole region); then, only when rsfTable is given (off by default,
+     the same "nothing is guessed" stance as the desktop), a reference-table
+     lookup by the row's own region name and photon energy. */
+  /* "scofield_tpp2m"/"scofield_ke06" are not real libraries in rsfTable --
+     they reuse the "scofield" rows verbatim, then multiply by a kinetic-
+     energy-dependent factor (see V.imfpNm/V.kePowerFactor above). */
+  var IMFP_LIBRARIES = { scofield_tpp2m: 'scofield', scofield_ke06: 'scofield' };
+  V.quantNormalise = function (rows, include, transmission, rsfTable, rsfLibrary) {
+    var out = rows.map(function (row, i) {
+      var area = transmission && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
+      var res = { corrected: null, at: null, why: '', rsfSource: null, rsfAnode: null, rsfValue: null,
+                 imfpNm: null, kePowerFactor: null };
+      if (include && include[i] === false) { res.why = 'not included'; return res; }
+      if (row.rsf && row.rsf > 0) {
+        if (area === null || area === undefined || !(area > 0)) res.why = 'no area';
+        else res.corrected = area / row.rsf;
+        return res;
+      }
+      var compTotal = (row.components || []).reduce(function (a, c) {
+        return a + (c.rsf && c.rsf > 0 && c.area !== null && c.area !== undefined ? c.area / c.rsf : 0);
+      }, 0);
+      if (compTotal > 0) { res.corrected = compTotal; res.rsfSource = 'component'; return res; }
+      if (rsfTable && rsfTable.length) {
+        var library = rsfLibrary || 'scofield';
+        var baseLibrary = IMFP_LIBRARIES[library] || library;
+        var value = V.rsfOf(row.region, rsfTable, baseLibrary, row.photon_energy);
+        if (!value) res.why = 'no RSF';
+        else if (area === null || area === undefined || !(area > 0)) res.why = 'no area';
+        else {
+          var source = baseLibrary;
+          if (IMFP_LIBRARIES[library]) {
+            var ke = (row.photon_energy !== null && row.photon_energy !== undefined
+                     && row.be_lo !== null && row.be_lo !== undefined
+                     && row.be_hi !== null && row.be_hi !== undefined)
+              ? row.photon_energy - (row.be_lo + row.be_hi) / 2 : null;
+            var factor = library === 'scofield_tpp2m' ? V.imfpNm(ke) : V.kePowerFactor(ke);
+            if (factor) {
+              value = value * factor;
+              source = library;
+              if (library === 'scofield_tpp2m') res.imfpNm = factor;
+              else res.kePowerFactor = factor;
+            }
+          }
+          res.corrected = area / value; res.rsfSource = source;
+          res.rsfAnode = V.anodeFor(row.photon_energy); res.rsfValue = value;
+        }
+        return res;
+      }
+      res.why = 'no RSF';
+      return res;
+    });
+    var total = out.reduce(function (a, x) { return a + (x.corrected === null ? 0 : x.corrected); }, 0);
+    out.forEach(function (x) { if (x.corrected !== null && total > 0) x.at = 100 * x.corrected / total; });
+    return out;
+  };
+  V.RSF_LIBRARY_SHORT = { scofield: 'Scofield', kratos_f1s: 'Kratos F1s',
+                          scofield_tpp2m: 'Scofield×TPP-2M', scofield_ke06: 'Scofield×KE^0.6' };
+  function rsfSourceText(x) {
+    if (!x.rsfSource) return '';
+    if (x.rsfSource === 'component') return "components' own RSF";
+    var label = V.RSF_LIBRARY_SHORT[x.rsfSource] || x.rsfSource;
+    return label + ', ' + x.rsfAnode + ' Kα (' + sig6(x.rsfValue) + ')';
+  }
+  /* the chemical states of one row: each one's share of the positive component area */
+  V.quantStates = function (row, at) {
+    var groups = [], by = {};
+    (row.components || []).forEach(function (c) {
+      var g = by[c.gk];
+      if (!g) { g = by[c.gk] = { name: c.state, area: 0 }; groups.push(g); }
+      g.area += Math.max(0, c.area || 0);
+    });
+    var tot = groups.reduce(function (a, g) { return a + g.area; }, 0);
+    if (!(tot > 0)) return [];
+    return groups.map(function (g) {
+      return { name: g.name, frac: g.area / tot, at: at === null || at === undefined ? null : at * g.area / tot };
+    });
+  };
+  function sig6(v) { return v === null || v === undefined || v !== v ? '' : String(+v.toPrecision(6)); }
+  /* the table as rows of cells, one per region and one per chemical state under it;
+     `inc` maps an entry's key to false when it is unticked */
+  V.quantTable = function (groups, inc, transmission, rsfTable, rsfLibrary) {
+    var rows = [V.QUANT_HEADER.slice()];
+    groups.forEach(function (g) {
+      var res = V.quantNormalise(g.entries.map(function (e) { return e.row; }),
+        g.entries.map(function (e) { return !(inc && inc[e.key] === false); }), transmission,
+        rsfTable, rsfLibrary);
+      var lv = g.level === null || g.level === undefined ? '' : String(g.level);
+      g.entries.forEach(function (e, i) {
+        var row = e.row, x = res[i];
+        var area = transmission && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
+        rows.push([g.sample, lv, e.spectrum, row.region, row.background || '', sig6(row.rsf), sig6(area),
+                   sig6(x.corrected), sig6(x.at), '', '', x.why, row.source || '', rsfSourceText(x)]);
+        if (x.at !== null) {
+          V.quantStates(row, x.at).forEach(function (st) {
+            rows.push([g.sample, lv, e.spectrum, row.region, '', '', '', '', '', st.name, sig6(st.at), '', '', '']);
+          });
+        }
+      });
+    });
+    return rows;
+  };
+  V.quantCsv = function (groups, inc, transmission, rsfTable, rsfLibrary) {
+    return V.quantTable(groups, inc, transmission, rsfTable, rsfLibrary).map(function (r) {
+      return r.map(V.csvField).join(',');
+    }).join('\r\n') + '\r\n';
+  };
+
+  /* CasaXPS's own exported quantification (Quant_survey.txt etc., see
+     casaquant.py): a sample it names carries its own `casaxps` block,
+     preferred over the fit-derived table above for that sample. The three
+     tables are independent flat lists, not nested one inside another (a
+     real Quant_regions.txt can list components with no matching element in
+     the same folder's Quant_survey.txt) -- shown exactly as CasaXPS wrote
+     them, nothing recomputed. */
+  V.casaxpsSurveyRows = function (cq) {
+    return [['Element', '%Conc']].concat((cq.survey || []).map(function (r) {
+      return [r.element, r.pct === null || r.pct === undefined ? '' : r.pct];
+    }));
+  };
+  V.casaxpsRegionsRows = function (cq) {
+    return [['Name', 'Position (eV)', '%At Conc']].concat((cq.regions || []).map(function (r) {
+      return [r.name, r.position === null || r.position === undefined ? '' : r.position,
+              r.at_pct === null || r.at_pct === undefined ? '' : r.at_pct];
+    }));
+  };
+  V.casaxpsDparamRows = function (cq) {
+    return [['Name', 'FWHM (eV)']].concat((cq.dparam || []).map(function (r) {
+      return [r.name, r.fwhm === null || r.fwhm === undefined ? '' : r.fwhm];
+    }));
+  };
+  V.casaxpsCsv = function (rows) {
+    return rows.map(function (r) { return r.map(V.csvField).join(','); }).join('\r\n') + '\r\n';
+  };
+
+  /* ------------------------------------------------- element identification */
+  /* mirrors xpslines.py: `el` is the payload's element table ({lines: [element, line,
+     be, ke, rank], common, bonus, hv}); an Auger line has a kinetic energy, so its
+     binding energy follows the photon energy */
+  V.lineBe = function (line, hv, defaultHv) {
+    return line[2] !== null && line[2] !== undefined ? line[2] : (hv || defaultHv) - line[3];
+  };
+  V.lineLabel = function (line) { return line[0] + ' ' + line[1]; };
+  /* the lines within `win` eV of a binding energy, most plausible first: nearest, a
+     secondary line (rank > 1) needs to be about 0.8 eV closer per rank step, and the
+     elements met on almost every sample get a head start */
+  V.candidates = function (be, win, el, hv) {
+    var out = [];
+    el.lines.forEach(function (line, i) {
+      var lb = V.lineBe(line, hv, el.hv), d = lb - be;
+      if (Math.abs(d) > win) return;
+      var rank = line[4] === null || line[4] === undefined ? 1 : line[4];
+      var key = Math.abs(d) + 0.8 * (rank - 1) - (rank === 1 && el.common.indexOf(line[0]) >= 0 ? el.bonus : 0);
+      out.push({ d: d, be: lb, line: line, label: V.lineLabel(line), key: key, i: i });
+    });
+    out.sort(function (a, b) { return a.key - b.key || a.i - b.i; });
+    return out;
+  };
+  /* other candidate lines near `be` besides the primary match `exclude`
+     (its label): mirrors xpslines.nearby_lines exactly. Up to `maxExtra`
+     other photoelectron lines (nearest first) when `secondary` is set, and
+     every Auger line in the window when `auger` is set. */
+  V.nearbyLines = function (be, win, el, hv, exclude, secondary, auger, maxExtra) {
+    maxExtra = maxExtra === undefined ? 2 : maxExtra;
+    var extraSecondary = [], extraAuger = [];
+    V.candidates(be, win, el, hv).forEach(function (c) {
+      if (c.label === exclude) return;
+      var isAuger = c.line[2] === null || c.line[2] === undefined;
+      if (isAuger) {
+        if (auger) extraAuger.push({ be: c.be, label: c.label, tier: 'auger' });
+      } else if (secondary) {
+        extraSecondary.push({ be: c.be, label: c.label, tier: 'secondary' });
+      }
+    });
+    return extraSecondary.slice(0, maxExtra).concat(extraAuger);
+  };
+
+  /* ------------------------------------------------------------ ZIP download */
+  /* a small store-only ZIP writer (no compression, UTF-8 names), so the page can hand
+     over everything at once without a library; tests read the result back with
+     Python's zipfile */
+  var crcTable = null;
+  V.crc32 = function (bytes) {
+    if (!crcTable) {
+      crcTable = new Uint32Array(256);
+      for (var n = 0; n < 256; n++) {
+        var c = n;
+        for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+        crcTable[n] = c >>> 0;
+      }
+    }
+    var crc = 0xFFFFFFFF;
+    for (var i = 0; i < bytes.length; i++) crc = crcTable[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+    return (crc ^ 0xFFFFFFFF) >>> 0;
+  };
+  V.utf8 = function (s) { return new TextEncoder().encode(s); };
+  /* files: [{name, data: string | Uint8Array}] -> Uint8Array of the archive */
+  V.zip = function (files, when) {
+    var d = when instanceof Date && !isNaN(when) ? when : new Date(2000, 0, 1);
+    var dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+    var dosDate = (Math.max(0, d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    var parts = [], central = [], offset = 0;
+    var u16 = function (v) { return [v & 255, (v >>> 8) & 255]; };
+    var u32 = function (v) { return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]; };
+    files.forEach(function (f) {
+      var name = V.utf8(f.name), data = typeof f.data === 'string' ? V.utf8(f.data) : f.data, crc = V.crc32(data);
+      var common = [].concat(u16(20), u16(0x0800), u16(0), u16(dosTime), u16(dosDate), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0));
+      parts.push(new Uint8Array([0x50, 0x4B, 3, 4].concat(common)), name, data);
+      central.push(new Uint8Array([0x50, 0x4B, 1, 2].concat(u16(20), common, u16(0), u16(0), u16(0), u32(0), u32(offset))), name);
+      offset += 30 + name.length + data.length;
+    });
+    var cdSize = central.reduce(function (a, p) { return a + p.length; }, 0);
+    var end = new Uint8Array([0x50, 0x4B, 5, 6].concat(u16(0), u16(0), u16(files.length), u16(files.length), u32(cdSize), u32(offset), u16(0)));
+    var all = parts.concat(central, [end]), total = all.reduce(function (a, p) { return a + p.length; }, 0);
+    var out = new Uint8Array(total), at = 0;
+    all.forEach(function (p) { out.set(p, at); at += p.length; });
+    return out;
+  };
+  /* a name safe as a file or folder name on any system */
+  V.safeName = function (s) {
+    var t = String(s === null || s === undefined ? '' : s).replace(/[^\w.\-() +,]+/g, '_').replace(/\s+/g, ' ').replace(/^[.\s]+|[.\s]+$/g, '');
+    return (t.slice(0, 80) || 'unnamed');
+  };
+  /* everything the page can hand over as files, ready for V.zip: a README, the text
+     notes, one CSV per spectrum name of each sample (all its depth levels side by side)
+     and the quantification table when there are fits */
+  V.bundleFiles = function (data, specs) {
+    var files = [], used = {};
+    var uniq = function (path) {
+      var base = path.replace(/\.csv$/, ''), n = 1, p = path;
+      while (used[p.toLowerCase()]) { n++; p = base + ' (' + n + ').csv'; }
+      used[p.toLowerCase()] = true;
+      return p;
+    };
+    var csvs = [], by = {}, order = [];
+    specs.forEach(function (s) {
+      var k = s.sample.index + '|' + V.normName(s.name);
+      if (!by[k]) { by[k] = { sample: s.sample, name: s.name, items: [] }; order.push(k); }
+      by[k].items.push(s);
+    });
+    order.forEach(function (k) {
+      var g = by[k];
+      csvs.push({ name: uniq('csv/' + V.safeName(g.sample.name || 'sample') + '/' + V.safeName(g.name) + '.csv'),
+                  data: '﻿' + V.buildCsv(g.items) });
+    });
+    var groups = V.quantGroups(specs);
+    if (groups.length) files.push({ name: 'quantification.csv', data: '﻿' + V.quantCsv(groups, null, false) });
+    var casaxpsFiles = [];
+    (data.samples || []).forEach(function (sm) {
+      if (!sm.casaxps) return;
+      var base = V.safeName(sm.name || 'sample');
+      [['survey', V.casaxpsSurveyRows(sm.casaxps)],
+       ['regions', V.casaxpsRegionsRows(sm.casaxps)],
+       ['dparam', V.casaxpsDparamRows(sm.casaxps)]].forEach(function (t) {
+        if (t[1].length > 1) {
+          casaxpsFiles.push({ name: 'casaxps/' + base + '_' + t[0] + '.csv',
+                             data: '﻿' + V.casaxpsCsv(t[1]) });
+        }
+      });
+    });
+    files = files.concat(casaxpsFiles);
+    if ((data.methods || '').trim()) files.push({ name: 'methods.txt', data: data.methods.trim() + '\n' });
+    if ((data.calibration || '').trim()) files.push({ name: 'calibration.txt', data: data.calibration.trim() + '\n' });
+    var d = data.details || {};
+    if ((d.summary || '').trim()) files.push({ name: 'summary.txt', data: d.summary.trim() + '\n' });
+    files.unshift({ name: 'README.txt', data: V.readme(data, specs, csvs.length, groups.length > 0,
+                                                        casaxpsFiles.length > 0,
+                                                        files.map(function (f) { return f.name; })) });
+    return files.concat(csvs);
+  };
+  V.readme = function (data, specs, nCsv, hasQuant, hasCasaxps, others) {
+    var d = data.details || {}, L = [];
+    L.push(d.title || 'Experiment data');
+    L.push([d.customer, d.reference, d.operator, d.date].filter(Boolean).join('  ·  '));
+    L.push('Made with ' + data.tool + ' on ' + String(data.generated).replace('T', ' ') + '.');
+    L.push('');
+    L.push('What is in this folder');
+    L.push('  csv/                 ' + nCsv + ' CSV file' + (nCsv === 1 ? '' : 's') + ': one per sample and spectrum name, energy and intensity');
+    L.push('                       columns for every spectrum (every depth level side by side), plus the');
+    L.push('                       fitted curves where a CasaXPS fit was read. The units are in each header.');
+    if (hasQuant) L.push('  quantification.csv   atomic % from the fitted regions (area / RSF, CasaXPS numbers), per sample and level.');
+    if (hasCasaxps) L.push('  casaxps/              CasaXPS\'s own exported quantification for the samples it covers (Quant_survey.txt etc.), not recomputed.');
+    if (others.indexOf('methods.txt') >= 0) L.push('  methods.txt          the experimental methods text.');
+    if (others.indexOf('calibration.txt') >= 0) L.push('  calibration.txt      how the binding-energy axis was calibrated.');
+    if (others.indexOf('summary.txt') >= 0) L.push('  summary.txt          the summary written for this experiment.');
+    L.push('');
+    L.push(specs.length + ' spectra from ' + data.samples.length + ' sample' + (data.samples.length === 1 ? '' : 's') + ', from these source files:');
+    (data.files || []).forEach(function (f) { L.push('  ' + f.name + (f.format ? ' (' + f.format + ')' : '')); });
+    L.push('');
+    L.push('Energies are as shown in the data browser (binding-energy corrections applied where the file or the analyst gave one).');
+    return L.join('\n') + '\n';
+  };
+
+  /* ---------------------------------------------------------- depth profiles */
+  /* mirrors quant.profile: one group per depth level of a sample (from quantGroups,
+     in depth order); each level is normalised on its own. mode: 'element' (at % of
+     each region), 'state' (at % of each chemical state) or 'share' (a state's % of its
+     own region). Values are null where a region is missing, unticked or has no RSF. */
+  V.profile = function (groups, mode, inc, transmission) {
+    var series = {}, order = [];
+    groups.forEach(function (g, gi) {
+      var res = V.quantNormalise(g.entries.map(function (e) { return e.row; }),
+        g.entries.map(function (e) { return !(inc && inc[e.key] === false); }), transmission), seen = {};
+      g.entries.forEach(function (e, i) {
+        var x = res[i];
+        if (x.at === null) return;
+        var items = mode === 'element' ? [[e.row.region, x.at]] :
+          V.quantStates(e.row, x.at).map(function (st) { return [e.row.region + ': ' + st.name, mode === 'state' ? st.at : 100 * st.frac]; });
+        items.forEach(function (it) {
+          if (seen[it[0]]) return;
+          seen[it[0]] = true;
+          if (!series[it[0]]) { series[it[0]] = groups.map(function () { return null; }); order.push(it[0]); }
+          series[it[0]][gi] = it[1];
+        });
+      });
+    });
+    return { levels: groups.map(function (g) { return g.level; }),
+             series: order.map(function (n) { return { name: n, values: series[n] }; }) };
+  };
+  /* where a depth level sits: its number, etch time and, when the sputter settings are
+     known, depth and ion fluence (the desktop app writes those into the metadata) */
+  V.levelInfo = function (reg) {
+    var num = function (k) {
+      var v = reg.meta && reg.meta[k] !== undefined ? parseFloat(reg.meta[k]) : NaN;
+      return isFinite(v) ? v : null;
+    };
+    return { level: reg.level, etch: reg.etch === undefined ? null : reg.etch,
+             depth: num('Depth (nm)'), fluence: num('Fluence (ions/cm²)') };
+  };
+  /* the horizontal axes a set of levels can support, best first */
+  V.profileAxes = function (infos) {
+    var out = [], distinct = function (a) {
+      return a.every(function (v) { return v !== null && v !== undefined; }) && a.some(function (v) { return v !== a[0]; });
+    };
+    [['depth', 'Depth (nm)'], ['etch', 'Etch time (s)'], ['fluence', 'Ion fluence (ions/cm²)'], ['level', 'Level']].forEach(function (a) {
+      var vals = infos.map(function (i) { return i[a[0]]; });
+      if (distinct(vals)) out.push({ id: a[0], label: a[1], values: vals });
+    });
+    return out;
+  };
+  /* the peak maximum of each spectrum at each level (needs no fit); `specs` are one
+     sample's spectra with levels */
+  V.peakMaxSeries = function (specs) {
+    var levels = [], series = {}, order = [];
+    specs.forEach(function (s) { if (levels.indexOf(s.reg.level) < 0) levels.push(s.reg.level); });
+    levels.sort(function (a, b) { return a - b; });
+    specs.forEach(function (s) {
+      var k = s.name;
+      if (!series[k]) { series[k] = levels.map(function () { return null; }); order.push(k); }
+      var i = levels.indexOf(s.reg.level);
+      if (series[k][i] === null) series[k][i] = Math.max.apply(null, s.y);
+    });
+    return { levels: levels, series: order.map(function (n) { return { name: n, values: series[n] }; }) };
+  };
+  /* the profile as rows of cells: level, whichever of etch time / depth / fluence the
+     levels have, then a column per series */
+  V.profileTable = function (prof, infos) {
+    var cols = [['Level', 'level'], ['Etch time (s)', 'etch'], ['Depth (nm)', 'depth'], ['Ion fluence (ions/cm²)', 'fluence']]
+      .filter(function (c) { return infos.some(function (i) { return i[c[1]] !== null && i[c[1]] !== undefined; }); });
+    var rows = [cols.map(function (c) { return c[0]; }).concat(prof.series.map(function (s) { return s.name; }))];
+    prof.levels.forEach(function (lv, i) {
+      rows.push(cols.map(function (c) { return sig6(infos[i][c[1]]); }).concat(prof.series.map(function (s) { return sig6(s.values[i]); })));
+    });
+    return rows;
+  };
+
+  /* CSV columns of a spectrum's fit, named as the app's export names them */
+  V.fitCsvColumns = function (s, pre) {
+    var rows = V.fitRows(s.reg).filter(function (r) { return r.curve; }), cols = [], n = s.y.length;
+    rows.forEach(function (row) {
+      var tag = (pre || '') + s.name + ' fit' + (rows.length > 1 ? ' [' + row.region + ']' : '');
+      var cur = row.curve;
+      if (cur.bg) cols.push([tag + ': background', V.curveFull(cur, cur.bg, n)]);
+      row.components.forEach(function (c, j) {
+        if (cur.comps[j]) cols.push([tag + ': ' + c.name, V.curveFull(cur, cur.comps[j], n)]);
+      });
+      if (cur.env) cols.push([tag + ': envelope', V.curveFull(cur, cur.env, n)]);
+    });
+    return cols;
+  };
+
+  /* ------------------------------------------------------------- metadata */
+  /* what is the same for every row, and the columns that differ */
+  V.summariseMeta = function (rows, skip) {
+    skip = skip || [];
+    var keys = [];
+    rows.forEach(function (r) {
+      Object.keys(r).forEach(function (k) { if (keys.indexOf(k) < 0 && skip.indexOf(k) < 0) keys.push(k); });
+    });
+    var common = [], varying = [];
+    keys.forEach(function (k) {
+      var vals = rows.map(function (r) { return r[k] === undefined ? '' : r[k]; });
+      var first = vals[0], same = vals.every(function (v) { return v === first; });
+      if (same && first !== '') common.push([k, first]); else if (!same) varying.push(k);
+    });
+    return { common: common, varying: varying };
+  };
+  V.paragraphs = function (text) {
+    return String(text || '').replace(/\r\n/g, '\n').split(/\n\s*\n/)
+      .map(function (p) { return p.replace(/^\n+|\n+$/g, ''); })
+      .filter(function (p) { return p.trim() !== ''; });
+  };
+
+  /* --------------------------------------------------------- data prepare */
+  V.prepare = function (data) {
+    var specs = [], samples = data.samples;
+    samples.forEach(function (s, si) {
+      s.index = si;
+      s.regions.forEach(function (r) {
+        specs.push({ id: r.id, sample: s, reg: r, name: r.name, x: V.axisValues(r.e), y: r.y,
+                     fileName: (data.files[s.file] || {}).name || '' });
+      });
+    });
+    return specs;
+  };
+
+  /* ------------------------------------------------------------- SnapMaps */
+  /* A map arrives as 16-bit steps of m.q counts, [row][column][channel],
+     deflated. The functions below mirror snapmap.py so the page can redraw a
+     map for any energy window and area; tests compare them with Python. */
+  V.decodeMap = function (m) {
+    if (typeof DecompressionStream === 'undefined') {
+      return Promise.reject(new Error('This browser has no DecompressionStream'));
+    }
+    var stream = new Blob([V.b64ToBytes(m.z)]).stream()
+      .pipeThrough(new DecompressionStream('deflate'));
+    return new Response(stream).arrayBuffer().then(function (buf) {
+      var data = new Uint16Array(buf);
+      if (data.length !== m.nx * m.ny * m.n) throw new Error('the map data has the wrong size');
+      return data;
+    });
+  };
+  V.mapChannels = function (energy, lo, hi) {
+    var a = Math.min(lo, hi), b = Math.max(lo, hi), idx = [];
+    for (var i = 0; i < energy.length; i++) if (energy[i] >= a && energy[i] <= b) idx.push(i);
+    return idx;
+  };
+  /* counts summed over an energy window, one value per pixel; `background`
+     takes a straight line through the ends of the window off first */
+  V.mapImage = function (m, data, energy, lo, hi, background) {
+    var np = m.nx * m.ny, out = new Float64Array(np), idx = V.mapChannels(energy, lo, hi), n = idx.length;
+    if (!n) return out;
+    var k = Math.max(1, Math.floor(n / 8)), bg = !!background && n >= 4, p, j, base, s, a, b, t;
+    for (p = 0; p < np; p++) {
+      base = p * m.n; s = 0;
+      if (bg) {
+        a = 0; b = 0;
+        for (j = 0; j < k; j++) { a += data[base + idx[j]]; b += data[base + idx[n - 1 - j]]; }
+        a = a * m.q / k; b = b * m.q / k;
+        for (j = 0; j < n; j++) s += data[base + idx[j]] * m.q - (a + (b - a) * (j / (n - 1)));
+      } else {
+        for (j = 0; j < n; j++) s += data[base + idx[j]];
+        s *= m.q;
+      }
+      out[p] = s;
+    }
+    return out;
+  };
+  /* boolean mask (1 = in) of the pixels whose centres lie in a rectangle (µm) */
+  V.rectMask = function (m, xa, ya, xb, yb) {
+    var mask = new Uint8Array(m.nx * m.ny), n = 0, ix, iy, x, y;
+    var x0 = Math.min(xa, xb), x1 = Math.max(xa, xb), y0 = Math.min(ya, yb), y1 = Math.max(ya, yb);
+    for (iy = 0; iy < m.ny; iy++) {
+      y = m.y0 + iy * m.dy;
+      if (y < y0 || y > y1) continue;
+      for (ix = 0; ix < m.nx; ix++) {
+        x = m.x0 + ix * m.dx;
+        if (x >= x0 && x <= x1) { mask[iy * m.nx + ix] = 1; n++; }
+      }
+    }
+    return { mask: mask, count: n };
+  };
+  V.pixelAt = function (m, x, y) {
+    var ix = m.dx ? Math.round((x - m.x0) / m.dx) : -1, iy = m.dy ? Math.round((y - m.y0) / m.dy) : -1;
+    return ix >= 0 && ix < m.nx && iy >= 0 && iy < m.ny ? [ix, iy] : null;
+  };
+  /* counts per pixel at every channel, over a mask (or the whole map) */
+  V.meanSpectrum = function (m, data, mask) {
+    var out = new Float64Array(m.n), np = m.nx * m.ny, cnt = 0, p, c, base;
+    for (p = 0; p < np; p++) {
+      if (mask && !mask[p]) continue;
+      cnt++; base = p * m.n;
+      for (c = 0; c < m.n; c++) out[c] += data[base + c];
+    }
+    for (c = 0; c < m.n; c++) out[c] = cnt ? out[c] * m.q / cnt : 0;
+    return out;
+  };
+  /* the window round the strongest peak (see snapmap.default_window) */
+  V.defaultWindow = function (energy, y, fraction, minWidth) {
+    fraction = fraction === undefined ? 0.3 : fraction;
+    minWidth = minWidth === undefined ? 2.0 : minWidth;
+    var n = y.length, i, lo = Infinity, hi = -Infinity;
+    for (i = 0; i < n; i++) { if (energy[i] < lo) lo = energy[i]; if (energy[i] > hi) hi = energy[i]; }
+    if (n < 10) return [lo, hi];
+    var ys = new Array(n), res = new Array(n), score = new Array(n);
+    for (i = 0; i < n; i++) ys[i] = (y[Math.max(0, i - 1)] + y[i] + y[Math.min(n - 1, i + 1)]) / 3;
+    var k = Math.max(2, Math.floor(n / 20)), a0 = 0, b0 = 0;
+    for (i = 0; i < k; i++) { a0 += ys[i]; b0 += ys[n - 1 - i]; }
+    a0 /= k; b0 /= k;
+    for (i = 0; i < n; i++) {
+      var x = -1 + 2 * i / (n - 1);
+      res[i] = ys[i] - (a0 + (b0 - a0) * (i / (n - 1)));
+      score[i] = res[i] * Math.exp(-Math.pow(x / 0.6, 2));
+    }
+    var tenth = Math.floor(n / 10), best = -1;
+    for (i = 0; i < n; i++) {
+      if (i < tenth || i >= n - tenth) score[i] = -Infinity;
+      if (best < 0 || score[i] > score[best]) best = i;
+    }
+    if (!(res[best] > 0)) return [lo, hi];
+    var thr = fraction * res[best], a = best, b = best;
+    while (a > 0 && res[a - 1] >= thr) a--;
+    while (b < n - 1 && res[b + 1] >= thr) b++;
+    a = Math.max(0, a - 1); b = Math.min(n - 1, b + 1);
+    var step = Math.abs(energy[n - 1] - energy[0]) / (n - 1), want = step > 0 ? Math.round(minWidth / step) : 0;
+    while (b - a < want && (a > 0 || b < n - 1)) { a = Math.max(0, a - 1); b = Math.min(n - 1, b + 1); }
+    return [Math.min(energy[a], energy[b]), Math.max(energy[a], energy[b])];
+  };
+  /* colour range of an image: 1st and 99th percentile (linear, as numpy) */
+  V.percentile = function (sorted, p) {
+    var pos = (sorted.length - 1) * p / 100, lo = Math.floor(pos), hi = Math.ceil(pos);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+  };
+  V.colourRange = function (img, low, high) {
+    var a = [], i;
+    for (i = 0; i < img.length; i++) if (isFinite(img[i])) a.push(img[i]);
+    if (!a.length) return [0, 1];
+    a.sort(function (x, y) { return x - y; });
+    var lo = V.percentile(a, low === undefined ? 1 : low), hi = V.percentile(a, high === undefined ? 99 : high);
+    if (hi <= lo) { lo = a[0]; hi = a[a.length - 1]; }
+    if (hi <= lo) hi = lo + 1;
+    return [lo, hi];
+  };
+  /* colour scales as anchor colours (close to matplotlib's, not identical) */
+  V.SCALES = {
+    Viridis: ['#440154', '#482878', '#3E4A89', '#31688E', '#26828E', '#1F9E89', '#35B779', '#6DCD59', '#B4DE2C', '#FDE725'],
+    Magma: ['#000004', '#180F3E', '#451077', '#721F81', '#9F2F7F', '#CD4071', '#F1605D', '#FD9567', '#FEC98D', '#FCFDBF'],
+    Cividis: ['#00204D', '#00336F', '#39486B', '#575C6C', '#707173', '#8A8779', '#A69D75', '#C4B56C', '#E4CF5B', '#FFEA46'],
+    Greys: ['#0A0A0A', '#FFFFFF']
+  };
+  V.scaleColour = function (name, t) {      /* t in [0, 1] -> [r, g, b] */
+    var st = V.SCALES[name] || V.SCALES.Viridis;
+    t = Math.max(0, Math.min(1, t)) * (st.length - 1);
+    var i = Math.min(st.length - 2, Math.floor(t)), f = t - i;
+    var a = V.hexToRgb(st[i]), b = V.hexToRgb(st[i + 1]);
+    return [0, 1, 2].map(function (k) { return a[k] + (b[k] - a[k]) * f; });
+  };
+  /* the map values as CSV: a header row of X (µm), then one row per Y (µm) */
+  V.mapCsv = function (m, img) {
+    var head = ['Y/X (um)'], rows, ix, iy;
+    for (ix = 0; ix < m.nx; ix++) head.push(String(+(m.x0 + ix * m.dx).toPrecision(6)));
+    rows = [head.join(',')];
+    for (iy = 0; iy < m.ny; iy++) {
+      var r = [String(+(m.y0 + iy * m.dy).toPrecision(6))];
+      for (ix = 0; ix < m.nx; ix++) r.push(String(+img[iy * m.nx + ix].toPrecision(7)));
+      rows.push(r.join(','));
+    }
+    return rows.join('\r\n') + '\r\n';
+  };
+
+  G.XPSViewer = V;
+  if (typeof module !== 'undefined' && module.exports) module.exports = V;
+  if (typeof document === 'undefined') return;
+
+  /* ============================================================ the page */
+  var S = { data: null, specs: [], byId: {}, ticked: new Set(), selected: null, mode: 'stack',
+            norm: 'none', offset: 0.6, scale: 'Binding', levelOn: false, levelIdx: 0, levels: [],
+            panels: new Map(), theme: 'auto', printing: false, nodes: [], holderIdx: 0,
+            holderHot: null, tab: 'plot', filter: '', camIdx: 0, mapById: {}, camById: {},
+            fit: { components: true, envelope: true, background: true, residual: false, hidden: {},
+                  colour: {} },   // state name -> colour, kept across every panel on the page
+            q: { include: {}, transmission: false, level: {}, rsfLibrary: '' },
+            d: { sample: null, mode: 'element', axis: null, last: null },
+            ident: { on: false, win: 2, auto: false, secondary: false, auger: false,
+                    clicked: null, extra: {} },
+            M: { id: null, data: null, energy: null, total: null, win: null, mask: null, count: 0,
+                 scale: 'Viridis', bg: false, overlay: false, alpha: 0.65, loading: false, drag: null } };
+  var $ = function (id) { return document.getElementById(id); };
+
+  function h(tag, attrs) {
+    var e = document.createElement(tag);
+    if (attrs) Object.keys(attrs).forEach(function (k) {
+      if (k === 'text') e.textContent = attrs[k];
+      else if (k === 'class') e.className = attrs[k];
+      else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), attrs[k]);
+      else e.setAttribute(k, attrs[k]);
+    });
+    for (var i = 2; i < arguments.length; i++) {
+      var c = arguments[i];
+      if (c === null || c === undefined) continue;
+      e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+    }
+    return e;
+  }
+  function clear(e) { while (e.firstChild) e.removeChild(e.firstChild); return e; }
+
+  /* ---------------------------------------------------------------- theme */
+  function isDark() {
+    if (S.printing) return false;
+    if (S.theme === 'dark') return true;
+    if (S.theme === 'light') return false;
+    return !!(G.matchMedia && G.matchMedia('(prefers-color-scheme: dark)').matches);
+  }
+  function applyTheme() {
+    document.documentElement.setAttribute('data-eff', isDark() ? 'dark' : 'light');
+    requestRender();
+    redrawTab();
+  }
+  function colours() {
+    var cs = G.getComputedStyle(document.documentElement);
+    var g = function (n) { return cs.getPropertyValue(n).trim(); };
+    return { bg: g('--plot-bg'), fg: g('--plot-fg'), muted: g('--plot-muted'), grid: g('--plot-grid'),
+             accent: g('--accent'), auger: cycle()[1] };
+  }
+  function cycle() { return S.data.palette[isDark() ? 'dark' : 'light']; }
+
+  /* ----------------------------------------------------------------- tree */
+  function slotOf(spec) {
+    return S.data.files.length > 1 ? spec.sample.file : spec.sample.index;
+  }
+  function buildTree() {
+    var root = clear($('tree')), ul = h('ul', { role: 'group' });
+    root.appendChild(ul);
+    S.nodes = [];
+    var many = S.data.samples.length > 3;
+    S.data.samples.forEach(function (s) {
+      var byName = {}, order = [];
+      s.regions.forEach(function (r) {
+        var k = V.normName(r.name);
+        if (!byName[k]) { byName[k] = []; order.push(k); }
+        byName[k].push(r);
+      });
+      var kids = [];
+      order.forEach(function (k) {
+        var rs = byName[k], profile = rs.length > 1 && rs.every(function (r) { return r.level !== null && r.level !== undefined; });
+        if (profile) {
+          var leaves = rs.map(function (r) {
+            return leafNode(r.id, 'Level ' + r.level + (r.etch !== null && r.etch !== undefined ? ' (' + +r.etch.toPrecision(6) + ' s)' : ''), s.name + ' ' + rs[0].name);
+          });
+          kids.push(groupNode(rs[0].name + ' · ' + rs.length + ' levels', leaves, false));
+        } else {
+          rs.forEach(function (r) { kids.push(leafNode(r.id, r.name, s.name)); });
+        }
+      });
+      var node = groupNode(s.name || '(unnamed)', kids, many, s);
+      ul.appendChild(node.li);
+    });
+    refreshChecks();
+  }
+  function leafIds(node) {
+    return node.leaf ? [node.leaf] : node.kids.reduce(function (a, k) { return a.concat(leafIds(k)); }, []);
+  }
+  function leafNode(id, label, group) {
+    var chk = h('input', { type: 'checkbox', 'aria-label': 'Plot ' + label });
+    var spec = S.byId[id];
+    var lbl = h('span', { class: 'lbl', tabindex: '0', role: 'treeitem', text: label,
+                          title: (group ? group + ' – ' : '') + label });
+    var sw = h('span', { class: 'swatch' });
+    var row = h('div', { class: 'row' }, h('button', { class: 'tw leaf', tabindex: '-1', 'aria-hidden': 'true', text: '▸' }), chk, sw, lbl);
+    if (spec && spec.reg.map) {                 /* a SnapMap: offer its pixels */
+      var mb = h('button', { type: 'button', class: 'mapbtn', text: 'map', title: 'Open the SnapMap (where the signal comes from)' });
+      mb.addEventListener('click', function () { showTab('maps'); openMap(spec.reg.map); });
+      row.appendChild(mb);
+    }
+    var li = h('li', null, row);
+    var node = { li: li, chk: chk, lbl: lbl, sw: sw, leaf: id, kids: [], label: label, spec: spec, group: group };
+    chk.addEventListener('change', function () { setTicked([id], chk.checked); });
+    var pick = function () { select({ kind: 'region', id: id }); };
+    lbl.addEventListener('click', pick);
+    lbl.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    S.nodes.push(node);
+    return node;
+  }
+  function groupNode(label, kids, collapsed, sample) {
+    var chk = h('input', { type: 'checkbox', 'aria-label': 'Plot every spectrum of ' + label });
+    var tw = h('button', { class: 'tw', type: 'button', 'aria-label': 'Expand or collapse ' + label, text: '▾' });
+    var lbl = h('span', { class: 'lbl', tabindex: '0', role: 'treeitem', text: label, title: label });
+    var cnt = h('span', { class: 'cnt' });
+    var ul = h('ul', { role: 'group' });
+    kids.forEach(function (k) { ul.appendChild(k.li); });
+    var li = h('li', null, h('div', { class: 'row' }, tw, chk, lbl, cnt), ul);
+    var node = { li: li, chk: chk, lbl: lbl, cnt: cnt, tw: tw, kids: kids, label: label, sample: sample };
+    var setOpen = function (open) {
+      li.classList.toggle('collapsed', !open);
+      tw.textContent = open ? '▾' : '▸';
+    };
+    node.setOpen = setOpen;
+    setOpen(!collapsed);
+    tw.addEventListener('click', function () { setOpen(li.classList.contains('collapsed')); });
+    chk.addEventListener('change', function () { setTicked(leafIds(node), chk.checked); });
+    var pick = function () {
+      if (sample) select({ kind: 'sample', id: sample.id });
+      else setOpen(li.classList.contains('collapsed'));
+    };
+    lbl.addEventListener('click', pick);
+    lbl.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+    S.nodes.push(node);
+    return node;
+  }
+  function refreshChecks() {
+    S.nodes.forEach(function (n) {
+      if (n.leaf) { n.chk.checked = S.ticked.has(n.leaf); return; }
+      var ids = leafIds(n), k = ids.filter(function (i) { return S.ticked.has(i); }).length;
+      n.chk.checked = k === ids.length && k > 0;
+      n.chk.indeterminate = k > 0 && k < ids.length;
+      n.cnt.textContent = k ? k + '/' + ids.length : String(ids.length);
+    });
+    $('tickcount').textContent = S.ticked.size + ' of ' + S.specs.length + ' spectra ticked';
+  }
+  function refreshSwatches() {
+    var cols = traceColourMap();
+    S.nodes.forEach(function (n) {
+      if (!n.leaf) return;
+      var c = S.ticked.has(n.leaf) ? cols[n.leaf] : null;
+      n.sw.style.background = c || 'transparent';
+      n.sw.style.border = c ? 'none' : '1px solid var(--border)';
+    });
+  }
+  function refreshSelection() {
+    S.nodes.forEach(function (n) {
+      var on = false;
+      if (S.selected) {
+        if (S.selected.kind === 'region') on = n.leaf === S.selected.id;
+        else on = !!(n.sample && n.sample.id === S.selected.id);
+      }
+      n.lbl.parentNode.classList.toggle('selected', on);
+    });
+  }
+  function setTicked(ids, on) {
+    ids.forEach(function (i) { if (on) S.ticked.add(i); else S.ticked.delete(i); });
+    refreshChecks();
+    requestRender();
+    redrawTab();
+  }
+  function tickOnly(ids) {
+    S.ticked = new Set(ids);
+    refreshChecks();
+    requestRender();
+  }
+  function applyFilter() {
+    var q = S.filter.trim().toLowerCase();
+    function vis(node, forced) {
+      var self = !q || (node.label + ' ' + (node.group || '')).toLowerCase().indexOf(q) >= 0;
+      var any = false;
+      node.kids.forEach(function (k) { if (vis(k, forced || (self && !!q))) any = true; });
+      var show = !q || self || any || forced;
+      node.li.classList.toggle('hidden', !show);
+      if (q && node.setOpen && any) node.setOpen(true);
+      return show && (self || any || forced);
+    }
+    S.nodes.filter(function (n) { return n.sample; }).forEach(function (n) { vis(n, false); });
+  }
+
+  function select(sel) {
+    S.selected = sel;
+    followSelection(sel);
+    refreshSelection();
+    renderMeta();
+    requestRender();
+    redrawTab();
+  }
+
+  /* -------------------------------------------------------- plot: models */
+  function visibleSpecs() {
+    var list = S.specs.filter(function (s) { return S.ticked.has(s.id); });
+    var lv = [];
+    list.forEach(function (s) {
+      var l = s.reg.level;
+      if (l !== null && l !== undefined && lv.indexOf(l) < 0) lv.push(l);
+    });
+    lv.sort(function (a, b) { return a - b; });
+    S.levels = lv;
+    if (S.levelIdx > lv.length - 1) S.levelIdx = Math.max(0, lv.length - 1);
+    if (S.levelOn && lv.length > 1) {
+      var want = lv[S.levelIdx];
+      list = list.filter(function (s) { var l = s.reg.level; return l === null || l === undefined || l === want; });
+    }
+    return list;
+  }
+  function traceColourMap() {
+    var out = {}, cyc = cycle(), bg = S.data.palette.bg[isDark() ? 'dark' : 'light'];
+    V.groupSpectra(S.specs.filter(function (s) { return S.ticked.has(s.id); })).forEach(function (g) {
+      var cols = V.stackColours(g.items.map(slotOf), cyc, bg);
+      g.items.forEach(function (s, i) { out[s.id] = cols[i]; });
+    });
+    return out;
+  }
+  function isSelected(spec) {
+    if (!S.selected) return false;
+    return S.selected.kind === 'region' ? S.selected.id === spec.id : S.selected.id === spec.sample.id;
+  }
+
+  /* ----------------------------------------------------------- plot: draw */
+  var reqJob = 0;
+  function requestRender() {
+    if (reqJob) return;
+    reqJob = G.requestAnimationFrame(function () { reqJob = 0; render(); });
+  }
+  function render() {
+    if (S.tab !== 'plot' && !S.printing) return;
+    var specs = visibleSpecs(), groups = V.groupSpectra(specs);
+    var host = $('panels'), keep = {};
+    groups.forEach(function (g) { keep[g.key] = true; });
+    S.panels.forEach(function (p, k) { if (!keep[k]) { host.removeChild(p.wrap); S.panels.delete(k); } });
+    groups.forEach(function (g, i) {
+      var p = S.panels.get(g.key);
+      if (!p) p = makePanel(g.key);
+      p.group = g;
+      if (host.children[i] !== p.wrap) host.insertBefore(p.wrap, host.children[i] || null);
+    });
+    host.classList.toggle('one', groups.length === 1);
+    $('empty').hidden = groups.length > 0;
+    $('offsetField').style.display = S.mode === 'stack' ? '' : 'none';
+    var bar = $('levelbar'), many = S.levels.length > 1;
+    bar.hidden = !many;
+    if (!many && playJob) togglePlay(false);
+    if (many) {
+      $('level').max = String(S.levels.length - 1);
+      $('level').value = String(S.levelIdx);
+      $('level').disabled = !S.levelOn;
+      var l = S.levels[S.levelIdx], any = specs.filter(function (s) { return s.reg.level === l; })[0];
+      var depth = any && any.reg.meta && any.reg.meta['Depth (nm)'] ? ', ' + any.reg.meta['Depth (nm)'] + ' nm' : '';
+      $('levelText').textContent = S.levelOn ? 'Level ' + l + (any && any.reg.etch !== null && any.reg.etch !== undefined ? ' (' + +any.reg.etch.toPrecision(6) + ' s' + depth + ')' : '') + '  ·  ' + (S.levelIdx + 1) + ' of ' + S.levels.length : S.levels.length + ' levels shown';
+    }
+    var notes = [];
+    if (S.scale === 'Kinetic' && specs.some(function (s) { return s.reg.binding && !s.reg.hv; })) {
+      notes.push('no photon energy for some spectra: shown as binding energy');
+    }
+    var anyFit = false;
+    S.panels.forEach(function (p) {
+      var s = singleFit(p.group);
+      if (s) {
+        anyFit = true;
+        (s.reg.fit.notes || []).forEach(function (t) { notes.push('fit: ' + t); });
+      }
+    });
+    $('fitbar').hidden = !anyFit;
+    $('autoField').hidden = !specs.some(function (s) { return (s.reg.auto || []).length > 0; });
+    $('nearbyField').hidden = !specs.some(function (s) { return (s.reg.markers || []).length > 0; });
+    $('notes').textContent = notes.join('; ');
+    refreshSwatches();
+    var cols = colours(), cmap = traceColourMap();
+    S.panels.forEach(function (p) { drawPanel(p, cols, cmap); updateFitBox(p); });
+  }
+
+  /* ------------------------------------------------------------ plot: fits */
+  /* a fit is drawn (and tabulated) on a panel that shows one spectrum */
+  function singleFit(g) {
+    return g && g.items.length === 1 && V.fitRows(g.items[0].reg).length ? g.items[0] : null;
+  }
+  function fitColours() {
+    var c = cycle();
+    return c.length > 1 ? c.slice(1) : c;
+  }
+  /* the colour for a fit state name, stable across every panel on the page
+     (S.fit.colour), assigning the next unused colour the first time a name
+     is seen -- so 'V2p(II)' is always the same colour, and the same legend
+     entry, wherever it is drawn (mirrors Workspace.fit_state_colour). */
+  function fitStateColour(name) {
+    var map = S.fit.colour, cols = fitColours();
+    if (!(name in map)) map[name] = cols[Object.keys(map).length % cols.length];
+    return map[name];
+  }
+  function fitSlotMap(reg) {
+    var slot = {};
+    V.fitStates(reg).forEach(function (x) { slot[x.name] = fitStateColour(x.name); });
+    return slot;
+  }
+  /* the fit's curves on every point of the spectrum, scaled like the data */
+  function fitCurves(s, f) {
+    var n = s.y.length, sc = function (a) { return a ? a.map(function (v) { return v === null ? null : v / f; }) : null; };
+    return V.fitRows(s.reg).map(function (row, ri) {
+      var cur = row.curve;
+      if (!cur) return { row: row, ri: ri, bg: null, env: null, comps: [], res: null };
+      var env = sc(V.curveFull(cur, cur.env, n));
+      return { row: row, ri: ri, bg: sc(V.curveFull(cur, cur.bg, n)), env: env,
+               comps: cur.comps.map(function (c) { return sc(V.curveFull(cur, c, n)); }),
+               res: env ? V.residual(s.y.map(function (v) { return v / f; }), env) : null };
+    });
+  }
+  function fmtN(v, d) { return v === null || v === undefined || v !== v ? '' : v.toFixed(d); }
+  function updateFitBox(p) {
+    var s = singleFit(p.group);
+    if (!s) { if (p.fitbox) { p.wrap.removeChild(p.fitbox); p.fitbox = null; } return; }
+    if (!p.fitbox) { p.fitbox = h('div', { class: 'fitbox' }); p.wrap.appendChild(p.fitbox); }
+    var box = clear(p.fitbox), slot = fitSlotMap(s.reg), kin = S.scale === 'Kinetic' && s.reg.hv;
+    var rows = s.reg.fit.rows, shown = 0;
+    rows.forEach(function (row, ri) {
+      if (shown >= 8) return;
+      shown++;
+      var head = [row.region, row.background + ' background'];
+      if (row.rsf) head.push('RSF ' + +row.rsf.toPrecision(4));
+      if (row.area !== null && row.area !== undefined) head.push('area ' + Math.round(row.area).toLocaleString('en-US') + ' counts/s·eV' + (row.basis === 'components' ? ' (sum of components)' : ''));
+      if (row.rms !== null && row.rms !== undefined) head.push('fit rms ' + (row.rms * 100).toFixed(1) + ' % of the range');
+      if (row.chi2_red !== null && row.chi2_red !== undefined) head.push('reduced χ² ' + row.chi2_red.toFixed(2));
+      box.appendChild(h('div', { class: 'fit-head', text: head.join('  ·  ') }));
+      if (!row.components.length) return;
+      var tot = row.components.reduce(function (a, c) { return a + Math.max(0, c.area || 0); }, 0);
+      var tb = h('tbody');
+      row.components.forEach(function (c, j) {
+        var key = ri + ':' + j, off = !!S.fit.hidden[key];
+        var cb = h('input', { type: 'checkbox', 'aria-label': 'Show ' + c.name });
+        cb.checked = !off;
+        var tr = h('tr', { class: off ? 'off' : '' },
+          h('td', null, cb),
+          h('td', null, h('span', { class: 'sw', style: 'background:' + (slot[c.state] || '#888') })),
+          h('td', { text: c.name }),
+          h('td', { class: 'num', text: fmtN(kin ? s.reg.hv - c.be : c.be, 2) }),
+          h('td', { class: 'num', text: fmtN(c.fwhm, 2) }),
+          h('td', { class: 'num', text: fmtN(c.area, 1) }),
+          h('td', { class: 'num', text: tot > 0 ? fmtN(100 * Math.max(0, c.area || 0) / tot, 1) : '' }),
+          h('td', { text: c.shape }),
+          h('td', { text: c.state !== c.name ? c.state : '' }));
+        cb.addEventListener('change', function () {
+          S.fit.hidden[key] = !cb.checked;
+          tr.className = cb.checked ? '' : 'off';
+          redraw(p);
+        });
+        tb.appendChild(tr);
+      });
+      var th = h('tr', null, h('th'), h('th'), h('th', { text: 'Component' }),
+        h('th', { class: 'num', text: (kin ? 'KE' : 'BE') + ' (eV)' }), h('th', { class: 'num', text: 'FWHM (eV)' }),
+        h('th', { class: 'num', text: 'Area (counts/s·eV)' }), h('th', { class: 'num', text: 'Area %' }),
+        h('th', { text: 'Shape' }), h('th', { text: 'State' }));
+      box.appendChild(h('div', { class: 'scroll' }, h('table', { class: 'grid' }, h('thead', null, th), tb)));
+    });
+    if (rows.length > shown) box.appendChild(h('div', { class: 'fit-head', text: '… and ' + (rows.length - shown) + ' more fit regions' }));
+  }
+  function makePanel(key) {
+    var canvas = h('canvas', { 'aria-label': 'Spectrum plot', role: 'img' });
+    var readout = h('div', { class: 'readout', 'aria-live': 'off' });
+    var png = h('button', { type: 'button', class: 'pngbtn', title: 'Save this plot as a PNG image', text: 'PNG' });
+    var wrap = h('div', { class: 'panel' }, canvas, h('div', { class: 'panel-foot' }, readout, png));
+    var p = { key: key, wrap: wrap, canvas: canvas, readout: readout, zoom: null, hover: null,
+              drag: null, lay: null, group: null, job: 0 };
+    S.panels.set(key, p);
+    png.addEventListener('click', function () { savePanelPng(p); });
+    canvas.addEventListener('mousemove', function (e) { onMove(p, e); });
+    canvas.addEventListener('mouseleave', function () { p.hover = null; p.readout.textContent = ''; redraw(p); });
+    canvas.addEventListener('mousedown', function (e) {
+      if (e.button !== 0 || !p.lay) return;
+      var x = px(p, e);
+      if (x >= p.lay.l && x <= p.lay.l + p.lay.w) p.drag = { a: x, b: x };
+    });
+    G.addEventListener('mouseup', function () {
+      if (!p.drag) return;
+      var d = p.drag; p.drag = null;
+      if (Math.abs(d.b - d.a) > 6 && p.lay) {
+        var v1 = p.lay.toX(d.a), v2 = p.lay.toX(d.b);
+        p.zoom = [Math.min(v1, v2), Math.max(v1, v2)];
+      } else if (S.ident.on && p.lay) identifyAt(p, d.a);
+      redraw(p);
+    });
+    canvas.addEventListener('dblclick', function () { p.zoom = null; redraw(p); });
+    canvas.addEventListener('wheel', function (e) {
+      if (!p.lay) return;
+      e.preventDefault();
+      var x = px(p, e), c = p.lay.toX(x), f = e.deltaY < 0 ? 0.8 : 1.25;
+      var lo = p.lay.lo, hi = p.lay.hi;
+      p.zoom = [c - (c - lo) * f, c + (hi - c) * f];
+      redraw(p);
+    }, { passive: false });
+    return p;
+  }
+  /* a plot as an image: drawn again off screen in light colours at twice the size, whatever
+     the theme on screen, so it can go straight into a report */
+  function saveBlob(name, blob) {
+    var a = h('a', { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+  function savePanelPng(P) {
+    if (!P.group || !P.canvas.clientWidth || !P.canvas.clientHeight) return;
+    var keep = S.printing, host = h('div', { style: 'position:fixed;left:-99999px;top:0;width:' + P.canvas.clientWidth + 'px;height:' + P.canvas.clientHeight + 'px' });
+    var cv = h('canvas', { style: 'width:100%;height:100%' });
+    host.appendChild(cv); document.body.appendChild(host);
+    S.printing = true;
+    try {
+      drawPanel({ key: P.key, canvas: cv, group: P.group, zoom: P.zoom, hover: null, drag: null, lay: null, dpr: 2 },
+        { bg: '#FFFFFF', fg: '#222222', muted: '#56636E', grid: '#E3E8EC', accent: '#0F6B8C' }, traceColourMap());
+    } finally { S.printing = keep; }
+    var it = P.group.items[0], name = V.safeName(P.group.name + (P.group.items.length === 1 && it.sample.name ? ' ' + it.sample.name : '')) + '.png';
+    cv.toBlob(function (blob) { document.body.removeChild(host); if (blob) saveBlob(name, blob); }, 'image/png');
+  }
+  function downloadEverything() {
+    var files = V.bundleFiles(S.data, S.specs), when = new Date(S.data.generated);
+    var bytes = V.zip(files, when);
+    var title = V.safeName((S.data.details && S.data.details.title) || 'experiment');
+    saveBlob(title + '.zip', new Blob([bytes], { type: 'application/zip' }));
+    $('notes').textContent = 'Saved ' + files.length + ' files in ' + title + '.zip.';
+  }
+  /* depth levels: step, play, and the arrow keys */
+  var playJob = 0;
+  function stepLevel(d, wrap) {
+    var n = S.levels.length;
+    if (n < 2) return;
+    if (!S.levelOn) { S.levelOn = true; $('levelOn').checked = true; }
+    S.levelIdx = wrap ? (S.levelIdx + d + n) % n : Math.max(0, Math.min(n - 1, S.levelIdx + d));
+    requestRender();
+  }
+  function togglePlay(force) {
+    var on = force === undefined ? !playJob : force;
+    if (playJob) { G.clearInterval(playJob); playJob = 0; }
+    if (on && S.levels.length > 1) playJob = G.setInterval(function () { stepLevel(1, true); }, 450);
+    $('levPlay').setAttribute('aria-pressed', playJob ? 'true' : 'false');
+    $('levPlay').textContent = playJob ? 'Pause' : 'Play';
+  }
+  function px(p, e) { return e.clientX - p.canvas.getBoundingClientRect().left; }
+  function py(p, e) { return e.clientY - p.canvas.getBoundingClientRect().top; }
+  function redraw(p) {
+    if (p.job) return;
+    p.job = G.requestAnimationFrame(function () {
+      p.job = 0;
+      drawPanel(p, colours(), traceColourMap());
+    });
+  }
+
+  function drawPanel(P, C, cmap) {
+    var g = P.group, cv = P.canvas;
+    if (!g) return;
+    var W = cv.clientWidth, H = cv.clientHeight;
+    if (!W || !H) return;
+    var dpr = P.dpr || G.devicePixelRatio || 1;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) {
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    }
+    var ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    var font = function (px_, w) { return (w || '') + ' ' + px_ + 'px system-ui, "Segoe UI", Helvetica, Arial, sans-serif'; };
+
+    var items = g.items, n = items.length;
+    var axes = items.map(function (s) { return V.energyAxis(s.reg, s.x, S.scale); });
+    var ax0 = axes[0];
+    var ys = items.map(function (s) {
+      var f = V.normFactor(s.y, S.norm);
+      return s.y.map(function (v) { return v / f; });
+    });
+    var stacked = S.mode === 'stack' && n > 1;
+    var spans = ys.map(function (v) { return Math.max.apply(null, v) - Math.min.apply(null, v); });
+    var step = stacked ? S.offset * (Math.max.apply(null, spans) || 1) : 0;
+    var yoff = ys.map(function (v, i) { return v.map(function (y) { return y + i * step; }); });
+
+    var fit = singleFit(g) ? fitCurves(items[0], V.normFactor(items[0].y, S.norm)) : null;
+    var xlo = Infinity, xhi = -Infinity;
+    axes.forEach(function (a) { a.x.forEach(function (v) { if (v < xlo) xlo = v; if (v > xhi) xhi = v; }); });
+    var pad = (xhi - xlo) * 0.02 || 1;
+    var dlo = xlo - pad, dhi = xhi + pad;
+    var lo = P.zoom ? P.zoom[0] : dlo, hi = P.zoom ? P.zoom[1] : dhi;
+    if (!(hi > lo)) { lo = dlo; hi = dhi; }
+
+    var ylo = Infinity, yhi = -Infinity;
+    yoff.forEach(function (v, i) {
+      var xs = axes[i].x;
+      for (var k = 0; k < v.length; k++) {
+        if (xs[k] < lo || xs[k] > hi) continue;
+        if (v[k] < ylo) ylo = v[k]; if (v[k] > yhi) yhi = v[k];
+      }
+    });
+    if (!isFinite(ylo)) { ylo = 0; yhi = 1; }
+    /* the residual (data - envelope) gets a band of its own under the spectrum, at true scale */
+    var resBase = null, rr = 0;
+    if (fit && S.fit.residual) {
+      fit.forEach(function (fr) {
+        if (!fr.res) return;
+        for (var k = 0; k < fr.res.length; k++) {
+          if (fr.res[k] === null || axes[0].x[k] < lo || axes[0].x[k] > hi) continue;
+          rr = Math.max(rr, Math.abs(fr.res[k]));
+        }
+      });
+      if (rr > 0) { resBase = ylo - rr * 1.6; ylo = resBase - rr * 1.3; }
+    }
+    var yp = (yhi - ylo) * 0.06 || 1;
+    ylo -= yp; yhi += yp;
+
+    /* end labels sit in a gutter to the right of a stack */
+    var labels = items.map(function (s) { return V.traceLabel(s, S.data.files.length > 1); });
+    var gutter = 14;
+    if (stacked) {
+      ctx.font = font(11);
+      gutter = Math.min(150, Math.max.apply(null, labels.map(function (t) { return ctx.measureText(t).width; })) + 16);
+    }
+    var lay = { l: stacked ? 46 : 62, t: 30, w: 0, h: 0, lo: lo, hi: hi };
+    lay.w = Math.max(50, W - lay.l - gutter);
+    lay.h = Math.max(50, H - lay.t - 44);
+    var invert = ax0.invert;
+    var X = function (v) { return lay.l + (invert ? (hi - v) : (v - lo)) / (hi - lo) * lay.w; };
+    var Y = function (v) { return lay.t + (1 - (v - ylo) / (yhi - ylo)) * lay.h; };
+    lay.toX = function (pxv) { var f = (pxv - lay.l) / lay.w; return invert ? hi - f * (hi - lo) : lo + f * (hi - lo); };
+    lay.X = X; lay.Y = Y; lay.ax = ax0;
+    P.lay = lay; P.axes = axes; P.yoff = yoff; P.ys = ys; P.items = items; P.stacked = stacked;
+
+    /* titles */
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = C.fg; ctx.font = font(14, 'bold'); ctx.textAlign = 'left';
+    ctx.fillText(g.name, lay.l, 20);
+    var sub = n === 1 ? items[0].sample.name : n + ' spectra';
+    ctx.fillStyle = C.muted; ctx.font = font(11); ctx.textAlign = 'right';
+    ctx.fillText(sub, lay.l + lay.w, 20);
+
+    /* x axis: line, ticks, labels */
+    ctx.strokeStyle = C.muted; ctx.fillStyle = C.muted; ctx.lineWidth = 1;
+    var by = lay.t + lay.h;
+    ctx.beginPath(); ctx.moveTo(lay.l, by + 0.5); ctx.lineTo(lay.l + lay.w, by + 0.5); ctx.stroke();
+    var xt = V.niceTicks(lo, hi, Math.max(3, Math.round(lay.w / 80))), xstep = xt.length > 1 ? xt[1] - xt[0] : 1;
+    ctx.font = font(11); ctx.textAlign = 'center';
+    xt.forEach(function (t) {
+      var x = Math.round(X(t)) + 0.5;
+      ctx.strokeStyle = C.grid; ctx.beginPath(); ctx.moveTo(x, lay.t); ctx.lineTo(x, by); ctx.stroke();
+      ctx.strokeStyle = C.muted; ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x, by + 4); ctx.stroke();
+      ctx.fillText(t.toFixed(V.decimals(xstep)), x, by + 17);
+    });
+    ctx.fillStyle = C.fg; ctx.font = font(12); ctx.textAlign = 'center';
+    ctx.fillText(ax0.label + ' (' + ax0.units + ')', lay.l + lay.w / 2, by + 36);
+
+    /* y axis: ticks for one spectrum or an overlay, a scale bar for a stack */
+    ctx.strokeStyle = C.muted; ctx.fillStyle = C.muted;
+    if (!stacked) {
+      ctx.beginPath(); ctx.moveTo(lay.l + 0.5, lay.t); ctx.lineTo(lay.l + 0.5, by); ctx.stroke();
+      ctx.font = font(11); ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      V.niceTicks(ylo, yhi, Math.max(3, Math.round(lay.h / 50))).forEach(function (t) {
+        var y = Math.round(Y(t)) + 0.5;
+        ctx.strokeStyle = C.grid; ctx.beginPath(); ctx.moveTo(lay.l, y); ctx.lineTo(lay.l + lay.w, y); ctx.stroke();
+        ctx.strokeStyle = C.muted; ctx.beginPath(); ctx.moveTo(lay.l - 4, y); ctx.lineTo(lay.l, y); ctx.stroke();
+        ctx.fillText(V.fmtY(t), lay.l - 7, y);
+      });
+      ctx.save(); ctx.translate(13, lay.t + lay.h / 2); ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = C.fg; ctx.font = font(12); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      var r0 = items[0].reg;
+      ctx.fillText(S.norm === 'none' ? r0.ylabel + (r0.yunits ? ' (' + r0.yunits + ')' : '') : r0.ylabel + ' (normalised)', 0, 0);
+      ctx.restore();
+    } else {
+      var bar = V.niceFloor((yhi - ylo) * 0.22), y0 = ylo + (yhi - ylo) * 0.06;
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(lay.l - 8, Y(y0)); ctx.lineTo(lay.l - 8, Y(y0 + bar)); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.save(); ctx.translate(lay.l - 14, (Y(y0) + Y(y0 + bar)) / 2); ctx.rotate(-Math.PI / 2);
+      ctx.font = font(11); ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      var u = S.norm === 'none' ? ' ' + (items[0].reg.yunits || '') : '';
+      ctx.fillText((bar >= 1 ? Math.round(bar).toLocaleString('en-US') : String(bar)) + u, 0, 0);
+      ctx.restore();
+    }
+    ctx.textBaseline = 'alphabetic';
+
+    /* peak markers: the labels of every spectrum of the panel, the automatic survey
+       labels when asked for, and the ones picked in this session */
+    ctx.save();
+    ctx.beginPath(); ctx.rect(lay.l, lay.t, lay.w, lay.h); ctx.clip();
+    var drawnLabels = [];
+    /* the user's own labels first, then the app's, then the automatic ones: a label that
+       would sit on top of one already drawn keeps its line but not its text */
+    panelMarks(g).map(function (m) {
+      var fromHv = m.hv ? m.hv - m.be : null;
+      m.v = m.kin ? (ax0.invert ? fromHv : m.be) : (ax0.invert ? m.be : fromHv);
+      return m;
+    }).filter(function (m) { return m.v !== null && m.v >= lo && m.v <= hi; })
+      .sort(function (a, b) { return (b.mine - a.mine) || (a.auto - b.auto); }).forEach(function (m) {
+      var x = X(m.v);
+      var colour = m.tier === 'secondary' ? C.accent : m.tier === 'auger' ? C.auger
+        : (m.mine ? C.accent : C.muted);
+      ctx.strokeStyle = colour; ctx.globalAlpha = m.auto ? 0.6 : 1; ctx.setLineDash([2, 3]); ctx.beginPath();
+      ctx.moveTo(x, lay.t); ctx.lineTo(x, by); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      if (drawnLabels.some(function (o) { return Math.abs(o - x) < 11; })) return;
+      drawnLabels.push(x);
+      ctx.save(); ctx.translate(x, lay.t + 4); ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = colour; ctx.font = font(10); ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      ctx.fillText(m.label, 0, 0); ctx.restore();
+    });
+
+    /* the fit: background, components on top of it, envelope, residual */
+    if (fit) drawFit(ctx, C, lay, X, Y, axes[0].x, fit, items[0], resBase, rr, font);
+
+    /* traces */
+    var endpts = [];
+    items.forEach(function (s, i) {
+      var xs = axes[i].x, v = yoff[i], sel = isSelected(s);
+      ctx.strokeStyle = cmap[s.id] || C.fg;
+      ctx.lineWidth = sel ? 2.3 : (n > 12 ? 1 : 1.4);
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      for (var k = 0; k < xs.length; k++) {
+        var x = X(xs[k]), y = Y(v[k]);
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      /* the right-hand end of the trace, for its label */
+      var j = 0;
+      for (var q = 1; q < xs.length; q++) if ((invert ? xs[q] < xs[j] : xs[q] > xs[j])) j = q;
+      var a = Math.max(0, j - 2), b = Math.min(v.length, j + 3), sum = 0;
+      for (q = a; q < b; q++) sum += v[q];
+      endpts.push(Y(sum / (b - a)));
+    });
+    ctx.restore();
+    if (fit && S.fit.components) fitLegend(ctx, C, lay, items[0], font);
+
+    /* trace labels: at the end of each trace of a stack, a legend otherwise */
+    ctx.font = font(11); ctx.textBaseline = 'middle';
+    if (stacked) {
+      var every = Math.max(1, Math.ceil(n / 12)), sel = [], ids = [];
+      items.forEach(function (s, i) { if (i % every === 0) { sel.push(endpts[i]); ids.push(i); } });
+      var pos = V.dodge(sel, 14);
+      ctx.textAlign = 'left';
+      ids.forEach(function (i, k) {
+        ctx.fillStyle = cmap[items[i].id] || C.fg;
+        ctx.fillText(labels[i], lay.l + lay.w + 6, Math.min(by - 4, Math.max(lay.t + 4, pos[k])));
+      });
+    } else if (n > 1) {
+      var lx = lay.l + lay.w - 8, ly = lay.t + 10;
+      ctx.textAlign = 'right';
+      items.slice(0, 12).forEach(function (s, i) {
+        ctx.fillStyle = cmap[s.id] || C.fg;
+        ctx.fillText(labels[i], lx - 16, ly + i * 15);
+        ctx.fillRect(lx - 12, ly + i * 15 - 1, 12, 2.5);
+      });
+    }
+    ctx.textBaseline = 'alphabetic';
+
+    /* crosshair and zoom rectangle */
+    if (P.hover !== null && P.hover >= lay.l && P.hover <= lay.l + lay.w) {
+      ctx.strokeStyle = C.accent; ctx.setLineDash([4, 3]); ctx.beginPath();
+      ctx.moveTo(P.hover + 0.5, lay.t); ctx.lineTo(P.hover + 0.5, by); ctx.stroke(); ctx.setLineDash([]);
+    }
+    if (P.drag) {
+      ctx.fillStyle = C.accent; ctx.globalAlpha = 0.15;
+      ctx.fillRect(Math.min(P.drag.a, P.drag.b), lay.t, Math.abs(P.drag.b - P.drag.a), lay.h);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  /* every marker to draw on a panel, each with its own spectrum's photon energy;
+     the same label at (almost) the same energy on several spectra is drawn once */
+  function panelMarks(g) {
+    var out = [], seen = {};
+    var mark = function (be, label, kin, hv, auto, mine, tier) {
+      var k = label + '|' + Math.round(be * 2) + '|' + (kin ? 'k' : 'b');
+      if (seen[k]) return;
+      seen[k] = true;
+      out.push({ be: be, label: label, kin: !!kin, hv: hv, auto: auto, mine: mine, tier: tier || null });
+    };
+    g.items.forEach(function (s) {
+      var lists = [[s.reg.markers || [], false, false], [S.ident.auto ? (s.reg.auto || []) : [], true, false],
+                   [S.ident.extra[s.id] || [], false, true]];
+      lists.forEach(function (l) {
+        l[0].forEach(function (m) { mark(m.be, m.label, m.kin, s.reg.hv, l[1], l[2]); });
+      });
+      /* other candidate lines near each of this spectrum's own committed
+         markers, when the Secondary/Auger toggles ask for them */
+      if (S.ident.secondary || S.ident.auger) {
+        (s.reg.markers || []).forEach(function (m) {
+          if (m.kin) return;
+          V.nearbyLines(m.be, S.ident.win, S.data.elements, s.reg.hv, m.label,
+                        S.ident.secondary, S.ident.auger, 2).forEach(function (x) {
+            mark(x.be, x.label, false, s.reg.hv, false, false, x.tier);
+          });
+        });
+      }
+    });
+    return out;
+  }
+  /* click a peak in identify mode: list the element lines near it */
+  function identifyAt(P, xpx) {
+    var v = P.lay.toX(xpx), item = P.items[0], hv = item.reg.hv;
+    var be = P.lay.ax.label === 'Kinetic energy' ? (hv ? hv - v : null) : v;
+    S.ident.clicked = be === null ? null : { be: be, item: item, hv: hv };
+    renderIdBox();
+  }
+  function renderIdBox() {
+    var box = clear($('idbox')), I = S.ident;
+    box.hidden = !I.on;
+    if (!I.on) return;
+    var win = h('input', { type: 'number', min: '0.1', step: '0.5', value: String(I.win), 'aria-label': 'Window in eV', class: 'idwin' });
+    win.addEventListener('change', function () { var v = parseFloat(win.value); I.win = v > 0 ? v : 2; renderIdBox(); });
+    box.appendChild(h('div', { class: 'controls' }, h('strong', { text: 'Identify peaks' }),
+      h('label', { class: 'field' }, 'Window ± ', win, ' eV')));
+    if (!I.clicked) {
+      box.appendChild(h('p', { class: 'muted small', text: 'Click a peak on a plot to see which element lines lie near it. Line positions are approximate (chemical shifts of a few eV are normal).' }));
+    } else {
+      var c = V.candidates(I.clicked.be, I.win, S.data.elements, I.clicked.hv);
+      box.appendChild(h('p', { class: 'small', text: 'Peak at ' + I.clicked.be.toFixed(2) + ' eV: ' + (c.length ? c.length + ' candidate line' + (c.length > 1 ? 's' : '') + ' within ± ' + I.win + ' eV (best first). Click one to label the peak.' : 'no line within ± ' + I.win + ' eV.') }));
+      var row = h('div', { class: 'chips' });
+      c.slice(0, 12).forEach(function (x) {
+        var b = h('button', { type: 'button', class: 'chip', title: x.label + ' at ' + x.be.toFixed(1) + ' eV (' + (x.d >= 0 ? '+' : '') + x.d.toFixed(1) + ' eV from the peak)', text: x.label + '  ' + x.be.toFixed(1) + ' (' + (x.d >= 0 ? '+' : '') + x.d.toFixed(1) + ')' });
+        b.addEventListener('click', function () {
+          var id = I.clicked.item.id;
+          (I.extra[id] = I.extra[id] || []).push({ be: I.clicked.be, label: x.label });
+          renderIdBox(); requestRender();
+        });
+        row.appendChild(b);
+      });
+      box.appendChild(row);
+    }
+    var n = Object.keys(I.extra).reduce(function (a, k) { return a + I.extra[k].length; }, 0);
+    if (n) {
+      var clr = h('button', { type: 'button', text: 'Clear my ' + n + ' label' + (n > 1 ? 's' : '') });
+      clr.addEventListener('click', function () { I.extra = {}; renderIdBox(); requestRender(); });
+      box.appendChild(h('p', { class: 'small' }, clr, ' Labels picked here last for this session only; the app\'s own labels are kept in the workbook.'));
+    }
+  }
+
+  /* a polyline through the points that have a value; a gap starts a new stroke */
+  function strokeCurve(ctx, xs, ys, X, Y) {
+    var pen = false;
+    ctx.beginPath();
+    for (var k = 0; k < xs.length; k++) {
+      if (ys[k] === null || ys[k] === undefined) { pen = false; continue; }
+      if (pen) ctx.lineTo(X(xs[k]), Y(ys[k])); else { ctx.moveTo(X(xs[k]), Y(ys[k])); pen = true; }
+    }
+    ctx.stroke();
+  }
+  /* the area between two curves over each run of points where both exist */
+  function fillBetween(ctx, xs, top, lo, X, Y) {
+    var k = 0, n = xs.length;
+    while (k < n) {
+      while (k < n && (top[k] === null || lo[k] === null)) k++;
+      var a = k;
+      while (k < n && top[k] !== null && lo[k] !== null) k++;
+      if (k - a < 2) continue;
+      ctx.beginPath();
+      for (var i = a; i < k; i++) { if (i === a) ctx.moveTo(X(xs[i]), Y(top[i])); else ctx.lineTo(X(xs[i]), Y(top[i])); }
+      for (i = k - 1; i >= a; i--) ctx.lineTo(X(xs[i]), Y(lo[i]));
+      ctx.closePath(); ctx.fill();
+    }
+  }
+  function drawFit(ctx, C, lay, X, Y, xs, fit, s, resBase, rr, font) {
+    var slot = fitSlotMap(s.reg);
+    ctx.lineJoin = 'round';
+    fit.forEach(function (fr) {
+      var zero = xs.map(function () { return 0; });
+      if (S.fit.background && fr.bg) {
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1; ctx.setLineDash([5, 3]);
+        strokeCurve(ctx, xs, fr.bg, X, Y); ctx.setLineDash([]);
+      }
+      if (S.fit.components) {
+        fr.comps.forEach(function (cv, j) {
+          if (!cv || S.fit.hidden[fr.ri + ':' + j]) return;
+          var c = fr.row.components[j], col = slot[c.state] || '#888888';
+          var lo = fr.bg || zero, top = cv.map(function (v, k) { return v === null || lo[k] === null ? null : lo[k] + v; });
+          ctx.fillStyle = col; ctx.globalAlpha = 0.35; fillBetween(ctx, xs, top, lo, X, Y); ctx.globalAlpha = 1;
+          ctx.strokeStyle = col; ctx.lineWidth = 1; strokeCurve(ctx, xs, top, X, Y);
+        });
+      }
+      if (S.fit.envelope && fr.env) {
+        ctx.strokeStyle = C.fg; ctx.lineWidth = 1.4; strokeCurve(ctx, xs, fr.env, X, Y);
+      }
+      if (resBase !== null && fr.res) {
+        var res = fr.res.map(function (v) { return v === null ? null : resBase + v; });
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 0.6; ctx.setLineDash([2, 3]);
+        ctx.beginPath(); ctx.moveTo(lay.l, Y(resBase)); ctx.lineTo(lay.l + lay.w, Y(resBase)); ctx.stroke(); ctx.setLineDash([]);
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1; strokeCurve(ctx, xs, res, X, Y);
+        ctx.fillStyle = C.muted; ctx.font = font(10); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+        ctx.fillText('Residual (data − envelope)', lay.l + 6, Y(resBase + rr) - 4);
+      }
+    });
+    ctx.lineWidth = 1;
+  }
+  /* the states of the fit, top left of the plot; a long list is left to the table */
+  function fitLegend(ctx, C, lay, s, font) {
+    var st = V.fitStates(s.reg);
+    if (!st.length || st.length > 6) return;
+    ctx.font = font(11); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    st.forEach(function (x, i) {
+      var y = lay.t + 12 + i * 15;
+      ctx.fillStyle = fitStateColour(x.name); ctx.globalAlpha = 0.5; ctx.fillRect(lay.l + 8, y - 5, 10, 10); ctx.globalAlpha = 1;
+      ctx.fillStyle = C.fg;
+      ctx.fillText(x.name.length > 22 ? x.name.slice(0, 21) + '…' : x.name, lay.l + 24, y);
+    });
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  function onMove(P, e) {
+    var lay = P.lay;
+    if (!lay) return;
+    var x = px(P, e), y = py(P, e);
+    if (P.drag) P.drag.b = Math.max(lay.l, Math.min(lay.l + lay.w, x));
+    if (x < lay.l || x > lay.l + lay.w || y < lay.t || y > lay.t + lay.h) {
+      P.hover = null; P.readout.textContent = ''; redraw(P); return;
+    }
+    P.hover = x;
+    var v = lay.toX(x), r0 = P.items[0].reg, a0 = lay.ax;
+    var be = null, ke = null;
+    if (a0.label === 'Kinetic energy') { ke = v; be = r0.hv ? r0.hv - v : null; }
+    else { be = v; ke = r0.hv && r0.binding ? r0.hv - v : null; }
+    var parts = [];
+    if (be !== null && r0.binding) parts.push('BE ' + be.toFixed(2) + ' eV');
+    else if (a0.label !== 'Kinetic energy') parts.push(a0.label + ' ' + v.toFixed(2) + ' eV');
+    if (ke !== null) parts.push('KE ' + ke.toFixed(2) + ' eV');
+    var best = null, bd = Infinity;
+    P.items.forEach(function (s, i) {
+      var yv = V.interp(P.axes[i].x, P.yoff[i], v);
+      if (yv === null) return;
+      var d = Math.abs(lay.Y(yv) - y);
+      if (d < bd) { bd = d; best = { s: s, i: i, raw: V.interp(P.axes[i].x, s.y, v) }; }
+    });
+    if (best) {
+      parts.push((P.items.length > 1 ? V.traceLabel(best.s, S.data.files.length > 1) + ': ' : '') +
+        V.fmtY(best.raw) + (best.s.reg.yunits ? ' ' + best.s.reg.yunits : ''));
+    }
+    P.readout.textContent = parts.join('   ·   ');
+    redraw(P);
+  }
+
+  /* ---------------------------------------------------------------- tabs */
+  var TABS = [['plot', 'Spectra'], ['quant', 'Quantification'], ['depth', 'Depth profile'], ['figures', 'Figures'], ['meta', 'Metadata'],
+              ['notes', 'Notes'], ['methods', 'Methods'], ['holder', 'Holder'],
+              ['cameras', 'Camera images'], ['maps', 'SnapMaps']];
+  function availableTabs() {
+    var d = S.data;
+    return TABS.filter(function (t) {
+      if (t[0] === 'figures') return d.figures.length > 0;
+      if (t[0] === 'quant') return V.quantGroups(S.specs).length > 0 ||
+        d.samples.some(function (sm) { return !!sm.casaxps; });
+      if (t[0] === 'depth') return profileSamples().length > 0;
+      if (t[0] === 'holder') return d.holders.length > 0;
+      if (t[0] === 'cameras') return (d.cameras || []).length > 0;
+      if (t[0] === 'maps') return (d.maps || []).length > 0;
+      if (t[0] === 'methods') return !!d.methods.trim();
+      return true;
+    });
+  }
+  function buildTabs() {
+    var nav = clear($('tabs'));
+    availableTabs().forEach(function (t) {
+      var b = h('button', { type: 'button', class: 'tab-btn', role: 'tab', id: 'tabbtn-' + t[0], text: t[1] });
+      b.addEventListener('click', function () { showTab(t[0]); });
+      nav.appendChild(b);
+    });
+  }
+  function showTab(name) {
+    S.tab = name;
+    TABS.forEach(function (t) {
+      var sec = $('tab-' + t[0]), btn = $('tabbtn-' + t[0]);
+      if (sec) sec.hidden = t[0] !== name;
+      if (btn) btn.setAttribute('aria-selected', t[0] === name ? 'true' : 'false');
+    });
+    if (name === 'plot') requestRender();
+    redrawTab();
+    if (name === 'meta') renderMeta();
+    if (name === 'depth') renderDepth();
+    if (name === 'quant') renderQuant();
+  }
+  function redrawTab() {
+    if (S.tab === 'depth') drawDepth();
+    else if (S.tab === 'holder') drawHolder();
+    else if (S.tab === 'cameras') drawCamera();
+    else if (S.tab === 'maps') { if (S.M.id) drawMapView(); else if ((S.data.maps || []).length) openMap(S.data.maps[0].id); }
+  }
+
+  /* ------------------------------------------------------- quantification tab */
+  /* A sample with its own CasaXPS-exported quantification (`sm.casaxps`,
+     see casaquant.py) is preferred over its fit-derived breakdown, so it is
+     left out of the fit-derived table below and rendered separately. */
+  function renderQuant() {
+    var box = clear($('tab-quant'));
+    var casaxpsSamples = S.data.samples.filter(function (sm) { return !!sm.casaxps; });
+    var casaxpsIds = {};
+    casaxpsSamples.forEach(function (sm) { casaxpsIds[sm.id] = true; });
+    var all = V.quantGroups(S.specs).filter(function (g) { return !casaxpsIds[g.sid]; });
+    if (!all.length && !casaxpsSamples.length) return;
+    var q = S.q;
+    if (all.length) renderFitQuant(box, all, q);
+    casaxpsSamples.forEach(function (sm) { renderCasaxpsQuant(box, sm); });
+  }
+  function renderFitQuant(box, all, q) {
+    var hasT = all.some(function (g) { return g.entries.some(function (e) { return e.row.area_t !== null && e.row.area_t !== undefined; }); });
+    var rsfTable = q.rsfLibrary ? (S.data.rsf || []) : null;
+    box.appendChild(h('p', { class: 'muted small', text: 'Atomic % = (region area ÷ RSF) as a share of the ticked regions of the same sample. Areas and RSFs are ' +
+      'CasaXPS\'s own, read from the fitted VAMAS file; nothing here is refitted. A region without an RSF is left out and says so.' }));
+    var tcb = h('input', { type: 'checkbox', id: 'q-trans' });
+    tcb.checked = q.transmission && hasT; tcb.disabled = !hasT;
+    tcb.addEventListener('change', function () { q.transmission = tcb.checked; renderQuant(); });
+    var rsel = h('select', { 'aria-label': 'RSF fallback for regions with no recorded sensitivity factor' });
+    [['', 'Off'], ['scofield', 'Scofield'], ['scofield_tpp2m', 'Scofield + TPP-2M'],
+     ['scofield_ke06', 'Scofield × KE^0.6'], ['kratos_f1s', 'Kratos Axis F1s']].forEach(function (opt) {
+      var o = h('option', { value: opt[0], text: opt[1] });
+      if (opt[0] === q.rsfLibrary) o.selected = true;
+      rsel.appendChild(o);
+    });
+    rsel.addEventListener('change', function () { q.rsfLibrary = rsel.value; renderQuant(); });
+    var dl = h('button', { type: 'button', text: 'Download quantification.csv' });
+    dl.addEventListener('click', function () { saveText('quantification.csv', V.quantCsv(all, q.include, q.transmission && hasT, rsfTable, q.rsfLibrary)); });
+    box.appendChild(h('div', { class: 'controls' },
+      h('label', { class: 'field', title: hasT ? 'Divide the spectrometer transmission function out of each region area' : 'These files carry no transmission function' }, tcb, ' Divide out the transmission function'),
+      h('label', { class: 'field', title: 'A region with no recorded RSF gets one from this reference library instead — marked as a substitute, never shown as though it were the file’s own' }, 'RSF fallback ', rsel),
+      dl));
+    var bySample = [], seen = {};
+    all.forEach(function (g) { if (!seen[g.sid]) { seen[g.sid] = []; bySample.push(seen[g.sid]); } seen[g.sid].push(g); });
+    bySample.forEach(function (gs) {
+      var sid = gs[0].sid, cur = q.level[sid];
+      var g = gs.filter(function (x) { return String(x.level) === String(cur); })[0] || gs[0];
+      var seed = V.preferredDefaults(g.entries, q.include);
+      Object.keys(seed).forEach(function (key) { if (!(key in q.include)) q.include[key] = seed[key]; });
+      box.appendChild(h('h2', { text: g.sample || '(unnamed)' }));
+      if (gs.length > 1) {
+        var sel = h('select', { 'aria-label': 'Depth level' });
+        gs.forEach(function (x) {
+          var o = h('option', { value: String(x.level), text: 'Level ' + x.level + (x.etch !== null && x.etch !== undefined ? ' (' + +x.etch.toPrecision(6) + ' s)' : '') });
+          if (x === g) o.selected = true;
+          sel.appendChild(o);
+        });
+        sel.addEventListener('change', function () { q.level[sid] = sel.value; renderQuant(); });
+        box.appendChild(h('div', { class: 'controls' }, h('label', { class: 'field' }, 'Depth level ', sel)));
+      }
+      var res = V.quantNormalise(g.entries.map(function (e) { return e.row; }),
+        g.entries.map(function (e) { return q.include[e.key] !== false; }), q.transmission && hasT,
+        rsfTable, q.rsfLibrary);
+      var tb = h('tbody');
+      g.entries.forEach(function (e, i) {
+        var row = e.row, x = res[i], off = q.include[e.key] === false;
+        var cb = h('input', { type: 'checkbox', 'aria-label': 'Include ' + row.region });
+        cb.checked = !off;
+        cb.addEventListener('change', function () { q.include[e.key] = cb.checked; renderQuant(); });
+        var area = q.transmission && hasT && row.area_t !== null && row.area_t !== undefined ? row.area_t : row.area;
+        var name = row.region + (e.spectrum !== row.region ? '  (' + e.spectrum + ')' : '') + (row.source === 'survey' ? ' †' : '');
+        var rsfCell = x.rsfSource && x.rsfSource !== 'component'
+          ? sig6(x.rsfValue) + ' (' + (V.RSF_LIBRARY_SHORT[x.rsfSource] || x.rsfSource) + ', ' + x.rsfAnode + ' Kα)'
+          : (row.rsf ? String(+row.rsf.toPrecision(4)) : '');
+        tb.appendChild(h('tr', { class: off ? 'off' : '' },
+          h('td', null, cb), h('td', { text: name }), h('td', { text: row.background }),
+          h('td', { class: 'num', text: rsfCell }),
+          h('td', { class: 'num', text: area === null || area === undefined ? '' : Math.round(area).toLocaleString('en-US') + (row.basis === 'components' ? ' *' : '') }),
+          h('td', { class: 'num', text: x.corrected === null ? '' : Math.round(x.corrected).toLocaleString('en-US') }),
+          h('td', { class: 'num', text: x.at === null ? (x.why && x.why !== 'not included' ? x.why : '') : x.at.toFixed(1) })));
+        if (x.at !== null) {
+          V.quantStates(row, x.at).forEach(function (st) {
+            tb.appendChild(h('tr', { class: 'state' }, h('td'), h('td', { text: '↳ ' + st.name }), h('td'), h('td'),
+              h('td', { class: 'num', text: (100 * st.frac).toFixed(0) + ' % of region' }), h('td'), h('td', { class: 'num', text: st.at.toFixed(1) })));
+          });
+        }
+      });
+      var head = h('tr', null, h('th'), h('th', { text: 'Region' }), h('th', { text: 'Background' }), h('th', { class: 'num', text: 'RSF' }),
+        h('th', { class: 'num', text: 'Area (counts/s·eV)' }), h('th', { class: 'num', text: 'Area ÷ RSF' }), h('th', { class: 'num', text: 'at %' }));
+      box.appendChild(h('div', { class: 'scroll' }, h('table', { class: 'grid quant' }, h('thead', null, head), tb)));
+      if (g.entries.some(function (e) { return e.row.basis === 'components'; })) {
+        box.appendChild(h('p', { class: 'muted small', text: '* the sum of the fitted components, because the background of that region is not reproduced here.' }));
+      }
+      var reg = g.entries.length > 1 && g.entries.some(function (e) { return e.row.region === g.entries[0].row.region && e !== g.entries[0]; });
+      if (reg) box.appendChild(h('p', { class: 'muted small', text: 'The same region appears more than once (for example from a survey and from its own scan): untick one to avoid counting it twice.' }));
+      if (Object.keys(seed).length) {
+        box.appendChild(h('p', { class: 'muted small', text: 'A non-standard line of the same element (e.g. a 4d region where 4f is also fitted) is unticked by default — the standard line for quantification; re-tick it if you want both counted.' }));
+      }
+      if (g.entries.some(function (e) { return e.row.source === 'survey'; })) {
+        box.appendChild(h('p', { class: 'muted small', text: '† survey-scan quantification, not a dedicated high-resolution scan — typically less precise than the rest of this total.' }));
+      }
+      if (!q.rsfLibrary && res.some(function (x) { return x.why === 'no RSF'; })) {
+        box.appendChild(h('p', { class: 'muted small', text: 'A region here has no recorded sensitivity factor and is left out of the total — try the RSF fallback dropdown above.' }));
+      }
+    });
+  }
+  function fmtPct(v) { return v === null || v === undefined ? '' : v.toFixed(2); }
+  function fmtNum(v) { return v === null || v === undefined ? '' : String(+v.toPrecision(6)); }
+  /* `csvRows` is [header, ...rows] (a V.casaxps*Rows() result); `dispRows`
+     the same rows formatted for on-screen display. */
+  function casaxpsTable(box, title, csvRows, dispRows, csvName) {
+    if (csvRows.length <= 1) return;
+    var header = csvRows[0];
+    box.appendChild(h('h3', { text: title }));
+    var head = h('tr');
+    header.forEach(function (c, i) { head.appendChild(h('th', { class: i > 0 ? 'num' : '', text: c })); });
+    var tb = h('tbody');
+    dispRows.forEach(function (r) {
+      var tr = h('tr');
+      r.forEach(function (c, i) { tr.appendChild(h('td', { class: i > 0 ? 'num' : '', text: c })); });
+      tb.appendChild(tr);
+    });
+    box.appendChild(h('div', { class: 'scroll' }, h('table', { class: 'grid quant' }, h('thead', null, head), tb)));
+    var dl = h('button', { type: 'button', text: 'Download ' + csvName });
+    dl.addEventListener('click', function () { saveText(csvName, V.casaxpsCsv(csvRows)); });
+    box.appendChild(h('div', { class: 'controls' }, dl));
+  }
+  /* one sample's CasaXPS-exported quantification (`sm.casaxps`): three
+     independent flat tables, shown exactly as CasaXPS wrote them -- no fit,
+     no recomputed atomic percent (see casaquant.py for why they are not
+     nested one inside another). */
+  function renderCasaxpsQuant(box, sm) {
+    var cq = sm.casaxps, base = V.safeName(sm.name || 'sample');
+    box.appendChild(h('h2', { text: sm.name || '(unnamed)' }));
+    box.appendChild(h('p', { class: 'muted small', text: 'Quantification for this sample is CasaXPS\'s own exported result ' +
+      '(Quant_survey.txt / Quant_regions.txt / Quant_Dparam.txt), not recomputed from an embedded fit.' }));
+    casaxpsTable(box, 'Survey (% concentration)', V.casaxpsSurveyRows(cq),
+      (cq.survey || []).map(function (r) { return [r.element, fmtPct(r.pct)]; }),
+      base + '_survey.csv');
+    casaxpsTable(box, 'Regions (% atomic concentration)', V.casaxpsRegionsRows(cq),
+      (cq.regions || []).map(function (r) { return [r.name, fmtNum(r.position), fmtPct(r.at_pct)]; }),
+      base + '_regions.csv');
+    casaxpsTable(box, 'D parameter', V.casaxpsDparamRows(cq),
+      (cq.dparam || []).map(function (r) { return [r.name, fmtNum(r.fwhm)]; }),
+      base + '_dparam.csv');
+  }
+
+  /* ---------------------------------------------------- depth profile tab */
+  var DEPTH_MODES = [['element', 'Composition (at %)'], ['state', 'Chemical states (at %)'],
+                     ['share', 'State share of its element (%)'], ['peak', 'Peak maximum']];
+  /* the samples that have a depth profile: at least two distinct levels */
+  function profileSamples() {
+    var out = [];
+    S.data.samples.forEach(function (sm) {
+      var lv = [];
+      sm.regions.forEach(function (r) { if (r.level !== null && r.level !== undefined && lv.indexOf(r.level) < 0) lv.push(r.level); });
+      if (lv.length > 1) out.push(sm);
+    });
+    return out;
+  }
+  function profileOf(sm, mode) {
+    var specs = S.specs.filter(function (s) { return s.sample === sm && s.reg.level !== null && s.reg.level !== undefined; });
+    var infoAt = {};
+    specs.forEach(function (s) { if (!infoAt[s.reg.level]) infoAt[s.reg.level] = V.levelInfo(s.reg); });
+    var prof;
+    if (mode === 'peak') prof = V.peakMaxSeries(specs);
+    else {
+      var gs = V.quantGroups(specs).filter(function (g) { return g.level !== null; }).sort(function (a, b) { return a.level - b.level; });
+      prof = V.profile(gs, mode, S.q.include, S.q.transmission);
+    }
+    return { prof: prof, infos: prof.levels.map(function (l) { return infoAt[l]; }), specs: specs };
+  }
+  function renderDepth() {
+    var box = clear($('tab-depth')), sms = profileSamples();
+    if (!sms.length) return;
+    var d = S.d;
+    if (sms.indexOf(d.sample) < 0) d.sample = sms[0];
+    var hasFit = V.quantGroups(S.specs.filter(function (s) { return s.sample === d.sample; })).length > 0;
+    if (!hasFit && d.mode !== 'peak') d.mode = 'peak';
+    var res = profileOf(d.sample, d.mode), axes = V.profileAxes(res.infos);
+    if (!axes.length) axes = [{ id: 'level', label: 'Level', values: res.prof.levels }];
+    if (!axes.some(function (a) { return a.id === d.axis; })) d.axis = axes[0].id;
+    var axis = axes.filter(function (a) { return a.id === d.axis; })[0];
+
+    var ctl = h('div', { class: 'controls' });
+    if (sms.length > 1) {
+      var ssel = h('select', { 'aria-label': 'Sample' });
+      sms.forEach(function (sm) { var o = h('option', { value: sm.id, text: sm.name || '(unnamed)' }); if (sm === d.sample) o.selected = true; ssel.appendChild(o); });
+      ssel.addEventListener('change', function () { d.sample = sms.filter(function (s) { return s.id === ssel.value; })[0]; renderDepth(); });
+      ctl.appendChild(h('label', { class: 'field' }, 'Sample ', ssel));
+    }
+    var msel = h('select', { 'aria-label': 'Show' });
+    DEPTH_MODES.forEach(function (m) {
+      var o = h('option', { value: m[0], text: m[1] }); if (m[0] === d.mode) o.selected = true;
+      if (m[0] !== 'peak' && !hasFit) o.disabled = true;
+      msel.appendChild(o);
+    });
+    msel.addEventListener('change', function () { d.mode = msel.value; renderDepth(); });
+    ctl.appendChild(h('label', { class: 'field' }, 'Show ', msel));
+    var xsel = h('select', { 'aria-label': 'Horizontal axis' });
+    axes.forEach(function (a) { var o = h('option', { value: a.id, text: a.label }); if (a === axis) o.selected = true; xsel.appendChild(o); });
+    xsel.addEventListener('change', function () { d.axis = xsel.value; renderDepth(); });
+    ctl.appendChild(h('label', { class: 'field' }, 'Against ', xsel));
+    var dl = h('button', { type: 'button', text: 'Download depth_profile.csv' });
+    dl.addEventListener('click', function () {
+      saveText('depth_profile.csv', V.profileTable(res.prof, res.infos).map(function (r) { return r.map(V.csvField).join(','); }).join('\r\n') + '\r\n');
+    });
+    ctl.appendChild(dl);
+    box.appendChild(ctl);
+    var why = [];
+    if (d.mode !== 'peak') why.push('Uses the regions ticked in the Quantification tab' + (S.q.transmission ? ', with the transmission function divided out' : '') + '.');
+    if (axes.length && axes[0].id === 'level' && res.infos.some(function (i) { return i.etch !== null && i.etch !== undefined; })) {
+      why.push('Etch times are all the same or not recorded, so the levels are shown by number.');
+    } else if (!axes.some(function (a) { return a.id === 'depth'; })) {
+      why.push('Enter the etch rate in the app (Sputter settings) to plot against depth.');
+    }
+    box.appendChild(h('p', { class: 'muted small', text: why.join(' ') }));
+    if (!res.prof.series.length) {
+      box.appendChild(h('p', { class: 'empty', text: 'Nothing to plot here: none of the ticked regions has an RSF and an area.' }));
+      d.last = null;
+      return;
+    }
+    var cv = h('canvas', { 'aria-label': 'Depth profile', role: 'img', id: 'depthCanvas' });
+    var read = h('div', { class: 'readout', id: 'depthRead' });
+    box.appendChild(h('div', { class: 'panel depth-panel' }, cv, read));
+    d.last = { canvas: cv, read: read, res: res, axis: axis, hover: null };
+    cv.addEventListener('mousemove', function (e) { d.last.hover = nearestLevel(d.last, e); depthReadout(d.last); drawDepth(); });
+    cv.addEventListener('mouseleave', function () { d.last.hover = null; read.textContent = ''; drawDepth(); });
+    cv.addEventListener('click', function (e) {
+      var i = nearestLevel(d.last, e);
+      if (i !== null) gotoLevel(d.sample, res.prof.levels[i]);
+    });
+    var rows = V.profileTable(res.prof, res.infos), tb = h('table', { class: 'grid quant' });
+    rows.forEach(function (r, i) {
+      var tr = h('tr');
+      r.forEach(function (c) { tr.appendChild(h(i ? 'td' : 'th', { class: 'num', text: c })); });
+      tb.appendChild(tr);
+    });
+    box.appendChild(h('div', { class: 'scroll' }, tb));
+    drawDepth();
+  }
+  function nearestLevel(L, e) {
+    if (!L || !L.pts) return null;
+    var x = e.clientX - L.canvas.getBoundingClientRect().left, best = null, bd = Infinity;
+    L.pts.forEach(function (px_, i) { var dd = Math.abs(px_ - x); if (dd < bd) { bd = dd; best = i; } });
+    return bd < 40 ? best : null;
+  }
+  function depthReadout(L) {
+    if (L.hover === null) { L.read.textContent = ''; return; }
+    var i = L.hover, info = L.res.infos[i], ax = L.axis;
+    var parts = ['Level ' + info.level + (ax.id !== 'level' ? ' · ' + ax.label + ' ' + sig6(ax.values[i]) : '')];
+    L.res.prof.series.forEach(function (s) { if (s.values[i] !== null) parts.push(s.name + ' ' + V.fmtY(s.values[i])); });
+    L.read.textContent = parts.join('   ·   ') + '   (click to open this level)';
+  }
+  function gotoLevel(sm, level) {
+    var ids = sm.regions.map(function (r) { return r.id; });
+    var lv = [];
+    sm.regions.forEach(function (r) { if (r.level !== null && r.level !== undefined && lv.indexOf(r.level) < 0) lv.push(r.level); });
+    lv.sort(function (a, b) { return a - b; });
+    S.levelOn = true; S.levelIdx = Math.max(0, lv.indexOf(level));
+    $('levelOn').checked = true;
+    tickOnly(ids);
+    showTab('plot');
+  }
+  function drawDepth() {
+    var L = S.d.last;
+    if (!L || S.tab !== 'depth') return;
+    var cv = L.canvas, W = cv.clientWidth, H = cv.clientHeight, C = colours();
+    if (!W || !H) return;
+    var dpr = G.devicePixelRatio || 1;
+    if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+    var ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    var font = function (n, w) { return (w || '') + ' ' + n + 'px system-ui, "Segoe UI", Helvetica, Arial, sans-serif'; };
+    var xs = L.axis.values.map(Number), cyc = cycle(), series = L.res.prof.series;
+    var xlo = Math.min.apply(null, xs), xhi = Math.max.apply(null, xs);
+    if (!(xhi > xlo)) { xlo -= 1; xhi += 1; }
+    var xp = (xhi - xlo) * 0.04; xlo -= xp; xhi += xp;
+    var yhi = 0;
+    series.forEach(function (s) { s.values.forEach(function (v) { if (v !== null && v > yhi) yhi = v; }); });
+    yhi = yhi > 0 ? yhi * 1.08 : 1;
+    var gutter = 190, lay = { l: 64, t: 16, w: Math.max(60, W - 64 - gutter), h: Math.max(60, H - 16 - 46) };
+    var X = function (v) { return lay.l + (v - xlo) / (xhi - xlo) * lay.w; }, Y = function (v) { return lay.t + (1 - v / yhi) * lay.h; };
+    L.pts = xs.map(X);
+    ctx.strokeStyle = C.muted; ctx.fillStyle = C.muted; ctx.lineWidth = 1; ctx.font = font(11);
+    ctx.beginPath(); ctx.moveTo(lay.l + 0.5, lay.t); ctx.lineTo(lay.l + 0.5, lay.t + lay.h); ctx.lineTo(lay.l + lay.w, lay.t + lay.h + 0.5); ctx.stroke();
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    V.niceTicks(0, yhi, Math.max(3, Math.round(lay.h / 50))).forEach(function (t) {
+      var y = Math.round(Y(t)) + 0.5;
+      ctx.strokeStyle = C.grid; ctx.beginPath(); ctx.moveTo(lay.l, y); ctx.lineTo(lay.l + lay.w, y); ctx.stroke();
+      ctx.fillStyle = C.muted; ctx.fillText(V.fmtY(t), lay.l - 6, y);
+    });
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    var ticks = V.niceTicks(xlo, xhi, Math.max(3, Math.round(lay.w / 90)));
+    ticks.forEach(function (t) { ctx.fillStyle = C.muted; ctx.fillText(V.fmtY(t), X(t), lay.t + lay.h + 16); });
+    ctx.fillStyle = C.fg; ctx.font = font(12);
+    ctx.fillText(L.axis.label, lay.l + lay.w / 2, lay.t + lay.h + 36);
+    var mode = S.d.mode, r0 = L.res.specs[0] ? L.res.specs[0].reg : {};
+    var ylab = mode === 'peak' ? 'Peak maximum' + (r0.yunits ? ' (' + r0.yunits + ')' : '') : mode === 'share' ? 'Percent of the element' : 'Atomic %';
+    ctx.save(); ctx.translate(14, lay.t + lay.h / 2); ctx.rotate(-Math.PI / 2); ctx.fillText(ylab, 0, 0); ctx.restore();
+    series.forEach(function (s, k) {
+      var col = cyc[k % cyc.length], pen = false;
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
+      ctx.beginPath();
+      s.values.forEach(function (v, i) {
+        if (v === null) { pen = false; return; }
+        if (pen) ctx.lineTo(X(xs[i]), Y(v)); else { ctx.moveTo(X(xs[i]), Y(v)); pen = true; }
+      });
+      ctx.stroke();
+      s.values.forEach(function (v, i) {
+        if (v === null) return;
+        ctx.beginPath(); ctx.arc(X(xs[i]), Y(v), L.hover === i ? 4.5 : (xs.length > 30 ? 1.8 : 3), 0, 6.2832); ctx.fill();
+      });
+    });
+    if (L.hover !== null) {
+      ctx.strokeStyle = C.accent; ctx.setLineDash([4, 3]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(X(xs[L.hover]) + 0.5, lay.t); ctx.lineTo(X(xs[L.hover]) + 0.5, lay.t + lay.h); ctx.stroke(); ctx.setLineDash([]);
+    }
+    ctx.font = font(11); ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    series.slice(0, 16).forEach(function (s, k) {
+      var y = lay.t + 8 + k * 16, x = lay.l + lay.w + 14;
+      ctx.fillStyle = cyc[k % cyc.length]; ctx.fillRect(x, y - 1.5, 14, 3);
+      ctx.fillStyle = C.fg; ctx.fillText(s.name.length > 24 ? s.name.slice(0, 23) + '…' : s.name, x + 20, y);
+    });
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  function renderFigures() {
+    var box = clear($('tab-figures'));
+    S.data.figures.forEach(function (f, i) {
+      var fig = h('figure');
+      f.pages.forEach(function (src, k) {
+        var img = h('img', { src: src, alt: 'Figure ' + (i + 1) + ': ' + f.name });
+        fig.appendChild(img);
+        fig.appendChild(h('div', null, h('a', { href: src, download: 'figure_' + (i + 1) + (f.pages.length > 1 ? '_p' + (k + 1) : '') + '.png', text: 'Download PNG' })));
+      });
+      fig.appendChild(h('figcaption', null, h('strong', { text: 'Figure ' + (i + 1) + ' – ' + f.name }), f.caption ? '\n' + f.caption : ''));
+      box.appendChild(fig);
+    });
+  }
+
+  function kvTable(pairs) {
+    var t = h('table', { class: 'kv' });
+    pairs.forEach(function (p) { t.appendChild(h('tr', null, h('th', { text: p[0] }), h('td', { text: p[1] }))); });
+    return t;
+  }
+  function renderMeta() {
+    var box = clear($('tab-meta')), sel = S.selected;
+    if (!sel) {
+      box.appendChild(h('p', { class: 'muted', text: 'Select a sample or a spectrum in the list to see its acquisition metadata.' }));
+      return;
+    }
+    if (sel.kind === 'region') {
+      var s = S.byId[sel.id];
+      box.appendChild(h('h2', { text: (s.sample.name ? s.sample.name + ' – ' : '') + s.name }));
+      box.appendChild(kvTable(Object.keys(s.reg.meta).map(function (k) { return [k, s.reg.meta[k]]; })));
+      if (s.reg.note) box.appendChild(h('p', { class: 'note', text: 'Note: ' + s.reg.note }));
+      return;
+    }
+    var sm = S.data.samples[+sel.id.slice(1)];
+    box.appendChild(h('h2', { text: sm.name || '(unnamed)' }));
+    var rows = sm.regions.map(function (r) { return r.meta; });
+    var sum = V.summariseMeta(rows, ['Sample', 'Region', 'Source file', 'Notes']);
+    if (sum.common.length) {
+      box.appendChild(h('h3', { text: 'Common to every spectrum of this sample' }));
+      box.appendChild(kvTable(sum.common));
+    }
+    if (sum.varying.length) {
+      box.appendChild(h('h3', { text: 'What differs' }));
+      var tb = h('table', { class: 'grid' }), hd = h('tr', null, h('th', { text: 'Spectrum' }));
+      sum.varying.forEach(function (k) { hd.appendChild(h('th', { text: k })); });
+      tb.appendChild(hd);
+      sm.regions.forEach(function (r) {
+        var tr = h('tr', null, h('td', { text: r.level !== null && r.level !== undefined ? r.name + ' · L' + r.level : r.name }));
+        sum.varying.forEach(function (k) { tr.appendChild(h('td', { text: r.meta[k] === undefined ? '' : r.meta[k] })); });
+        tb.appendChild(tr);
+      });
+      box.appendChild(h('div', { class: 'scroll' }, tb));
+    }
+    if (sm.note) box.appendChild(h('p', { class: 'note', text: 'Note: ' + sm.note }));
+  }
+
+  function renderNotes() {
+    var box = clear($('tab-notes')), d = S.data, any = false;
+    if ((d.build_notes || []).length) {
+      any = true;
+      box.appendChild(h('h2', { text: 'Left out or thinned to keep the file small' }));
+      d.build_notes.forEach(function (t) { box.appendChild(h('p', { class: 'note', text: t })); });
+    }
+    if (d.details.summary.trim()) {
+      any = true;
+      box.appendChild(h('h2', { text: 'Summary' }));
+      V.paragraphs(d.details.summary).forEach(function (p) { box.appendChild(h('p', { class: 'note', text: p })); });
+    }
+    if (d.calibration.trim()) {
+      any = true;
+      box.appendChild(h('h2', { text: 'Energy calibration' }));
+      box.appendChild(h('p', { class: 'note', text: d.calibration }));
+    }
+    var notes = [];
+    d.samples.forEach(function (s) {
+      if (s.note) notes.push([s.name || '(unnamed)', s.note]);
+      s.regions.forEach(function (r) { if (r.note) notes.push([(s.name ? s.name + ' – ' : '') + r.name, r.note]); });
+    });
+    if (notes.length) {
+      any = true;
+      box.appendChild(h('h2', { text: 'Notes on samples and spectra' }));
+      box.appendChild(kvTable(notes));
+    }
+    box.appendChild(h('h2', { text: 'Source files' }));
+    box.appendChild(kvTable(d.files.map(function (f) { return [f.name, f.format]; })));
+    if (!any) box.insertBefore(h('p', { class: 'muted', text: 'No notes were written for this experiment.' }), box.firstChild);
+  }
+
+  function renderMethods() {
+    var box = clear($('tab-methods'));
+    var pre = h('div', { class: 'prose', id: 'methodsText', text: S.data.methods });
+    var btn = h('button', { type: 'button', text: 'Copy text' });
+    btn.addEventListener('click', function () {
+      var done = function () { btn.textContent = 'Copied'; };
+      var fail = function () {
+        var r = document.createRange(); r.selectNodeContents(pre);
+        var sel = G.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+        btn.textContent = 'Selected: press Ctrl+C';
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(S.data.methods).then(done, fail);
+      else fail();
+    });
+    box.appendChild(pre); box.appendChild(btn);
+  }
+
+  /* --------------------------------------------------------- holder photo */
+  var photoCache = {};
+  function currentHolder() { return S.data.holders[S.holderIdx] || null; }
+  function hotSamples() {
+    var hot = {};
+    S.specs.forEach(function (s) { if (S.ticked.has(s.id) || isSelected(s)) hot[s.sample.name] = true; });
+    return hot;
+  }
+  function renderHolder() {
+    var box = clear($('tab-holder')), hs = S.data.holders;
+    if (hs.length > 1) {
+      var sel = h('select', { 'aria-label': 'Holder photo' });
+      hs.forEach(function (x, i) { sel.appendChild(h('option', { value: String(i), text: x.file })); });
+      sel.addEventListener('change', function () { S.holderIdx = +sel.value; drawHolder(); });
+      box.appendChild(h('p', null, sel));
+    }
+    box.appendChild(h('div', { class: 'holder-wrap' }, h('canvas', { id: 'holderCanvas', 'aria-label': 'Holder photo with analysis positions', role: 'img' })));
+    box.appendChild(h('div', { class: 'holder-info', id: 'holderInfo' }));
+    var cv = $('holderCanvas');
+    cv.addEventListener('click', function (e) {
+      var hd = currentHolder(), lay = cv._lay;
+      if (!hd || !lay) return;
+      var rect = cv.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top;
+      var best = null, bd = 18;
+      Object.keys(hd.points).forEach(function (name) {
+        var p = hd.points[name], d = Math.hypot(p[0] * lay.k - x, p[1] * lay.k - y);
+        if (d <= bd) { bd = d; best = name; }
+      });
+      S.holderHot = best;
+      var sm = S.data.samples.filter(function (s) { return s.name === best; })[0];
+      if (sm) select({ kind: 'sample', id: sm.id }); else drawHolder();
+    });
+  }
+  /* analysis-point markers with their names, halo'd so they read on any
+     picture; `points` is {name: [x, y]} in picture pixels, `k` the display
+     scale, `hot` the names to highlight. Returns the names drawn. */
+  function paintMarkers(ctx, points, k, hot) {
+    ctx.font = '12px system-ui, "Segoe UI", Helvetica, Arial, sans-serif'; ctx.textBaseline = 'middle';
+    var names = Object.keys(points), placed = [];
+    names.sort(function (a, b) { return (hot[b] ? 1 : 0) - (hot[a] ? 1 : 0); });
+    names.forEach(function (name) {
+      var p = points[name], x = p[0] * k, y = p[1] * k, on = !!hot[name];
+      var col = on ? '#FF4D4D' : '#19E0FF', r = on ? 9 : 7;
+      ctx.lineWidth = (on ? 2.4 : 1.8) + 2.6; ctx.strokeStyle = '#0B1116';
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
+      ctx.lineWidth = on ? 2.4 : 1.8; ctx.strokeStyle = col;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 6.2832); ctx.stroke();
+      var text = name || '(unnamed)', w = ctx.measureText(text).width;
+      var spots = [[r + 4, 10, 'left'], [r + 4, -10, 'left'], [-r - 4, 10, 'right'], [-r - 4, -10, 'right']], at = spots[0];
+      for (var s = 0; s < spots.length; s++) {
+        var lx = x + spots[s][0], ly = y + spots[s][1], x0 = spots[s][2] === 'left' ? lx : lx - w;
+        var box2 = [x0 - 2, ly - 8, w + 4, 16];
+        var hit = placed.some(function (b) { return box2[0] < b[0] + b[2] && box2[0] + box2[2] > b[0] && box2[1] < b[1] + b[3] && box2[1] + box2[3] > b[1]; });
+        if (!hit) { at = spots[s]; placed.push(box2); break; }
+        if (s === spots.length - 1) placed.push(box2);
+      }
+      ctx.textAlign = at[2]; ctx.font = (on ? 'bold ' : '') + '12px system-ui, "Segoe UI", Helvetica, Arial, sans-serif';
+      ctx.lineWidth = 3.2; ctx.strokeStyle = '#0B1116'; ctx.lineJoin = 'round';
+      ctx.strokeText(text, x + at[0], y + at[1]);
+      ctx.fillStyle = col; ctx.fillText(text, x + at[0], y + at[1]);
+    });
+    return names;
+  }
+  /* the picture at its display size on a canvas, drawn once decoded */
+  function withPicture(key, src, then) {
+    var cached = photoCache[key];
+    if (cached && cached.complete) { then(cached); return; }
+    var img = new Image();
+    img.onload = function () { photoCache[key] = img; then(img); };
+    img.src = src;
+  }
+  function sizeCanvas(cv, w, h) {
+    var dpr = G.devicePixelRatio || 1, ctx = cv.getContext('2d');
+    cv.style.width = Math.round(w) + 'px'; cv.style.height = Math.round(h) + 'px';
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return ctx;
+  }
+  function drawHolder() {
+    var hd = currentHolder(), cv = $('holderCanvas');
+    if (!hd || !cv) return;
+    var draw = function (img) {
+      var box = cv.parentNode.clientWidth || 700, k = Math.min(1, box / hd.w) ;
+      var dpr = G.devicePixelRatio || 1;
+      cv.style.width = Math.round(hd.w * k) + 'px'; cv.style.height = Math.round(hd.h * k) + 'px';
+      cv.width = Math.round(hd.w * k * dpr); cv.height = Math.round(hd.h * k * dpr);
+      var ctx = cv.getContext('2d');
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.drawImage(img, 0, 0, hd.w * k, hd.h * k);
+      cv._lay = { k: k };
+      var names = paintMarkers(ctx, hd.points, k, hotSamples());
+      var info = clear($('holderInfo'));
+      if (!names.length) {
+        info.appendChild(h('span', { class: 'muted', text: 'This file has no calibrated analysis positions for the photo.' }));
+      } else if (S.holderHot) {
+        var sm = S.data.samples.filter(function (s) { return s.name === S.holderHot; })[0];
+        if (sm) {
+          var b = h('button', { type: 'button', text: 'Show the spectra of ' + (sm.name || '(unnamed)') });
+          b.addEventListener('click', function () {
+            tickOnly(sm.regions.map(function (r) { return r.id; }));
+            showTab('plot');
+          });
+          info.appendChild(h('span', { text: (sm.name || '(unnamed)') + ' · ' + sm.regions.length + ' spectra   ' }));
+          info.appendChild(b);
+        }
+      } else {
+        info.appendChild(h('span', { class: 'muted', text: 'Click a marker to select that sample.' }));
+      }
+    };
+    var cached = photoCache[hd.file];
+    if (cached && cached.complete) { draw(cached); return; }
+    var img = new Image();
+    img.onload = function () { photoCache[hd.file] = img; draw(img); };
+    img.src = hd.photo;
+  }
+
+  /* ------------------------------------------------------ camera pictures */
+  function sampleByName(name) { return S.data.samples.filter(function (s) { return s.name === name; })[0]; }
+  function currentCam() { return S.data.cameras[S.camIdx] || null; }
+  function renderCameras() {
+    var box = clear($('tab-cameras')), cs = S.data.cameras || [];
+    if (!cs.length) return;
+    var sel = h('select', { id: 'camSel', 'aria-label': 'Camera picture' });
+    cs.forEach(function (c, i) { sel.appendChild(h('option', { value: String(i), text: c.name })); });
+    sel.addEventListener('change', function () { S.camIdx = +sel.value; drawCamera(); });
+    box.appendChild(h('p', null, sel));
+    box.appendChild(h('div', { class: 'cam-wrap' }, h('canvas', { id: 'camCanvas', 'aria-label': 'Camera picture with analysis positions', role: 'img' })));
+    box.appendChild(h('div', { class: 'holder-info', id: 'camInfo' }));
+    var cv = $('camCanvas');
+    cv.addEventListener('click', function (e) {
+      var c = currentCam(), lay = cv._lay;
+      if (!c || !lay) return;
+      var rect = cv.getBoundingClientRect(), x = e.clientX - rect.left, y = e.clientY - rect.top, best = null, bd = 18;
+      Object.keys(c.points).forEach(function (name) {
+        var p = c.points[name], d = Math.hypot(p[0] * lay.k - x, p[1] * lay.k - y);
+        if (d <= bd) { bd = d; best = name; }
+      });
+      var sm = best ? sampleByName(best) : null;
+      if (sm) select({ kind: 'sample', id: sm.id });
+    });
+  }
+  function drawCamera() {
+    var c = currentCam(), cv = $('camCanvas');
+    if (!c || !cv) return;
+    if ($('camSel')) $('camSel').value = String(S.camIdx);
+    withPicture('cam' + c.id, c.img, function (img) {
+      var box = cv.parentNode.clientWidth || 700, k = Math.min(1, box / c.w);
+      var ctx = sizeCanvas(cv, c.w * k, c.h * k);
+      ctx.drawImage(img, 0, 0, c.w * k, c.h * k);
+      cv._lay = { k: k };
+      ctx.setLineDash([6, 4]); ctx.lineWidth = 1.6; ctx.strokeStyle = '#FFD23F';
+      c.maps.forEach(function (m) { ctx.strokeRect(m.rect[0] * k, m.rect[1] * k, m.rect[2] * k, m.rect[3] * k); });
+      ctx.setLineDash([]);
+      var hot = hotSamples();
+      if (c.sample) hot[c.sample] = true;
+      paintMarkers(ctx, c.points, k, hot);
+      var mm = c.fov[0] >= 4 ? 1 : 0.5, bp = c.bar_px * mm * k, by = c.h * k - 26;
+      ctx.lineCap = 'butt'; ctx.strokeStyle = '#0B1116'; ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.moveTo(20, by); ctx.lineTo(20 + bp, by); ctx.stroke();
+      ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(20, by); ctx.lineTo(20 + bp, by); ctx.stroke();
+      ctx.font = '12px system-ui, "Segoe UI", Helvetica, Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+      ctx.lineWidth = 3; ctx.strokeStyle = '#0B1116'; ctx.fillStyle = '#FFFFFF';
+      ctx.strokeText(mm + ' mm', 20 + bp / 2, by - 6); ctx.fillText(mm + ' mm', 20 + bp / 2, by - 6);
+      var info = clear($('camInfo'));
+      info.appendChild(h('span', { text: c.name + '  ·  ' + c.fov[0] + ' × ' + c.fov[1] + ' mm   ' }));
+      var seen = {};
+      c.maps.forEach(function (m) {
+        var maps = S.data.maps.filter(function (x) { return x.sample === m.sample; });
+        if (!maps.length || seen[m.sample]) return;
+        seen[m.sample] = true;
+        var b = h('button', { type: 'button', text: 'Open the SnapMap of ' + m.sample });
+        b.addEventListener('click', function () { showTab('maps'); openMap(maps[0].id); });
+        info.appendChild(b);
+      });
+      if (!Object.keys(c.points).length) info.appendChild(h('span', { class: 'muted', text: 'No analysis positions fall inside this picture.' }));
+      else if (!c.maps.length) info.appendChild(h('span', { class: 'muted', text: 'Click a marker to select that sample.' }));
+    });
+  }
+
+  /* ------------------------------------------------------------- SnapMaps */
+  function currentMap() { return S.mapById[S.M.id] || null; }
+  function saveText(name, text, type) {
+    var blob = new Blob(['﻿' + text], { type: type || 'text/csv;charset=utf-8' });
+    var a = h('a', { href: URL.createObjectURL(blob), download: name });
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 2000);
+  }
+  function renderMaps() {
+    var box = clear($('tab-maps')), M = S.M, maps = S.data.maps || [];
+    if (!maps.length) return;
+    var mapSel = h('select', { id: 'mapSel', 'aria-label': 'SnapMap' });
+    maps.forEach(function (m) { mapSel.appendChild(h('option', { value: m.id, text: m.sample + ' · ' + m.name })); });
+    var scaleSel = h('select', { id: 'mapScale', 'aria-label': 'Colour scale' });
+    Object.keys(V.SCALES).forEach(function (n) { scaleSel.appendChild(h('option', { value: n, text: n })); });
+    var bg = h('input', { type: 'checkbox', id: 'mapBg' }), ov = h('input', { type: 'checkbox', id: 'mapOv' });
+    var al = h('input', { type: 'range', id: 'mapAlpha', min: '0.15', max: '1', step: '0.05', value: String(M.alpha), 'aria-label': 'Map opacity' });
+    var whole = h('button', { type: 'button', text: 'Whole map', title: 'Clear the chosen area' });
+    var csvMap = h('button', { type: 'button', text: 'Map CSV' }), csvSpec = h('button', { type: 'button', text: 'Spectra CSV' });
+    box.appendChild(h('div', { class: 'controls' },
+      h('label', { class: 'field' }, 'Map', mapSel), h('label', { class: 'field' }, 'Colours', scaleSel),
+      h('label', { class: 'field' }, bg, 'Remove background'), h('label', { class: 'field', id: 'mapOvField' }, ov, 'On camera image', al),
+      whole, csvMap, csvSpec));
+    box.appendChild(h('div', { class: 'maps-view' },
+      h('canvas', { id: 'mapCanvas', 'aria-label': 'SnapMap image', role: 'img' }),
+      h('canvas', { id: 'specCanvas', 'aria-label': 'Spectrum of the map', role: 'img' })));
+    box.appendChild(h('p', { class: 'map-read muted', id: 'mapRead' }));
+    box.appendChild(h('p', { class: 'muted small', text: 'Drag across the spectrum to choose the energy window; drag a box (or click a pixel) on the map to see that area\'s spectrum next to the whole map\'s.' }));
+    mapSel.addEventListener('change', function () { openMap(mapSel.value); });
+    scaleSel.addEventListener('change', function () { M.scale = scaleSel.value; drawMapView(); });
+    bg.addEventListener('change', function () { M.bg = bg.checked; drawMapView(); });
+    ov.addEventListener('change', function () { M.overlay = ov.checked; drawMapView(); });
+    al.addEventListener('input', function () { M.alpha = +al.value; drawMapView(); });
+    whole.addEventListener('click', function () { M.mask = null; M.roi = null; drawMapView(); });
+    csvMap.addEventListener('click', function () {
+      var m = currentMap();
+      if (m && M.data) saveText((m.sample + ' ' + m.name + ' map').replace(/[^\w.\- ]+/g, '_') + '.csv', V.mapCsv(m, mapImage(m)));
+    });
+    csvSpec.addEventListener('click', function () {
+      var m = currentMap();
+      if (!m || !M.data) return;
+      var e = M.energy, whole2 = M.total, roi = M.mask ? V.meanSpectrum(m, M.data, M.mask) : null, rows = ['Energy (eV),Whole map (counts per pixel)' + (roi ? ',Area ' + M.count + ' px (counts per pixel)' : '')];
+      for (var i = 0; i < e.length; i++) rows.push(e[i] + ',' + +whole2[i].toPrecision(7) + (roi ? ',' + +roi[i].toPrecision(7) : ''));
+      saveText((m.sample + ' ' + m.name + ' spectra').replace(/[^\w.\- ]+/g, '_') + '.csv', rows.join('\r\n') + '\r\n');
+    });
+    var mc = $('mapCanvas'), sc = $('specCanvas');
+    mc.addEventListener('mousedown', function (e) { var p = mapPoint(e); if (p) { M.drag = { kind: 'roi', a: p, b: p }; } });
+    sc.addEventListener('mousedown', function (e) { var x = specEnergy(e); if (x !== null) M.drag = { kind: 'win', a: x, b: x }; });
+    mc.addEventListener('mousemove', function (e) { mapHover(e); });
+    sc.addEventListener('mousemove', function (e) {
+      var x = specEnergy(e);
+      if (x !== null && !M.drag) $('mapRead').textContent = x.toFixed(2) + ' eV';
+    });
+    G.addEventListener('mousemove', function (e) {
+      if (!M.drag) return;
+      if (M.drag.kind === 'roi') { var p = mapPoint(e, true); if (p) M.drag.b = p; }
+      else { var x = specEnergy(e, true); if (x !== null) { M.drag.b = x; M.win = [Math.min(M.drag.a, x), Math.max(M.drag.a, x)]; } }
+      drawMapLater();
+    });
+    G.addEventListener('mouseup', function () {
+      var d = M.drag, m = currentMap();
+      if (!d) return;
+      M.drag = null;
+      if (d.kind === 'roi' && m && M.data) {
+        var one = Math.abs(d.b[0] - d.a[0]) < Math.abs(m.dx) / 2 && Math.abs(d.b[1] - d.a[1]) < Math.abs(m.dy) / 2, r;
+        if (one) {
+          var px = V.pixelAt(m, d.a[0], d.a[1]);
+          if (!px) { drawMapView(); return; }
+          r = V.rectMask(m, m.x0 + px[0] * m.dx, m.y0 + px[1] * m.dy, m.x0 + px[0] * m.dx, m.y0 + px[1] * m.dy);
+          M.roi = [m.x0 + px[0] * m.dx - m.dx / 2, m.y0 + px[1] * m.dy - m.dy / 2, m.x0 + px[0] * m.dx + m.dx / 2, m.y0 + px[1] * m.dy + m.dy / 2];
+        } else {
+          r = V.rectMask(m, d.a[0], d.a[1], d.b[0], d.b[1]);
+          M.roi = [Math.min(d.a[0], d.b[0]), Math.min(d.a[1], d.b[1]), Math.max(d.a[0], d.b[0]), Math.max(d.a[1], d.b[1])];
+        }
+        if (r.count) { M.mask = r.mask; M.count = r.count; } else M.roi = M.mask ? M.roi : null;
+      }
+      drawMapView();
+    });
+  }
+  var mapJob = 0;
+  function drawMapLater() {
+    if (mapJob) return;
+    mapJob = G.requestAnimationFrame(function () { mapJob = 0; drawMapView(); });
+  }
+  function openMap(id) {
+    var m = S.mapById[id], M = S.M;
+    if (!m) return;
+    M.id = id; M.data = null; M.loading = true; M.cache = null;
+    if (M.mask && M.mask.length !== m.nx * m.ny) { M.mask = null; M.roi = null; }
+    drawMapView();
+    V.decodeMap(m).then(function (data) {
+      if (M.id !== id) return;
+      M.data = data; M.energy = V.axisValues(m.e); M.total = V.meanSpectrum(m, data, null);
+      M.win = V.defaultWindow(M.energy, M.total);
+      M.loading = false;
+      drawMapView();
+    }).catch(function (err) {
+      if (M.id !== id) return;
+      M.loading = false;
+      $('mapRead').textContent = 'This map could not be decoded (' + (err && err.message ? err.message : err) + ').';
+    });
+  }
+  function mapImage(m) {
+    var M = S.M, key = [M.id, M.win[0], M.win[1], M.bg].join('|');
+    if (!M.cache || M.cache.key !== key) {
+      var img = V.mapImage(m, M.data, M.energy, M.win[0], M.win[1], M.bg);
+      M.cache = { key: key, img: img, range: V.colourRange(img) };
+    }
+    return M.cache.img;
+  }
+  function mapPoint(e, clampIt) {
+    var cv = $('mapCanvas'), lay = cv._lay;
+    if (!lay || !S.M.data) return null;
+    var r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+    var inside = x >= lay.L && x <= lay.L + lay.pw && y >= lay.T && y <= lay.T + lay.ph;
+    if (!inside && !clampIt) return null;
+    x = Math.max(lay.L, Math.min(lay.L + lay.pw, x)); y = Math.max(lay.T, Math.min(lay.T + lay.ph, y));
+    return [lay.vx0 + (x - lay.L) / lay.pw * (lay.vx1 - lay.vx0), lay.vy0 + (y - lay.T) / lay.ph * (lay.vy1 - lay.vy0)];
+  }
+  function specEnergy(e, clampIt) {
+    var cv = $('specCanvas'), lay = cv._lay;
+    if (!lay || !S.M.data) return null;
+    var r = cv.getBoundingClientRect(), x = e.clientX - r.left;
+    var inside = x >= lay.L && x <= lay.L + lay.pw;
+    if (!inside && !clampIt) return null;
+    x = Math.max(lay.L, Math.min(lay.L + lay.pw, x));
+    return lay.e0 + (x - lay.L) / lay.pw * (lay.e1 - lay.e0);
+  }
+  function mapHover(e) {
+    var m = currentMap(), p = mapPoint(e);
+    if (!m || !p || S.M.drag) return;
+    var px = V.pixelAt(m, p[0], p[1]);
+    if (px) $('mapRead').textContent = 'x ' + Math.round(p[0]) + ' µm   y ' + Math.round(p[1]) + ' µm    pixel (' + px[0] + ', ' + px[1] + ')    value ' + V.fmtY(mapImage(m)[px[1] * m.nx + px[0]]);
+  }
+  function drawMapView() {
+    var m = currentMap(), mc = $('mapCanvas'), sc = $('specCanvas'), M = S.M;
+    if (!m || !mc) return;
+    $('mapSel').value = m.id; $('mapScale').value = M.scale; $('mapBg').checked = M.bg; $('mapOv').checked = M.overlay && !!m.cam;
+    $('mapOvField').style.display = m.cam ? '' : 'none';
+    var C = colours(), W = mc.parentNode.clientWidth || 900, half = Math.max(280, (W - 12) / 2);
+    if (G.matchMedia && G.matchMedia('(max-width: 820px)').matches) half = Math.max(280, W);   /* stacked */
+    var reg = S.byId[m.region] || {};
+    if (!M.data) {
+      [mc, sc].forEach(function (cv) {
+        var ctx = sizeCanvas(cv, half, 200);
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, half, 200);
+        ctx.fillStyle = C.muted; ctx.font = '13px system-ui, sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(M.loading ? 'Decoding the map…' : '', half / 2, 100);
+      });
+      return;
+    }
+    var img = mapImage(m), lo = M.cache.range[0], hi = M.cache.range[1];
+    var ext = [m.x0 - m.dx / 2, m.x0 + (m.nx - 0.5) * m.dx, m.y0 - m.dy / 2, m.y0 + (m.ny - 0.5) * m.dy];   /* l, r, t, b */
+    var cam = M.overlay && m.cam ? S.camById[m.cam.id] : null;
+    var vx0 = ext[0], vx1 = ext[1], vy0 = ext[2], vy1 = ext[3];
+    if (cam) { var px = (ext[1] - ext[0]) * 0.3, py = (ext[3] - ext[2]) * 0.3; vx0 -= px; vx1 += px; vy0 -= py; vy1 += py; }
+    var L = 52, T = 26, B = 32, R = 64, pw = half - L - R, ph = pw * (vy1 - vy0) / (vx1 - vx0), H = ph + T + B;
+    var ctx = sizeCanvas(mc, half, H), sx = pw / (vx1 - vx0), sy = ph / (vy1 - vy0);
+    var X = function (x) { return L + (x - vx0) * sx; }, Y = function (y) { return T + (y - vy0) * sy; };
+    mc._lay = { L: L, T: T, pw: pw, ph: ph, vx0: vx0, vx1: vx1, vy0: vy0, vy1: vy1 };
+    var off = document.createElement('canvas');
+    off.width = m.nx; off.height = m.ny;
+    var octx = off.getContext('2d'), id = octx.createImageData(m.nx, m.ny), i;
+    for (i = 0; i < img.length; i++) {
+      var c3 = V.scaleColour(M.scale, (img[i] - lo) / (hi - lo));
+      id.data[4 * i] = c3[0]; id.data[4 * i + 1] = c3[1]; id.data[4 * i + 2] = c3[2]; id.data[4 * i + 3] = 255;
+    }
+    octx.putImageData(id, 0, 0);
+    var paint = function (photo) {
+      ctx.fillStyle = C.bg; ctx.fillRect(0, 0, half, H);
+      ctx.save(); ctx.beginPath(); ctx.rect(L, T, pw, ph); ctx.clip();
+      if (photo) ctx.drawImage(photo, X(m.cam.ext[0]), Y(m.cam.ext[3]), (m.cam.ext[1] - m.cam.ext[0]) * sx, (m.cam.ext[2] - m.cam.ext[3]) * sy);
+      ctx.globalAlpha = photo ? M.alpha : 1; ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(off, X(ext[0]), Y(ext[2]), (ext[1] - ext[0]) * sx, (ext[3] - ext[2]) * sy);
+      ctx.globalAlpha = 1;
+      var roi = M.drag && M.drag.kind === 'roi' ? [Math.min(M.drag.a[0], M.drag.b[0]), Math.min(M.drag.a[1], M.drag.b[1]), Math.max(M.drag.a[0], M.drag.b[0]), Math.max(M.drag.a[1], M.drag.b[1])] : M.roi;
+      if (roi) { ctx.setLineDash([5, 3]); ctx.lineWidth = 1.6; ctx.strokeStyle = C.accent; ctx.strokeRect(X(roi[0]), Y(roi[1]), (roi[2] - roi[0]) * sx, (roi[3] - roi[1]) * sy); ctx.setLineDash([]); }
+      ctx.restore();
+      ctx.strokeStyle = C.muted; ctx.lineWidth = 1; ctx.strokeRect(L, T, pw, ph);
+      ctx.fillStyle = C.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+      V.niceTicks(vx0, vx1, 5).forEach(function (t) { ctx.fillText(String(t), X(t), T + ph + 4); });
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+      V.niceTicks(vy0, vy1, 5).forEach(function (t) { ctx.fillText(String(t), L - 5, Y(t)); });
+      ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillStyle = C.fg;
+      ctx.fillText('X (µm)', L + pw / 2, H - 1);
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+      ctx.fillText(m.name + '   ' + M.win[0].toFixed(1) + '–' + M.win[1].toFixed(1) + ' eV', L, 4);
+      for (var s = 0; s < 64; s++) {                                   /* colour bar */
+        var cc = V.scaleColour(M.scale, 1 - s / 63);
+        ctx.fillStyle = V.rgbToHex(cc); ctx.fillRect(L + pw + 12, T + ph * s / 64, 12, ph / 64 + 1);
+      }
+      ctx.fillStyle = C.muted; ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(V.fmtY(hi), L + pw + 28, T);
+      ctx.textBaseline = 'bottom'; ctx.fillText(V.fmtY(lo), L + pw + 28, T + ph);
+    };
+    if (cam) withPicture('cam' + cam.id, cam.img, paint); else paint(null);
+    drawSpectrum(m, reg, sc, half, H, C);
+  }
+  function drawSpectrum(m, reg, cv, W, H, C) {
+    var M = S.M, e = M.energy, ctx = sizeCanvas(cv, W, H), L = 58, R = 12, T = 26, B = 32, pw = W - L - R, ph = H - T - B;
+    var roi = M.mask ? V.meanSpectrum(m, M.data, M.mask) : null, i, lo = Infinity, hi = -Infinity;
+    [M.total, roi].forEach(function (s) { if (s) for (i = 0; i < s.length; i++) { if (s[i] < lo) lo = s[i]; if (s[i] > hi) hi = s[i]; } });
+    lo = Math.min(0, lo); hi = hi * 1.08 || 1;
+    var e0 = e[0], e1 = e[e.length - 1], inv = !!reg.binding, a = inv ? Math.max(e0, e1) : Math.min(e0, e1), b = inv ? Math.min(e0, e1) : Math.max(e0, e1);
+    var X = function (v) { return L + (v - a) / (b - a) * pw; }, Y = function (v) { return T + ph - (v - lo) / (hi - lo) * ph; };
+    cv._lay = { L: L, pw: pw, e0: a, e1: b };
+    ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+    var wx0 = X(M.win[0]), wx1 = X(M.win[1]);
+    ctx.fillStyle = C.accent; ctx.globalAlpha = 0.18; ctx.fillRect(Math.min(wx0, wx1), T, Math.abs(wx1 - wx0), ph); ctx.globalAlpha = 1;
+    var line = function (s, col) {
+      ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.beginPath();
+      for (var k = 0; k < s.length; k++) { if (k) ctx.lineTo(X(e[k]), Y(s[k])); else ctx.moveTo(X(e[k]), Y(s[k])); }
+      ctx.stroke();
+    };
+    line(M.total, roi ? C.muted : C.accent);
+    if (roi) line(roi, C.accent);
+    ctx.strokeStyle = C.muted; ctx.lineWidth = 1; ctx.strokeRect(L, T, pw, ph);
+    ctx.fillStyle = C.muted; ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+    V.niceTicks(Math.min(a, b), Math.max(a, b), 6).forEach(function (t) { ctx.fillText(String(t), X(t), T + ph + 4); });
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    V.niceTicks(lo, hi, 5).forEach(function (t) { ctx.fillText(V.fmtY(t), L - 5, Y(t)); });
+    ctx.fillStyle = C.fg; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.fillText((reg.elabel || 'Binding Energy') + ' (' + (reg.eunits || 'eV') + ')', L + pw / 2, H - 1);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.fillText(roi ? 'grey: whole map · blue: area (' + M.count + ' px)' : 'whole map', L, 4);
+    ctx.save(); ctx.translate(12, T + ph / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText('counts per pixel', 0, 0); ctx.restore();
+  }
+  /* selecting a sample (or a map's own spectrum) brings up its picture / map */
+  function followSelection(sel) {
+    if (!sel) return;
+    var name = '', spec = null;
+    if (sel.kind === 'region') { spec = S.byId[sel.id]; name = spec ? spec.sample.name : ''; }
+    else { var sm = S.data.samples.filter(function (s) { return s.id === sel.id; })[0]; name = sm ? sm.name : ''; }
+    var cs = S.data.cameras || [], cur = currentCam();
+    if (cs.length && !(cur && cur.sample === name)) {
+      for (var i = 0; i < cs.length; i++) if (cs[i].sample === name) { S.camIdx = i; break; }
+    }
+    var maps = S.data.maps || [], cm = currentMap();
+    if (maps.length && S.tab === 'maps') {
+      if (spec && spec.reg.map) openMap(spec.reg.map);
+      else if (!(cm && cm.sample === name)) { var hit = maps.filter(function (x) { return x.sample === name; })[0]; if (hit) openMap(hit.id); }
+    }
+  }
+
+  /* ------------------------------------------------------------ download */
+  function downloadCsv() {
+    var specs = S.specs.filter(function (s) { return S.ticked.has(s.id); });
+    if (!specs.length) { $('notes').textContent = 'Tick some spectra first.'; return; }
+    saveText('spectra.csv', V.buildCsv(specs));
+  }
+
+  /* ---------------------------------------------------------------- setup */
+  function init(data) {
+    S.data = data;
+    S.specs = V.prepare(data);
+    S.specs.forEach(function (s) { S.byId[s.id] = s; });
+    (data.maps || []).forEach(function (m) { S.mapById[m.id] = m; });
+    (data.cameras || []).forEach(function (c) { S.camById[c.id] = c; });
+    data.cameras = data.cameras || []; data.maps = data.maps || [];
+    var d = data.details;
+    $('title').textContent = d.title || 'Experiment data browser';
+    document.title = $('title').textContent;
+    $('subtitle').textContent = [d.customer, d.reference, d.operator, d.date].filter(Boolean).join('  ·  ');
+    $('foot').textContent = 'Made with ' + data.tool + ' on ' + data.generated.replace('T', ' ') +
+      '. Self-contained: it needs no network and opens in any modern browser.';
+    buildTree();
+    buildTabs();
+    renderQuant(); renderFigures(); renderNotes(); renderMethods(); renderHolder(); renderMeta(); renderCameras(); renderMaps();
+    $('boot').hidden = true; $('app').hidden = false;
+    showTab('plot');
+    applyTheme();
+
+    $('filter').addEventListener('input', function (e) { S.filter = e.target.value; applyFilter(); });
+    $('untick').addEventListener('click', function () { tickOnly([]); });
+    $('mode').addEventListener('change', function (e) { S.mode = e.target.value; requestRender(); });
+    $('norm').addEventListener('change', function (e) { S.norm = e.target.value; requestRender(); });
+    $('offset').addEventListener('input', function (e) { S.offset = +e.target.value; requestRender(); });
+    $('scale').addEventListener('change', function (e) {
+      S.scale = e.target.value;
+      S.panels.forEach(function (p) { p.zoom = null; });
+      requestRender();
+    });
+    $('resetzoom').addEventListener('click', function () { S.panels.forEach(function (p) { p.zoom = null; }); requestRender(); });
+    $('csv').addEventListener('click', downloadCsv);
+    $('identify').addEventListener('click', function () {
+      S.ident.on = !S.ident.on;
+      $('identify').setAttribute('aria-pressed', S.ident.on ? 'true' : 'false');
+      document.body.classList.toggle('identifying', S.ident.on);
+      renderIdBox();
+    });
+    $('autolabel').addEventListener('change', function (e) { S.ident.auto = e.target.checked; requestRender(); });
+    $('nearbySecondary').addEventListener('change', function (e) { S.ident.secondary = e.target.checked; requestRender(); });
+    $('nearbyAuger').addEventListener('change', function (e) { S.ident.auger = e.target.checked; requestRender(); });
+    V.FIT_LAYERS.forEach(function (k) {
+      $('fit-' + k).addEventListener('change', function (e) { S.fit[k] = e.target.checked; requestRender(); });
+    });
+    $('zipall').addEventListener('click', downloadEverything);
+    $('levPrev').addEventListener('click', function () { stepLevel(-1, false); });
+    $('levNext').addEventListener('click', function () { stepLevel(1, false); });
+    $('levPlay').addEventListener('click', function () { togglePlay(); });
+    G.addEventListener('keydown', function (e) {
+      if (S.tab !== 'plot' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      var t = e.target && e.target.tagName;
+      if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA' || S.levels.length < 2) return;
+      if (e.key === 'ArrowLeft') { stepLevel(-1, false); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { stepLevel(1, false); e.preventDefault(); }
+    });
+    $('levelOn').addEventListener('change', function (e) { S.levelOn = e.target.checked; requestRender(); });
+    $('level').addEventListener('input', function (e) { S.levelIdx = +e.target.value; requestRender(); });
+    $('theme').addEventListener('change', function (e) { S.theme = e.target.value; applyTheme(); });
+    $('print').addEventListener('click', function () { G.print(); });
+    G.addEventListener('beforeprint', function () { S.printing = true; applyTheme(); render(); redrawTab(); });
+    G.addEventListener('afterprint', function () { S.printing = false; applyTheme(); });
+    if (G.matchMedia) {
+      var mq = G.matchMedia('(prefers-color-scheme: dark)');
+      if (mq.addEventListener) mq.addEventListener('change', function () { if (S.theme === 'auto') applyTheme(); });
+    }
+    if (G.ResizeObserver) {
+      new G.ResizeObserver(function () { requestRender(); redrawTab(); }).observe($('panels'));
+    } else G.addEventListener('resize', requestRender);
+    G.addEventListener('resize', function () { if (S.tab === 'cameras' || S.tab === 'maps') redrawTab(); });
+    /* start with something on screen: the first sample, all of its spectra */
+    if (data.samples.length) {
+      var first = data.samples[0];
+      setTicked(first.regions.map(function (r) { return r.id; }), true);
+    }
+  }
+  G.XPSViewerState = S;
+
+  var el = $('xps-data');
+  if (!el) return;
+  V.decode(el.textContent.trim()).then(init).catch(function (err) {
+    var b = $('boot'), old = typeof DecompressionStream === 'undefined';
+    b.className = 'boot error';
+    b.textContent = old
+      ? 'This browser is too old to open this page. Use Chrome or Edge 80+, Firefox 113+ or Safari 16.4+.'
+      : 'The data in this file could not be read (' + (err && err.message ? err.message : err) +
+        '). The file may have been damaged in transit: ask for a fresh copy.';
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : window);
+</script>
+</body>
+</html>
