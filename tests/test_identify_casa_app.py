@@ -132,6 +132,21 @@ class TestCasaLabelsAcrossMultipleSurveys(unittest.TestCase):
         self.assertIn("C 1s", labels)
         self.assertNotIn("O 1s", labels)
 
+    def test_predefined_regions_ignores_tree_selection(self):
+        """predefined_regions() must return every ticked CasaXPS-region
+        spectrum even when only one row is highlighted in the tree (the
+        real bug: the Identify dialog used to be handed sel_regions-scoped
+        regions, so its 'Label from CasaXPS regions' button only ever saw
+        one row's worth of spectra -- see test_identify_dialog.py for the
+        dialog-level regression test against workbook_ui._casa_label)."""
+        ws = self.ws
+        a_region = self.docs["a.vms"].regions[0]
+        ws.sel_regions = [a_region]
+
+        found = ws.predefined_regions()
+
+        self.assertEqual(len(found), 2, found)
+
 
 if __name__ == "__main__":
     unittest.main()

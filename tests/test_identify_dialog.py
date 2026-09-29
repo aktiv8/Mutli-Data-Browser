@@ -51,6 +51,8 @@ class TestIdentifyDialog(unittest.TestCase):
         self.addCleanup(patcher.stop)
         self.added = []
         self.markers = []
+        self.predefined = []
+        self.casa_labelled = []
 
     def fake_app(self):
         return SimpleNamespace(
@@ -65,10 +67,16 @@ class TestIdentifyDialog(unittest.TestCase):
             identify_add=self._fake_add,
             identify_remove=lambda r, m: None,
             identify_clear=lambda r: None,
-            identify_auto=lambda r: 0)
+            identify_auto=lambda r: 0,
+            predefined_regions=lambda: self.predefined,
+            identify_from_casa=self._fake_casa_label)
 
     def _fake_add(self, region, be, label):
         self.added.append((region.name, be, label))
+
+    def _fake_casa_label(self, region):
+        self.casa_labelled.append(region.name)
+        return 1
 
     def region(self, name="Fe 2p", hv=1486.6):
         return SimpleNamespace(name=name, photon_energy=hv)
@@ -148,6 +156,34 @@ class TestIdentifyDialog(unittest.TestCase):
         texts = [dlg.cand_list.get(i) for i in range(dlg.cand_list.size())]
         row = next(t for t in texts if "aFe2O3" in t)
         self.assertIn("[709.5–710.2]", row)
+
+    def test_casa_label_button_acts_on_every_predefined_region_not_just_selection(self):
+        """Regression: 'Label from CasaXPS regions' used to loop over
+        self.regions -- the dialog's own region list, which the caller
+        (Workspace.open_identify -> calibration_regions()) scopes to
+        whatever tree row is highlighted, not every ticked Survey. It must
+        act on app.predefined_regions() (every ticked CasaXPS-region
+        spectrum) instead, so it still labels spectra the dialog itself
+        was never given."""
+        region_a = self.region(name="C 1s")
+        region_b = self.region(name="O 1s")
+        self.predefined = [region_a, region_b]
+        dlg = self.dialog(regions=[region_a])   # as if only one row selected
+
+        dlg._casa_label()
+
+        self.assertEqual(self.casa_labelled, ["C 1s", "O 1s"])
+
+    def test_casa_button_enabled_state_follows_predefined_regions(self):
+        """The button's enabled state must reflect every ticked CasaXPS
+        region, not just the dialog's own (selection-scoped) region list."""
+        dlg = self.dialog(regions=[self.region()])
+        self.assertEqual(str(dlg.casa_btn.cget("state")), "disabled")
+
+        self.predefined = [self.region(name="Ti 2p")]
+        dlg._refresh_markers()
+
+        self.assertEqual(str(dlg.casa_btn.cget("state")), "normal")
 
 
 if __name__ == "__main__":

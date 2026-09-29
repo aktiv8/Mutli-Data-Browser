@@ -2036,6 +2036,15 @@ class Workspace:
                 if r.decodable and r.counts and viewdata.is_binding(r)]
         return regs[:60]
 
+    def predefined_regions(self):
+        """Every ticked binding-energy region carrying its own CasaXPS
+        'Regions' definitions -- used by 'Label from CasaXPS regions' so it
+        covers every plotted Survey, not just whatever row is highlighted in
+        the tree (that scoping is what calibration_regions()/sel_regions is
+        for; this button's job is different: label everything on screen)."""
+        return [r for r in self._ticked_regions()
+                if viewdata.is_binding(r) and r.fit and r.fit.regions]
+
     def calibration_label(self, r):
         p = self.region_parser.get(id(r))
         fid = self.file_ids.get(id(p), "") if p else ""

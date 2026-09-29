@@ -966,11 +966,10 @@ class IdentifyDialog(tk.Toplevel):
 
     def _casa_label(self):
         total = labelled = 0
-        for r in self.regions:
-            if r.fit and r.fit.regions:
-                n = self.app.identify_from_casa(r)
-                total += n
-                labelled += bool(n)
+        for r in self.app.predefined_regions():
+            n = self.app.identify_from_casa(r)
+            total += n
+            labelled += bool(n)
         self.hint.config(text=f"{total} region(s) labelled from CasaXPS "
                               f"across {labelled} spectrum/spectra.")
         self._refresh_markers()
@@ -981,8 +980,8 @@ class IdentifyDialog(tk.Toplevel):
             self.mark_list.insert(
                 "end", f"{m['label']:<12} @ {m['be']:.2f} eV"
                        f"{' (KE)' if m.get('kin') else ''}")
-        has_casa_any = any(r.fit and r.fit.regions for r in self.regions)
-        self.casa_btn.configure(state="normal" if has_casa_any else "disabled")
+        self.casa_btn.configure(
+            state="normal" if self.app.predefined_regions() else "disabled")
 
     def _remove(self):
         sel = self.mark_list.curselection()
