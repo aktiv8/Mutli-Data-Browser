@@ -1,0 +1,972 @@
+"""Generates the eXPoSe SpectraDeck user manual as a .docx file.
+
+Content is condensed and adapted from README.md into manual-style prose.
+Every place a screenshot would help the reader gets a bordered placeholder
+box plus a numbered caption, so finishing the manual is just: open it in
+Word, click a placeholder, Insert > Picture (or drag a screenshot in).
+
+Run with the interpreter that has python-docx installed:
+    python manual/build_manual.py
+"""
+
+import os
+
+from docx import Document
+from docx.enum.table import WD_ROW_HEIGHT_RULE
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Pt, RGBColor
+
+OUTPUT = os.path.join(os.path.dirname(__file__), "eXPoSe_SpectraDeck_Manual.docx")
+
+APP_NAME = "eXPoSe SpectraDeck"
+APP_VERSION = "1.0"
+
+ACCENT = RGBColor(0x2C, 0x3E, 0x50)  # matches pdfstyle.py's default navy accent
+GREY = RGBColor(0x80, 0x80, 0x80)
+
+fig_counter = {"n": 0}
+
+
+# ----------------------------------------------------------------------
+# low-level helpers
+# ----------------------------------------------------------------------
+
+def shade_cell(cell, hex_fill):
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), hex_fill)
+    tcPr.append(shd)
+
+
+def add_field(paragraph, instr_text, placeholder_text=""):
+    """Insert a raw OOXML field code (TOC, PAGE, NUMPAGES, ...) into a run."""
+    run = paragraph.add_run()
+    r = run._r
+
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = instr_text
+
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+
+    r.append(begin)
+    r.append(instr)
+    if placeholder_text:
+        t = OxmlElement("w:t")
+        t.text = placeholder_text
+        r.append(separate)
+        r.append(t)
+    else:
+        r.append(separate)
+    r.append(end)
+    return run
+
+
+def set_page_a4(doc, margin_cm=2.2):
+    section = doc.sections[0]
+    section.page_width = Cm(21.0)
+    section.page_height = Cm(29.7)
+    section.left_margin = Cm(margin_cm)
+    section.right_margin = Cm(margin_cm)
+    section.top_margin = Cm(1.8)
+    section.bottom_margin = Cm(1.8)
+
+
+def add_footer(doc):
+    section = doc.sections[0]
+    footer = section.footer
+    p = footer.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(f"{APP_NAME} — User Manual  ·  Page ")
+    run.font.size = Pt(9)
+    run.font.color.rgb = GREY
+    add_field(p, "PAGE", "1")
+    run2 = p.add_run(" of ")
+    run2.font.size = Pt(9)
+    run2.font.color.rgb = GREY
+    add_field(p, "NUMPAGES", "1")
+    for r in p.runs:
+        r.font.size = Pt(9)
+        r.font.color.rgb = GREY
+
+
+# ----------------------------------------------------------------------
+# content-building helpers
+# ----------------------------------------------------------------------
+
+def h1(doc, text):
+    doc.add_heading(text, level=1)
+
+
+def h2(doc, text):
+    doc.add_heading(text, level=2)
+
+
+def para(doc, text):
+    doc.add_paragraph(text)
+
+
+def bullets(doc, items):
+    for item in items:
+        doc.add_paragraph(item, style="List Bullet")
+
+
+def add_table(doc, headers, rows, widths_cm=None):
+    table = doc.add_table(rows=1, cols=len(headers))
+    table.style = "Table Grid"
+    table.autofit = False
+    hdr_cells = table.rows[0].cells
+    for i, text in enumerate(headers):
+        hdr_cells[i].text = ""
+        r = hdr_cells[i].paragraphs[0].add_run(text)
+        r.bold = True
+        r.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+        shade_cell(hdr_cells[i], "2C3E50")
+        if widths_cm:
+            hdr_cells[i].width = Cm(widths_cm[i])
+    for row in rows:
+        cells = table.add_row().cells
+        for i, text in enumerate(row):
+            cells[i].text = str(text)
+            if widths_cm:
+                cells[i].width = Cm(widths_cm[i])
+    doc.add_paragraph()
+    return table
+
+
+def add_figure(doc, caption, height_cm=6.0):
+    """A bordered, shaded placeholder box followed by a numbered caption.
+
+    Delete the placeholder text and Insert > Picture (or drag a screenshot
+    in) to finish it.
+    """
+    fig_counter["n"] += 1
+    n = fig_counter["n"]
+
+    table = doc.add_table(rows=1, cols=1)
+    table.style = "Table Grid"
+    table.autofit = False
+    row = table.rows[0]
+    row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+    row.height = Cm(height_cm)
+    cell = row.cells[0]
+    cell.width = Cm(16.6)
+    shade_cell(cell, "F2F2F2")
+
+    cell.paragraphs[0].text = ""
+    p1 = cell.add_paragraph()
+    p2 = cell.paragraphs[1] if len(cell.paragraphs) > 1 else cell.add_paragraph()
+    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p2.add_run(f"[ Insert screenshot here — {caption} ]")
+    run.italic = True
+    run.font.size = Pt(11)
+    run.font.color.rgb = GREY
+    cell.add_paragraph()
+
+    cap = doc.add_paragraph()
+    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    cap_run = cap.add_run(f"Figure {n}. {caption}")
+    cap_run.italic = True
+    cap_run.font.size = Pt(10)
+    doc.add_paragraph()
+
+
+def add_page_break(doc):
+    doc.add_page_break()
+
+
+# ----------------------------------------------------------------------
+# title page and table of contents
+# ----------------------------------------------------------------------
+
+def build_title_page(doc):
+    for _ in range(4):
+        doc.add_paragraph()
+    title = doc.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = title.add_run(APP_NAME)
+    r.bold = True
+    r.font.size = Pt(40)
+    r.font.color.rgb = ACCENT
+
+    subtitle = doc.add_paragraph()
+    subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = subtitle.add_run("User Manual")
+    r.font.size = Pt(20)
+    r.font.color.rgb = GREY
+
+    doc.add_paragraph()
+    version_p = doc.add_paragraph()
+    version_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = version_p.add_run(f"Covers version {APP_VERSION}  ·  Insert your report date here")
+    r.font.size = Pt(11)
+    r.font.color.rgb = GREY
+
+    doc.add_paragraph()
+    doc.add_paragraph()
+    table = doc.add_table(rows=1, cols=1)
+    table.style = "Table Grid"
+    table.autofit = False
+    row = table.rows[0]
+    row.height_rule = WD_ROW_HEIGHT_RULE.AT_LEAST
+    row.height = Cm(7.0)
+    cell = row.cells[0]
+    cell.width = Cm(16.6)
+    shade_cell(cell, "F2F2F2")
+    cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = cell.paragraphs[0].add_run(
+        "[ Insert your logo or a hero screenshot of the application here ]"
+    )
+    run.italic = True
+    run.font.color.rgb = GREY
+
+    add_page_break(doc)
+
+
+def build_toc(doc):
+    heading = doc.add_paragraph()
+    r = heading.add_run("Table of Contents")
+    r.bold = True
+    r.font.size = Pt(24)
+    r.font.color.rgb = ACCENT
+    doc.add_paragraph()
+
+    p = doc.add_paragraph()
+    add_field(
+        p,
+        'TOC \\o "1-2" \\h \\z \\u',
+        "Right-click here and choose “Update Field” "
+        "(or press F9) to build the table of contents.",
+    )
+    add_page_break(doc)
+
+
+# ----------------------------------------------------------------------
+# chapter content
+# ----------------------------------------------------------------------
+
+FORMATS_HEADERS = ["Format", "Extension", "Notes"]
+FORMATS_ROWS = [
+    ("VAMAS (ISO 14976)", ".vms, .vamas",
+     "From any vendor (Kratos/CasaXPS, PHI, SPECS, Thermo, ...). Handles "
+     "NORM/MAP/SDPSV modes, regular and irregular scans, and vendor comment blocks."),
+    ("Thermo Avantage text dump", ".avg (.avx text dump)",
+     "Multi-position scans give one region per position; a SnapMap loads as its "
+     "summed spectrum; camera images become pictures, not spectra."),
+    ("Thermo Avantage binary", ".vgd (.avx binary)",
+     "Reverse-engineered container; matches the .avg of the same data exactly."),
+    ("Thermo Avantage experiment", "a folder, or .VGX",
+     "Opens the whole experiment as one session: samples, analysis points, scans in "
+     "run order, camera images and SnapMaps (Chapter 22)."),
+    ("PHI / ULVAC-PHI MultiPak", ".spe", "Intensities are counts per second, as stored."),
+    ("Scienta Omicron SES", ".txt", "Detector/angle columns are summed to one spectrum."),
+    ("Kratos Vision", ".kal",
+     "Includes the transmission function. Files that do not record the X-ray "
+     "source stay on a kinetic-energy axis (a warning says so)."),
+    ("Kratos ESCApe", ".experiment", "Undocumented binary container; best-effort reverse engineering."),
+]
+
+LAUNCH_FLAGS = [
+    ("(no flag)", "Create the environment if needed, then start the application."),
+    ("--setup-only", "Build the environment but do not start the application."),
+    ("--reinstall", "Rebuild the environment from scratch."),
+    ("--check", "Report environment/tkinter/application-file status and exit."),
+]
+
+REPORT_SECTIONS = [
+    ("Cover page", "Logo, title, customer, reference, operator, date, and a cover picture."),
+    ("Contents", "The sections and their real page (slide) numbers; the PDF also gets bookmarks."),
+    ("Summary", "A short written overview of the experiment."),
+    ("Quantification", "Atomic percent from CasaXPS fits, by sample and by depth level."),
+    ("Figures", "One page (slide) per saved figure, drawn with its caption."),
+    ("Camera pictures and SnapMaps", "Sample-view photos, mosaics and element-map pages."),
+    ("Methods", "The automatically written methods paragraph."),
+    ("Energy calibration", "The binding-energy calibration statement."),
+    ("Acquisition metadata", "The tidied acquisition settings of every file."),
+    ("Data files", "A checksummed list of the original files (the audit trail)."),
+]
+
+SHORTCUTS = [
+    ("Space", "Tick or untick the selected row"),
+    ("F2", "Rename the selected sample or region"),
+    ("F11", "Focus mode — hide the side panels"),
+    ("Ctrl+S", "Save the workbook"),
+    ("▶ / ◀ →", "Play, or step, through the traces"),
+    ("Page Up / Page Down", "Previous / next page of panels"),
+    ("Home / End", "First / last page of panels"),
+    ("Shift + mouse wheel", "Slide the trace window (long stacks)"),
+    ("Esc", "Close the splash screen"),
+]
+
+
+def build_chapters(doc):
+    # 1. Introduction --------------------------------------------------
+    h1(doc, "1. Introduction")
+    para(doc,
+        f"{APP_NAME} is a desktop application for browsing, plotting and exporting "
+        "X-ray Photoelectron Spectroscopy (XPS) data from a wide range of instruments "
+        "and file formats. Open one or several files at once, tick the spectra you "
+        "want to see, and they are plotted immediately — spectra of the same core "
+        "level are stacked with a vertical offset on a shared panel, so they are easy "
+        "to compare. Metadata, camera images and a stage map sit alongside the plot; "
+        "spectra can be exported to CSV or VAMAS (ISO 14976), and a complete "
+        "experiment can be turned into a PDF report, a PowerPoint deck, a hand-over "
+        "ZIP, or a self-contained offline HTML browser for a customer or collaborator."
+    )
+    h2(doc, "Supported file formats")
+    add_table(doc, FORMATS_HEADERS, FORMATS_ROWS, widths_cm=[4.0, 3.2, 9.4])
+    para(doc,
+        "Files are recognised by their content, not only by their file extension, so "
+        "a renamed file still opens correctly. Every format that can be opened can "
+        "also be exported to CSV or VAMAS, which makes the application a converter "
+        "between instrument formats (for example, Thermo .avg to VAMAS)."
+    )
+    para(doc,
+        "Binding energy is calculated as photon energy minus kinetic energy "
+        "(BE = hν − KE) whenever the photon energy is known, and is not "
+        "charge-corrected until you apply a calibration (Chapter 11)."
+    )
+
+    # 2. Installation ----------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "2. Installation and quick start")
+    h2(doc, "Windows")
+    bullets(doc, [
+        "Install Python 3.8 or later from python.org and tick “Add python.exe "
+        "to PATH” during setup.",
+        "Double-click run.bat.",
+    ])
+    h2(doc, "macOS / Linux")
+    para(doc, "In a terminal, in the application folder:")
+    bullets(doc, ["chmod +x run.sh   (first time only)", "./run.sh"])
+    para(doc,
+        "On the first launch the application builds an isolated environment in "
+        "./.venv and installs the required packages (an internet connection is "
+        "needed once). Later launches start immediately, and nothing is installed "
+        "into your system Python. The launcher re-installs automatically if its "
+        "requirements change."
+    )
+    h2(doc, "Manual launch")
+    para(doc, "For more control, run the launcher directly: python launch.py "
+        "(python3 launch.py on macOS/Linux).")
+    add_table(doc, ["Flag", "Effect"], LAUNCH_FLAGS, widths_cm=[3.5, 13.1])
+    add_figure(doc, "The splash screen shown while the application starts.")
+
+    # 3. Workspace window --------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "3. The workspace window")
+    para(doc,
+        f"{APP_NAME} is a single window: a file tree on the left, a large plot in "
+        "the middle, and an information column on the right (a Details panel above "
+        "an Images / Stage map notebook). Drag any splitter to resize; sizes are "
+        "remembered between sessions."
+    )
+    add_figure(doc, "The workspace window: file tree, plot area and information column.")
+    h2(doc, "The ribbon")
+    add_table(doc, ["Tab", "Contains"], [
+        ("Home", "Open, workbook, save, export, save plot image."),
+        ("Analyse", "Calibrate, identify peaks, ISS/REELS, sputter settings, SnapMap, rename, notes."),
+        ("Report", "Details, figures, report PDF, slides, hand-over ZIP, HTML browser, PDF previews."),
+        ("View", "Theme, plot style, side panels, focus mode, expand/collapse, untick all."),
+    ], widths_cm=[3.0, 13.6])
+    para(doc,
+        "Every ribbon button is a shortcut for a menu command — the menu bar "
+        "still holds everything — and buttons that need spectra are dimmed "
+        "until a file is open. Double-click a tab, or use the arrow at the right, "
+        "to fold the ribbon down to just the tab row and give the plot the height "
+        "back; the chosen tab and fold state are remembered."
+    )
+    add_figure(doc, "The tabbed ribbon: Home, Analyse, Report and View.")
+    h2(doc, "Splash and About")
+    para(doc,
+        "A splash screen shows while the program starts; click it, or press Esc, "
+        "to close it early. Help → About shows the version, a link to the "
+        "project page, the libraries in use, and a Copy version info button for "
+        "bug reports."
+    )
+
+    # 4. Opening files -----------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "4. Opening and organising files")
+    para(doc,
+        "Use Open → Spectra files… to load several files of any "
+        "supported format, or Open → Folder… to load every recognised "
+        "file in a folder. Each file becomes a top-level node in the tree. A "
+        "folder from a Thermo Avantage experiment, or its .VGX file, opens as one "
+        "experiment instead (see Chapter 22)."
+    )
+    para(doc,
+        "If a selection or folder holds the same dataset as both .avg and .vgd, "
+        "you are asked which to import (.avg is pre-selected). Tick “Remember "
+        "my choice” to stop being asked; File → “Ask about .avg / "
+        ".vgd duplicates again” brings the question back."
+    )
+    para(doc,
+        "Every node that holds spectra has a tick box — click it, or press "
+        "Space. Ticking a sample, region folder or whole file ticks everything "
+        "beneath it; a partly-ticked parent shows a bar. Filter narrows the tree "
+        "without losing your ticks. Right-click a row to tick or untick a whole "
+        "subtree, export from there down, or remove a file."
+    )
+    add_figure(doc, "The file tree with several spectra ticked and their colour swatches.")
+
+    # 5. Plotting spectra ----------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "5. Plotting spectra")
+    para(doc,
+        "Ticked spectra are plotted at once, and the tree is the legend. Spectra "
+        "sharing an element name (every C 1s, across samples and files) are drawn "
+        "on one panel, stacked with a vertical offset; other elements get their "
+        "own panels. A ticked box in the tree is a swatch in the trace's colour: "
+        "one colour per file when several files are loaded, otherwise one per "
+        "sample, and a fading ramp of one hue for long stacks such as depth "
+        "profiles. Stacked panels have no y-axis ticks — a scale bar gives "
+        "the intensity scale, and each trace is labelled at its right-hand end. "
+        "The selected spectrum is drawn heavier than the rest."
+    )
+    h2(doc, "View controls")
+    add_table(doc, ["Control", "What it does"], [
+        ("Group by", "Element name; Energy range (spectra whose ranges overlap by at "
+         "least half share a panel); or Element, per sample / per file."),
+        ("Normalise", "None; Max = 1; Area = 1; or At cursor — click a panel to set "
+         "an energy, and every spectrum in it is scaled to match there."),
+        ("Offset", "The gap between stacked traces (0 overlays them). Reverse stack "
+         "flips the order."),
+        ("View", "Stack (the default); Waterfall 3D (a rotatable 3-D plot); or "
+         "Heatmap (intensity as colour, with a colour bar)."),
+        ("Z axis", "What the trace axis shows in a waterfall or heatmap: Auto (etch "
+         "time, else etch level, else acquisition time, else trace order), or pick one."),
+        ("Colour", "Theme default, or a named scale (Viridis, Plasma, Magma, …) "
+         "applied to the heatmap and spread across a stack's traces; Reverse flips it."),
+        ("Axes", "Colour of the axis lines, ticks and labels: Theme default, Black, "
+         "White, or a colour you choose."),
+        ("Energy", "Binding or Kinetic (KE = hν − BE, when the photon energy "
+         "is known); KE top axis mirrors binding energy along the top as kinetic energy."),
+    ], widths_cm=[3.0, 13.6])
+    add_figure(doc, "A stack view: several spectra of one core level, offset vertically.")
+    add_figure(doc, "A Waterfall 3D view of a depth profile.")
+    add_figure(doc, "A Heatmap view of a depth profile, with its colour bar.")
+
+    # 6. Paging ---------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "6. Paging, scrolling and playback")
+    para(doc,
+        "Panels per page chooses how many panels are shown at once (Auto, 1, 2, 4, "
+        "6, 9, 12 or 16); scroll between pages with the mouse wheel, the scrollbar "
+        "beside the plot, Page Up / Page Down, Home / End, or the Prev / Next "
+        "buttons."
+    )
+    para(doc,
+        "Traces per panel is either All or a fixed number. For a long stack (say a "
+        "200-level depth profile) each panel then shows a window of that many "
+        "traces; slide the window with Shift + mouse wheel or the Traces slider "
+        "under the plot."
+    )
+    para(doc,
+        "The ▶ Play button, or the ◀ / → keys, step through the "
+        "traces in view — set Traces to 1 to step through a depth profile one "
+        "level at a time."
+    )
+
+    # 7. Selecting --------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "7. Selecting a spectrum: Details, Images and the Stage map")
+    para(doc,
+        "Ticking a row plots it; selecting a row (rather than ticking it) fills "
+        "the Details panel with the sample, acquisition and region information "
+        "(all of it copyable), and the Images / Stage map tabs, which only appear "
+        "when the loaded files carry images or stage positions."
+    )
+    add_figure(doc, "The Details panel for a selected spectrum.")
+    para(doc,
+        "Selecting several rows at once (or a whole sample or file) tidies "
+        "Details: a setting that is the same for all of them, such as photon "
+        "energy or lens mode, is stated once; settings that differ are grouped by "
+        "value. The metadata PDF (Chapter 14) does the same for each sample."
+    )
+    h2(doc, "Holder photo calibration")
+    para(doc,
+        "Overlaying analysis positions on a photo needs a one-time Calibrate… "
+        "step. The calibration panel works live: tick Flip X / Flip Y, nudge the "
+        "markers with the arrow keys, rotate or spread them, or type exact values "
+        "(image centre in millimetres, millimetres per pixel, rotation) and watch "
+        "the markers move onto the samples. The calibration is saved in the "
+        "workbook, and the last one used seeds new workbooks. Markers carry a "
+        "halo so their names stay readable over any photo; click a marker, on the "
+        "photo or on the Stage map, to select that sample in the tree."
+    )
+    add_figure(doc, "The calibration panel, with markers placed on the sample photo.")
+
+    # 8. Themes / layout ---------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "8. Colour themes and layout")
+    para(doc,
+        "Six colour themes are built in: Light (the default), Dark (the plot sits "
+        "recessed below the chrome, like an instrument screen), Midnight, "
+        "Solarized Light, High contrast, and System (the native operating-system "
+        "look). Change the theme from the Theme box or View → Colour theme; "
+        "your choice is remembered. Every theme has its own colour-blind-safe "
+        "data palette and meets WCAG AA text contrast. PDFs always print on white."
+    )
+    para(doc,
+        "The Files and Details buttons in the toolbar show or hide the side "
+        "panels, and Focus (F11) hides both so the plot fills the window. Hover "
+        "any control for a short explanation."
+    )
+    add_figure(doc, "The same experiment shown in the Light and Dark themes.")
+
+    # 9. PDF preview -------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "9. PDF preview and saving plot images")
+    para(doc,
+        "Preview spectra and Preview metadata show the PDF inside the "
+        "application, with page navigation, zoom, Save as…, and Open in "
+        "viewer. The spectra preview lets you change panels per page, portrait "
+        "or landscape orientation, and whether to use only the traces currently "
+        "in view; Save as… writes exactly what you see. Without PyMuPDF "
+        "installed, the PDF opens in your default viewer instead."
+    )
+    para(doc,
+        "Save plot image… writes the current view as PNG, SVG or PDF, at "
+        "any size and resolution."
+    )
+
+    # 10. Exporting --------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "10. Exporting spectra")
+    para(doc,
+        "Export → Ticked spectra to CSV / VAMAS writes exactly what is "
+        "currently ticked. Export → Regions and levels… opens a dialog "
+        "(pre-set to your ticks) for picking individual regions or depth-profile "
+        "levels. VAMAS output is CasaXPS-compatible: a kinetic-energy abscissa "
+        "with Intensity and the spectrometer's Transmission function as a "
+        "corresponding variable (toggle it off in the dialog if you do not want "
+        "it)."
+    )
+    para(doc,
+        "Export → Metadata to CSV / PDF saves the per-sample acquisition "
+        "metadata; with several files open, select a row belonging to the file "
+        "you want first."
+    )
+
+    # 11. Editing / calibration ---------------------------------------------
+    add_page_break(doc)
+    h1(doc, "11. Editing, calibration and element labels")
+    para(doc,
+        "Nothing in this chapter changes the instrument files: your edits are "
+        "stored beside the data, in the workbook, and applied when you plot, "
+        "export or build a report."
+    )
+    h2(doc, "Rename and notes")
+    para(doc,
+        "Press F2, or right-click a sample or region, to give it a display name; "
+        "the original name is always kept and shown in Details. Notes… adds "
+        "free text to a sample or region."
+    )
+    h2(doc, "Edit metadata")
+    para(doc,
+        "Double-click a value in Details (or right-click it for Edit value, Add "
+        "field, or Reset) to change it. Edited values carry a pencil mark and "
+        "flow into the PDF, PowerPoint and CSV exports."
+    )
+    h2(doc, "Calibrate binding energy")
+    para(doc,
+        "Tools → Calibrate binding energy…: pick a reference spectrum, "
+        "find the peak (or click it on the plot), choose the reference (C 1s "
+        "284.8 eV, Au 4f7/2 83.95 eV, Ag, Cu, a Fermi edge, or your own value), "
+        "and apply the shift to a region, a sample, or a whole file. Plots, CSV "
+        "and VAMAS exports use the shifted energies (VAMAS carries the shift "
+        "through the source energy, so kinetic energies are unchanged), and the "
+        "report gets a calibration statement automatically."
+    )
+    h2(doc, "Identify peaks")
+    para(doc,
+        "Tools → Identify peaks…: click a survey peak to list candidate "
+        "element lines, add the one you want as a marker, or use Auto-label to "
+        "label every peak at once. Markers follow binding-energy calibrations and "
+        "the kinetic-energy axis. Line positions are approximate typical values "
+        "— chemical shifts of a few eV are normal."
+    )
+    add_figure(doc, "The Identify peaks dialog, with candidate element lines listed.")
+    h2(doc, "Cursor read-out and other comforts")
+    para(doc,
+        "The status bar always shows the binding energy, kinetic energy and "
+        "intensity under the pointer. Other comforts: File → Open recent, "
+        "drag files or folders onto the window, a progress box with Cancel when "
+        "loading many files, and the play/step controls from Chapter 6."
+    )
+
+    # 12. Workbooks --------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "12. Experiment workbooks (.xpscontainer)")
+    para(doc,
+        "The Workbook menu saves everything about an experiment in one file "
+        "that you can reopen at any time (or double-click, or pass on the "
+        "command line). A workbook holds:"
+    )
+    bullets(doc, [
+        "The original data files, byte-for-byte, with SHA-256 hashes as "
+        "provenance; files are re-read on opening, so reader improvements apply "
+        "to old workbooks.",
+        "The look: what is ticked, the view, grouping, normalisation, energy "
+        "scale, colour scale, axis colour, panels/traces and any “At "
+        "cursor” energies.",
+        "Details and notes — title, customer, reference, operator, date, a "
+        "free-text summary and a letterhead logo.",
+        "Figures — any number of named looks with captions.",
+        "A snapshot of the acquisition metadata and a preview image.",
+    ])
+    para(doc,
+        "Save with Ctrl+S; the title bar shows an asterisk for unsaved changes, "
+        "and closing the application asks whether to save. The file is a ZIP "
+        "archive of JSON and the original files, so it can be inspected with "
+        "any zip tool and never runs code."
+    )
+    add_figure(doc, "The Workbook Details dialog.")
+    para(doc,
+        "Metadata layout: settings that are the same for every region (photon "
+        "energy, lens mode, …) are stated once at the top, settings constant "
+        "within a sample sit on that sample's line, and the rest is a compact "
+        "scan table. A depth profile collapses to one row (e.g. “levels "
+        "0–60, etch 0–1800 s, 30 s steps”) only where that "
+        "reproduces every level exactly; otherwise a per-level table is used."
+    )
+
+    # 13. Report generator ---------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "13. The Report generator")
+    para(doc,
+        "Workbook → Report generator… (or Report ▸ Generator on "
+        "the ribbon) is where you say what a report contains and in what "
+        "order. The same choice is used for the PDF report, the PowerPoint "
+        "deck, the previews and the hand-over package; it is remembered and "
+        "saved with the workbook."
+    )
+    add_table(doc, ["Section", "Contents"], REPORT_SECTIONS, widths_cm=[4.2, 12.4])
+    h2(doc, "The cover")
+    para(doc,
+        "The Cover tab offers five designs drawn from one accent colour "
+        "(spectrum ribbon, band, minimal, your own data, peak map), a picture "
+        "of your own (or one dropped into assets/covers/), or no picture, in "
+        "one of six accent colours or a colour you choose. Presets never change "
+        "the cover."
+    )
+    h2(doc, "Presets")
+    para(doc,
+        "Built-in presets (Everything, Customer report, Quick look, Audit "
+        "trail) and your own saved presets fill in the ticks in one go. "
+        "Sections with many items (figures, pictures, files, samples) open "
+        "with a double-click, and All / None ticks every item of the selected "
+        "section."
+    )
+    add_figure(doc, "The Report generator dialog: sections, order and options.")
+    add_figure(doc, "A sample cover page design.")
+
+    # 14. PDF report and deck -------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "14. The PDF report and PowerPoint deck")
+    para(doc,
+        "Contents lists every section with its real page (or slide) number; "
+        "the PDF also gets bookmarks. Slides get a divider slide before a long "
+        "section, and every slide is numbered “n of N”."
+    )
+    h2(doc, "Quantification")
+    para(doc,
+        "Atomic percent comes from CasaXPS peak-fit areas and sensitivity "
+        "factors: one table per sample (with chemical states), or, for a depth "
+        "profile, a chart and a table by level. A region fitted in more than "
+        "one spectrum at a level is counted once — the dedicated scan, not "
+        "the survey — and this is stated on the page. An element counted "
+        "from two different lines is flagged. No transmission correction is "
+        "applied unless you switch it on. Each sample can be ticked separately "
+        "in the Report generator."
+    )
+    h2(doc, "Camera pictures, SnapMaps and mosaics")
+    para(doc,
+        "When the loaded files include camera images (an Avantage experiment), "
+        "overlapping pictures can also be stitched into one large mosaic; a "
+        "note on the page says how many overlaps were matched. Camera pictures "
+        "appear six to a report page (three to a slide), each with the analysis "
+        "points that fall in it and a scale bar; one page or slide is added per "
+        "SnapMap site, showing the camera picture beside a grid of element maps."
+    )
+    h2(doc, "Methods text")
+    para(doc,
+        "Workbook → Details… has a Methods box holding a paragraph "
+        "written automatically from what your files record: instrument and "
+        "source, pass energies, step sizes, dwell times, lens mode, "
+        "neutraliser, sputtering, depth profiles, dates and the calibration "
+        "statement. A setting a file does not record is left out, never "
+        "guessed. Edit the text to use your own wording; Regenerate brings the "
+        "automatic text back."
+    )
+    add_figure(doc, "A sample page from the PDF report.")
+    add_figure(doc, "A sample quantification table.")
+
+    # 15. Hand-over ----------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "15. Hand-over package (ZIP)")
+    para(doc,
+        "Workbook → Hand-over package (ZIP)… puts a whole experiment "
+        "into one ZIP file for a customer or collaborator. It contains the "
+        "report PDF, the methods text, one VAMAS and one CSV file per sample "
+        "(with your display names and energy shifts applied), the metadata as "
+        "CSV, every saved figure as a PNG, optionally the interactive data "
+        "browser and the workbook itself, a README.txt listing everything "
+        "included, and SHA256SUMS.txt (checked with sha256sum -c "
+        "SHA256SUMS.txt). Tick what you want to include in the dialog."
+    )
+
+    # 16. HTML browser ---------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "16. Interactive HTML data browser")
+    para(doc,
+        "Workbook → Interactive data browser (HTML)… writes one "
+        "self-contained .html file that anyone can open in a modern browser, "
+        "offline, with nothing to install. It lets the reader filter the "
+        "sample list, tick spectra to plot them (stacked or overlaid, "
+        "normalised, binding or kinetic energy, drag to zoom, hover for "
+        "values), step through depth levels one at a time, read the "
+        "acquisition metadata, notes and methods, look at your saved figures "
+        "with their captions, see the holder photo with the analysis "
+        "positions, and download spectra as CSV. It has light, dark and print "
+        "styles, and makes no network requests."
+    )
+    para(doc,
+        "For an Avantage experiment it also holds a Camera images tab (each "
+        "picture with its analysis points and a scale bar) and a SnapMaps tab "
+        "(the same viewer as in the application: drag the energy window, drag "
+        "a region for its spectrum, switch element, choose a colour scale, "
+        "overlay on the camera image, and download the map or spectra as CSV)."
+    )
+    add_figure(doc, "The interactive HTML data browser, opened in a web browser.")
+
+    # 17. Plot style -----------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "17. Plot style")
+    para(doc,
+        "View → Plot style… (or the Style… button under the plot "
+        "controls) opens one dialog for how plots look: font and sizes, line "
+        "width and style, markers, fill under traces, frame, tick direction "
+        "and length, grid, panel titles and axis labels, y units, energy and "
+        "intensity ranges, trace labels, and the size and resolution of saved "
+        "images."
+    )
+    para(doc,
+        "Changes apply at once and reach the screen, PDFs, slides and Save "
+        "plot image…. Pick a preset (Journal – compact, Presentation "
+        "– large, Data points, Filled peaks, …) or save your own. The "
+        "current style is remembered between sessions, saved in the workbook, "
+        "and stored with each saved figure, so a figure keeps its own look in "
+        "the report even after you change the live plot."
+    )
+    add_figure(doc, "The Plot style dialog.")
+
+    # 18. Sputter -----------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "18. Sputter settings, depth and fluence")
+    para(doc,
+        "Tools → Sputter settings… holds the ion-gun settings of each "
+        "depth profile: ion and charge state, energy, current, raster size and "
+        "etch rate. These are prefilled wherever the file states them; nothing "
+        "is guessed, so a bare number whose unit is unknown is left for you to "
+        "fill in."
+    )
+    para(doc,
+        "With these settings recorded, the Z axis of a waterfall or heatmap "
+        "can show Depth (nm) (etch rate × etch time) or Fluence "
+        "(ions/cm², from current, time, charge and raster area). Asking "
+        "for a value that cannot be worked out tells you exactly what to enter "
+        "and where. The settings are kept per sample in the workbook and appear "
+        "in the metadata and the methods text."
+    )
+
+    # 19. VAMAS metadata --------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "19. VAMAS that keeps its metadata")
+    para(doc,
+        "VAMAS has no fields for most acquisition details, so a file exported "
+        "from this application carries them in its comments instead: lens "
+        "mode, aperture, neutraliser, ion gun, dates, stage position, depth "
+        "level and etch time, sputter settings, your notes and any energy "
+        "shift. Other software simply shows this as plain text. Reading such a "
+        "file back into the application restores all of it, while values VAMAS "
+        "stores exactly (photon energy, pass energy, dwell, step) are never "
+        "taken from the text. Files without this information read exactly as "
+        "before."
+    )
+
+    # 20. CasaXPS fits --------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "20. CasaXPS fits")
+    para(doc,
+        "A VAMAS file saved from CasaXPS after peak fitting carries the fit in "
+        "its comments. Opening such a file shows the fit under any panel that "
+        "holds one spectrum: tick Components, Envelope and/or Background in "
+        "the Fit row under the plot controls. A depth profile keeps one fit "
+        "per level."
+    )
+    para(doc,
+        "CasaXPS's own binding-energy charge correction is carried over "
+        "automatically and appears in Details (“BE calibration "
+        "(CasaXPS)”) and in the report's calibration statement."
+    )
+    para(doc,
+        "GL and SGL peak shapes, and Shirley, linear and the two-parameter "
+        "Tougaard backgrounds, are computed exactly. Other shapes (LA, LF and "
+        "some Tougaard variants) are reconstructions, checked against real "
+        "CasaXPS fits to within a few percent of peak height; where a shape "
+        "cannot be reproduced, the components are drawn without an envelope "
+        "and the status bar says so. The fit itself is read-only — fit "
+        "your data in CasaXPS, then review it here."
+    )
+    add_figure(doc, "A fitted spectrum with its components, envelope and background shown.")
+
+    # 21. ISS/REELS -------------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "21. ISS and REELS")
+    para(doc,
+        "Tools → ISS / REELS… works on the one spectrum you have "
+        "ticked, on whatever energy axis it uses."
+    )
+    h2(doc, "ISS peaks")
+    para(doc,
+        "Give the ion (H⁺, He⁺, Ne⁺, Ar⁺), the beam energy "
+        "(read from the file where it is recorded) and the scattering angle "
+        "for your instrument. Click a peak on the plot and the elements that "
+        "could scatter the ion to that energy are listed, nearest first, from "
+        "the single-collision scattering model. Add marker labels the peak, or "
+        "type the elements you expect and Mark places each at its predicted "
+        "energy. ISS markers sit at kinetic energy, so a binding-energy "
+        "calibration never moves them."
+    )
+    add_figure(doc, "The ISS dialog, with candidate elements listed for a clicked peak.")
+    h2(doc, "REELS band gap")
+    para(doc,
+        "Find the elastic peak (automatically, by typing it, or by clicking "
+        "it), then click two points on the rising edge of the loss spectrum. "
+        "The straight line through them meets the baseline at the band gap, "
+        "which is drawn on the plot and stored in the workbook and the "
+        "spectrum's metadata. Points that do not give a positive gap are "
+        "explained rather than stored as a result."
+    )
+    add_figure(doc, "The REELS band-gap construction: elastic peak, tangent and baseline.")
+
+    # 22. Avantage / SnapMap -----------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "22. Avantage experiments, camera images and SnapMaps")
+    para(doc,
+        "Thermo Avantage writes one .VGD file per scan into a folder tree "
+        "beside its .VGX file. Open → Folder… on that folder (or on "
+        "the .VGX, or on a single sample folder inside it) loads everything as "
+        "one experiment, with a progress box you can cancel. The tree runs "
+        "experiment → sample → analysis point → scan, in the "
+        "order the .VGX file says they were run."
+    )
+    para(doc,
+        "Camera images: the sample-view pictures Avantage takes at each point "
+        "carry their own stage calibration, so no manual calibration is "
+        "needed. Select a point and its picture appears in the Images tab, "
+        "with the analysis points that fall inside it, the outline of any "
+        "SnapMap taken there, and a scale bar. Click a point in the picture to "
+        "select it in the tree."
+    )
+    para(doc,
+        "SnapMaps (a spectrum at every pixel) appear as one region each, "
+        "marked (SnapMap). Double-click one to open the viewer: drag across "
+        "the spectrum to choose the energy window (Remove background takes a "
+        "sloping baseline off first), drag a box or click a pixel on the map "
+        "to see that area's spectrum, lay the map over the camera picture, and "
+        "save the picture, the map values, or the spectra."
+    )
+    add_figure(doc, "The SnapMap viewer: the element map and the selected area's spectrum.")
+
+    # 23. Depth profiles -------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "23. Depth profiles")
+    para(doc,
+        "Sputter depth profiles are detected automatically, either from a "
+        "Kratos file's own instrument record or from a repeated region in a "
+        "VAMAS file with an etch-time variable. Ticking a region folder puts "
+        "every level on one panel. The export dialog then offers region-type "
+        "checkboxes and level selection (All, First N, Every Nth, or a range)."
+    )
+    para(doc,
+        "Level 0 is the surface at time zero, followed by the cumulative "
+        "sputter time. Etch level and etch time appear in the metadata "
+        "CSV/PDF and the Details panel, and are written into each VAMAS block "
+        "as comment lines."
+    )
+
+    # 24. Troubleshooting -------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "24. Troubleshooting and notes")
+    bullets(doc, [
+        "tkinter is part of Python but needs an extra OS package on some "
+        "Linux systems: sudo apt-get install python3-tk (Debian/Ubuntu), or "
+        "sudo dnf install python3-tkinter (Fedora). The launcher reports "
+        "whether it is missing.",
+        "Settings (theme, panel sizes, view options, plot style and your "
+        "presets) are saved in ~/.spectradeck_config.json. The holder-photo "
+        "calibration lives in each workbook; the last one used seeds new "
+        "workbooks via ~/.spectradeck_calib.json.",
+        "Binding energy is photon energy minus kinetic energy and is not "
+        "charge-corrected, so peaks on a charging sample may sit a few eV off "
+        "until you calibrate (Chapter 11).",
+        "The .experiment, .vgd and .kal readers are reverse-engineered from "
+        "undocumented formats. They have been checked against vendor exports "
+        "of the same data, but cross-check anything critical against the "
+        "vendor's own software.",
+        "If a .experiment file was transferred as text rather than binary it "
+        "can be silently corrupted; the application detects this and refuses "
+        "to export noise.",
+        "To test the application against your own data, set the XPS_CORPUS "
+        "environment variable to a folder of spectra files and run the test "
+        "suite to check that every recognised file loads.",
+    ])
+
+    # Appendices ------------------------------------------------------------
+    add_page_break(doc)
+    h1(doc, "Appendix A: Supported file formats")
+    add_table(doc, FORMATS_HEADERS, FORMATS_ROWS, widths_cm=[4.0, 3.2, 9.4])
+
+    add_page_break(doc)
+    h1(doc, "Appendix B: Keyboard shortcuts")
+    add_table(doc, ["Shortcut", "Action"], SHORTCUTS, widths_cm=[5.0, 11.6])
+
+
+# ----------------------------------------------------------------------
+# main
+# ----------------------------------------------------------------------
+
+def main():
+    doc = Document()
+    set_page_a4(doc)
+    add_footer(doc)
+
+    style = doc.styles["Normal"]
+    style.font.name = "Calibri"
+    style.font.size = Pt(11)
+
+    build_title_page(doc)
+    build_toc(doc)
+    build_chapters(doc)
+
+    doc.save(OUTPUT)
+    print(f"Wrote {OUTPUT}")
+    print(f"Figures placed: {fig_counter['n']}")
+
+
+if __name__ == "__main__":
+    main()
