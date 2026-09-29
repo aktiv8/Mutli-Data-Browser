@@ -779,6 +779,8 @@ class Workspace:
         viewm.add_command(label="Collapse all",
                           command=lambda: self._expand(False))
         viewm.add_command(label="Untick all", command=self.untick_all)
+        viewm.add_command(label="Tick matching regions everywhere",
+                          command=self._tick_matching)
         viewm.add_separator()
         viewm.add_command(label="Show/hide file tree",
                           command=lambda: self._toggle_pane("tree"))
@@ -2591,6 +2593,26 @@ class Workspace:
         self._refresh_boxes()
         self._schedule_render(reset_page=True)
 
+    def _tick_matching(self, row=None):
+        """Tick every region sharing the given row's name, in every loaded file."""
+        if row is None:
+            sel = self.tree.selection()
+            row = sel[0] if sel else self.tree.focus()
+        if not row:
+            return
+        regs = self._regions_of([row])
+        keys = {normalise_name(r.name) for r in regs}
+        if len(keys) != 1:
+            return
+        key = next(iter(keys))
+        ids = {id(r) for p in self.docs for r in regions_under(p.tree)
+               if r.decodable and r.counts and normalise_name(r.name) == key}
+        if not ids:
+            return
+        self.checked |= ids
+        self._refresh_boxes()
+        self._schedule_render()
+
     def _on_tree_click(self, event):
         iid = self.tree.identify_row(event.y)
         if not iid or iid not in self.leaf_ids:
@@ -2650,6 +2672,12 @@ class Workspace:
                              command=lambda: self._toggle(sel, True))
             menu.add_command(label=f"Untick ({n})",
                              command=lambda: self._toggle(sel, False))
+            names = {normalise_name(r.name) for r in regions}
+            if len(names) == 1:
+                match_name = regions[0].name
+                menu.add_command(
+                    label=f"Tick every '{match_name}' region (all samples)…",
+                    command=lambda: self._tick_matching(row))
             menu.add_separator()
             exp = self._menu(menu)
             exp.add_command(label="CSV…",

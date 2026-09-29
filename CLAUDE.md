@@ -132,6 +132,8 @@ Work goes in milestones that are each tested and committed on their own; **check
 
 **Planned or open, not implemented** (nothing here is started; ask before picking one up):
 
+- *Bugs*
+  - **Peak identification** (Tools → Identify peaks…) doesn't always plot the right candidate lines: expected lines sometimes don't appear, and a line can be mislabelled even after picking the correct element (e.g. an O 1s peak labelled as a different element). Not yet investigated.
 - *Quantification*
   - A **desktop quantification view** on top of `quant.py` (the reports and the HTML page have one; the app window does not).
   - **Per-region include / exclude in the report** (today: the dedicated-scan rule, an element with a known preferred line — `_PREFERRED_LINE` — counts once and says so, one without still counts from both lines with a note, and only whole samples can be left out). Whether every element should count once regardless (guessing a preference for elements not in the curated table) is still undecided — deliberately not attempted, since a wrong guess there would silently misquantify.
