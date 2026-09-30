@@ -395,9 +395,16 @@ def match_to_regions(blocks, regions):
     point count. Either step reports (never guesses) when more than one
     candidate remains. Only regions that already carry a native CasaXPS fit
     are considered (an unfitted repeat scan is reported, not synthesized).
-    Component alignment is by BE-position cost (nearest-first, greedy),
-    all-or-nothing per region: if even one fitted component has no matching
-    CSV column, that region is skipped and the missing one(s) are named."""
+    When a region has several named CasaXPS "regions" (``FitRegion``s) that
+    together share one wider acquired scan (e.g. a combined "S2p B1s Scan"
+    fitted as separate "S 2p" and "P 2s" CasaXPS regions on one spectrum,
+    or a Survey's several narrow background windows), every one of that
+    region's own windows that falls inside the block's BE range is aligned
+    and reported separately -- one CSV block can yield several
+    :class:`MatchResult`\\ s. Component alignment is by BE-position cost
+    (nearest-first, greedy), all-or-nothing per (region, FitRegion): if even
+    one fitted component has no matching CSV column, that one is skipped
+    and the missing one(s) are named."""
     import numpy as np
 
     report = MatchReport()
@@ -418,7 +425,7 @@ def match_to_regions(blocks, regions):
                        "document"))
             continue
 
-        region, fit_region = None, None
+        region = None
 
         if block.ke is not None and block.counts is not None:
             bke = [v for v in block.ke if v is not None]
@@ -491,103 +498,118 @@ def match_to_regions(blocks, regions):
                 reason="region has no CasaXPS fit to attach curves to"))
             continue
 
-        if fit_region is None:
-            frs = region.fit.regions
-            if len(frs) == 1:
-                fit_region = frs[0]
+        frs = region.fit.regions
+        if len(frs) == 1:
+            fit_region_list = [frs[0]]
+        else:
+            b_be = [v for v in block.be if v is not None]
+            b_lo, b_hi = min(b_be), max(b_be)
+            hits = [fr for fr in frs
+                    if abs((region.photon_energy - fr.end_ke) - b_lo) <= 0.3
+                    and abs((region.photon_energy - fr.start_ke) - b_hi)
+                    <= 0.3]
+            if len(hits) == 1:
+                fit_region_list = hits
+            elif len(hits) > 1:
+                report.results.append(MatchResult(block=block,
+                    region=region,
+                    reason=f"ambiguous: {len(hits)} of the region's own "
+                           "fit windows match this CSV block's BE range"))
+                continue
             else:
-                b_be = [v for v in block.be if v is not None]
-                b_lo, b_hi = min(b_be), max(b_be)
-                hits = [fr for fr in frs
-                        if abs((region.photon_energy - fr.end_ke) - b_lo) <= 0.3
-                        and abs((region.photon_energy - fr.start_ke) - b_hi)
-                        <= 0.3]
-                if len(hits) == 1:
-                    fit_region = hits[0]
-                elif not hits:
+                # No single window spans the WHOLE block -- but several
+                # named regions can share one wider acquired scan (e.g. a
+                # combined "S2p B1s Scan" fitted as separate "S 2p" and
+                # "P 2s" CasaXPS regions on one spectrum, or a Survey with
+                # several narrow background windows): take every one of the
+                # region's own windows that falls *inside* this block's BE
+                # range, and align each separately below instead of forcing
+                # a single pick.
+                contained = [fr for fr in frs
+                             if (region.photon_energy - fr.end_ke)
+                             >= b_lo - 0.3
+                             and (region.photon_energy - fr.start_ke)
+                             <= b_hi + 0.3]
+                if not contained:
                     report.results.append(MatchResult(block=block,
                         region=region,
-                        reason=f"region has {len(frs)} separate CasaXPS fit "
-                               "windows and none spans this CSV block's "
-                               "own BE range (e.g. a Survey with several "
-                               "narrow background windows)"))
+                        reason=f"region has {len(frs)} separate CasaXPS "
+                               "fit windows and none spans this CSV "
+                               "block's own BE range (e.g. a Survey with "
+                               "several narrow background windows)"))
                     continue
-                else:
-                    report.results.append(MatchResult(block=block,
-                        region=region,
-                        reason=f"ambiguous: {len(hits)} of the region's "
-                               "own fit windows match this CSV block's BE "
-                               "range"))
-                    continue
+                fit_region_list = contained
 
         hv = region.photon_energy
-        fit_comps = list(region.fit.region_components(fit_region))
-        n_total = len(fit_comps)
+        for fr in fit_region_list:
+            fit_comps = list(region.fit.region_components(fr))
+            n_total = len(fit_comps)
 
-        aligned = {}
-        if fit_comps and hv is not None:
-            pairs = []
-            for fc in fit_comps:
-                fbe = casafit.component_be(fc, hv, region.fit)
-                for cc in block.components:
-                    if cc.position_be is None:
+            aligned = {}
+            if fit_comps and hv is not None:
+                pairs = []
+                for fc in fit_comps:
+                    fbe = casafit.component_be(fc, hv, region.fit)
+                    for cc in block.components:
+                        if cc.position_be is None:
+                            continue
+                        pairs.append((abs(fbe - cc.position_be), fc, cc))
+                pairs.sort(key=lambda p: p[0])
+                used_fc, used_cc = set(), set()
+                for cost, fc, cc in pairs:
+                    if cost > 0.5:
+                        break
+                    if id(fc) in used_fc or id(cc) in used_cc:
                         continue
-                    pairs.append((abs(fbe - cc.position_be), fc, cc))
-            pairs.sort(key=lambda p: p[0])
-            used_fc, used_cc = set(), set()
-            for cost, fc, cc in pairs:
-                if cost > 0.5:
-                    break
-                if id(fc) in used_fc or id(cc) in used_cc:
-                    continue
-                used_fc.add(id(fc)); used_cc.add(id(cc))
-                aligned[id(fc)] = cc
-        n_aligned = len(aligned)
+                    used_fc.add(id(fc)); used_cc.add(id(cc))
+                    aligned[id(fc)] = cc
+            n_aligned = len(aligned)
 
-        if n_total and n_aligned < n_total:
-            missing = [fc.name for fc in fit_comps if id(fc) not in aligned]
-            report.results.append(MatchResult(block=block, region=region,
-                fit_region=fit_region, n_components_total=n_total,
-                n_components_aligned=n_aligned,
-                reason="not every fitted component matched a CSV column "
-                       f"(missing: {', '.join(missing) or '?'})"))
-            continue
-        if n_total and hv is None:
-            report.results.append(MatchResult(block=block, region=region,
-                fit_region=fit_region, n_components_total=n_total,
-                reason="no photon energy: components not position-matched"))
-            continue
+            if n_total and n_aligned < n_total:
+                missing = [fc.name for fc in fit_comps if id(fc) not in aligned]
+                report.results.append(MatchResult(block=block, region=region,
+                    fit_region=fr, n_components_total=n_total,
+                    n_components_aligned=n_aligned,
+                    reason="not every fitted component matched a CSV column "
+                           f"(missing: {', '.join(missing) or '?'})"))
+                continue
+            if n_total and hv is None:
+                report.results.append(MatchResult(block=block, region=region,
+                    fit_region=fr, n_components_total=n_total,
+                    reason="no photon energy: components not "
+                           "position-matched"))
+                continue
 
-        if block.background_cps is None and n_total == 0:
-            report.results.append(MatchResult(block=block, region=region,
-                fit_region=fit_region,
-                reason="CSV block has no background/envelope/components "
-                       "to attach"))
-            continue
+            if block.background_cps is None and n_total == 0:
+                report.results.append(MatchResult(block=block, region=region,
+                    fit_region=fr,
+                    reason="CSV block has no background/envelope/components "
+                           "to attach"))
+                continue
 
-        if block.ke is not None:
-            ke_axis = block.ke
-        elif hv is not None:
-            ke_axis = tuple(hv - be if be is not None else None
-                            for be in block.be)
-        else:
-            ke_axis = None
-        if ke_axis is None or any(v is None for v in ke_axis):
-            report.results.append(MatchResult(block=block, region=region,
-                fit_region=fit_region, n_components_total=n_total,
-                n_components_aligned=n_aligned,
-                reason="could not build an energy axis for this block (no "
-                       "photon energy available)"))
-            continue
+            if block.ke is not None:
+                ke_axis = block.ke
+            elif hv is not None:
+                ke_axis = tuple(hv - be if be is not None else None
+                                for be in block.be)
+            else:
+                ke_axis = None
+            if ke_axis is None or any(v is None for v in ke_axis):
+                report.results.append(MatchResult(block=block, region=region,
+                    fit_region=fr, n_components_total=n_total,
+                    n_components_aligned=n_aligned,
+                    reason="could not build an energy axis for this block "
+                           "(no photon energy available)"))
+                continue
 
-        csv_curves = casafit.CsvCurves(
-            ke=ke_axis, background=block.background_cps,
-            components=tuple((fc, aligned[id(fc)].curve_cps)
-                             for fc in fit_comps if id(fc) in aligned),
-            envelope=block.envelope_cps, source=block.source)
-        report.results.append(MatchResult(block=block, region=region,
-            fit_region=fit_region, n_components_total=n_total,
-            n_components_aligned=n_aligned, csv_curves=csv_curves))
+            csv_curves = casafit.CsvCurves(
+                ke=ke_axis, background=block.background_cps,
+                components=tuple((fc, aligned[id(fc)].curve_cps)
+                                 for fc in fit_comps if id(fc) in aligned),
+                envelope=block.envelope_cps, source=block.source)
+            report.results.append(MatchResult(block=block, region=region,
+                fit_region=fr, n_components_total=n_total,
+                n_components_aligned=n_aligned, csv_curves=csv_curves))
 
     report.unmatched_samples = unmatched
     return report

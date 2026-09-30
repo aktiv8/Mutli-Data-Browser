@@ -420,6 +420,44 @@ class TestMatchToRegions(unittest.TestCase):
         self.assertIs(report.results[0].region, region)
         self.assertEqual(report.results[0].reason, "")
 
+    def test_several_fit_windows_sharing_one_block_all_align(self):
+        """Regression for a real file: a combined "S2p B1s Scan" is fitted
+        as two separate, non-overlapping named CasaXPS regions ("S 2p" and
+        "P 2s") on ONE spectrum/scan, so their union -- not either one
+        alone -- equals the CSV block's own BE range. The old code required
+        a single FitRegion's own window to match the whole block, so
+        neither ever matched ("none spans this CSV block's own BE range")
+        even though each region's own window individually falls inside the
+        block. Both must now align independently from the one shared
+        block."""
+        hv = 1000.0
+        be = [20.0 - i for i in range(21)]           # full scan: 20..0 eV
+        fc_a = casafit.FitComponent(name="a1", pos_ke=hv - 16.0, region="A")
+        fc_b = casafit.FitComponent(name="b1", pos_ke=hv - 4.0, region="B")
+        fr_a = casafit.FitRegion(name="A", background="Linear",
+                                 start_ke=hv - 18.0, end_ke=hv - 14.0)
+        fr_b = casafit.FitRegion(name="B", background="Shirley",
+                                 start_ke=hv - 6.0, end_ke=hv - 2.0)
+        fit = casafit.Fit(regions=[fr_a, fr_b], components=[fc_a, fc_b])
+        region = _mk_region("R", "S", be, [1.0] * 21, hv, fit=fit)
+        block = casacsv.CsvBlock(
+            source="x.csv", block_index=0, layout="rows", cycle=0,
+            sample="S", scan_name="A B Scan", hv=None, dwell_total=None,
+            ke=None, counts=None, be=tuple(be), cps=tuple([1.0] * 21),
+            background_cps=None, envelope_cps=None, components=[
+                casacsv.CsvComponent(name="a1", position_be=16.0, fwhm=1.0,
+                                     area=1.0, lineshape="GL(30)",
+                                     curve_cps=tuple([0.1] * 21)),
+                casacsv.CsvComponent(name="b1", position_be=4.0, fwhm=1.0,
+                                     area=1.0, lineshape="GL(30)",
+                                     curve_cps=tuple([0.2] * 21))])
+        report = casacsv.match_to_regions([block], [region])
+        by_fit_region = {res.fit_region.name: res for res in report.results}
+        self.assertEqual(set(by_fit_region), {"A", "B"})
+        for res in by_fit_region.values():
+            self.assertEqual(res.reason, "")
+            self.assertIsNotNone(res.csv_curves)
+
     def test_unmatched_sample_reported(self):
         block = casacsv.CsvBlock(
             source="x.csv", block_index=0, layout="columns", cycle=0,

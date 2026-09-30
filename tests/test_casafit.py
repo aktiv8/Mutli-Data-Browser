@@ -465,6 +465,40 @@ class TestParse(unittest.TestCase):
         self.assertEqual([c.name for c in fit.region_components(
             fit.regions[1])], ["b1"])
 
+    def test_several_regions_listed_before_any_of_their_components(self):
+        """Regression for a real file (a combined "S2p B1s Scan" fitted as
+        separate "S 2p"/"P 2s" CasaXPS regions on one spectrum): CasaXPS can
+        list both CASA region lines back to back FIRST, then all of their
+        components afterward, instead of interleaving region/its own comps.
+        Naive "last region line seen" tracking then attributes every
+        component to the LAST region line (here "B"), leaving "A" with
+        none. Position-based re-attribution must recover the true split."""
+        lines = ["CASA region (*A*) (*Linear*) 100 110 1 1 (*A*) 1",
+                 "CASA region (*B*) (*Shirley*) 200 210 1 1 (*B*) 1",
+                 "1",
+                 "CASA comp (*a1*) (*GL(30)*) Area 5 0 9 -1 1 MFWHM 1 0 2 "
+                 "-1 1 Position 105 0 0 -1 1 RSF 1 MASS 1 INDEX -1 (*A*)",
+                 "CASA comp (*b1*) (*GL(30)*) Area 5 0 9 -1 1 MFWHM 1 0 2 "
+                 "-1 1 Position 205 0 0 -1 1 RSF 1 MASS 1 INDEX -1 (*B*)"]
+        fit = casafit.parse(lines)
+        self.assertEqual([r.name for r in fit.regions], ["A", "B"])
+        self.assertEqual([c.name for c in fit.region_components(
+            fit.regions[0])], ["a1"])
+        self.assertEqual([c.name for c in fit.region_components(
+            fit.regions[1])], ["b1"])
+
+    def test_a_component_outside_every_window_is_left_as_parsed(self):
+        """No guessing: a component whose own position falls inside neither
+        region's window keeps whatever region the parse order gave it."""
+        lines = ["CASA region (*A*) (*Linear*) 100 110 1 1 (*A*) 1",
+                 "CASA region (*B*) (*Shirley*) 200 210 1 1 (*B*) 1",
+                 "1",
+                 "CASA comp (*x1*) (*GL(30)*) Area 5 0 9 -1 1 MFWHM 1 0 2 "
+                 "-1 1 Position 500 0 0 -1 1 RSF 1 MASS 1 INDEX -1 (*A*)"]
+        fit = casafit.parse(lines)
+        self.assertEqual(fit.components[0].region, "B")   # last seen, as
+                                                            # parsed, not "A"
+
     def test_bad_component_lines_are_skipped(self):
         fit = casafit.parse(CASA[:9] + ["CASA comp (*x*) (*GL(30)*) nonsense"])
         self.assertEqual(len(fit.components), 0)

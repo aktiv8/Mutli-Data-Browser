@@ -226,6 +226,31 @@ def calib_line(measured, assigned) -> str:
             "Regions Comps BE ADD")
 
 
+def _fix_region_attribution(fit):
+    """Correct a component's ``region`` when a file lists all its ``CASA
+    region`` lines before any of their ``CASA comp`` lines (rather than
+    interleaving region/its own comps), which leaves every component
+    attributed to whichever region line came last (see ``parse``'s
+    ``current`` tracking) -- confirmed on a real file whose combined
+    "S2p B1s Scan" lists both the ``S 2p`` and ``P 2s`` region lines back to
+    back, then all 9 components: every one of them parsed as ``P 2s``,
+    leaving ``S 2p`` with none. Reassigns a component to whichever *other*
+    region's ``[start_ke, end_ke]`` window actually contains its own
+    ``pos_ke``, but only when exactly one other region qualifies -- a
+    component already inside its assigned region's window is untouched, and
+    one that fits nowhere or into more than one window (overlapping
+    regions) is left exactly as parsed rather than guessed."""
+    by_name = {r.name: r for r in fit.regions}
+    for comp in fit.components:
+        cur = by_name.get(comp.region)
+        if cur is not None and cur.start_ke <= comp.pos_ke <= cur.end_ke:
+            continue
+        hits = [r for r in fit.regions
+                if r.start_ke <= comp.pos_ke <= r.end_ke]
+        if len(hits) == 1:
+            comp.region = hits[0].name
+
+
 def parse(comment_lines):
     """The fit held in a block comment, or None when it has none."""
     fit = Fit()
@@ -255,6 +280,8 @@ def parse(comment_lines):
         if fit.lines and fit.lines[-1].startswith("CASA region") \
                 and re.fullmatch(r"\d+", line):
             fit.lines.append(line)                  # the comp count line
+    if len(fit.regions) > 1:
+        _fix_region_attribution(fit)
     if fit.is_empty():
         return None
     fit.block = _casa_block(comment_lines, fit.lines)
