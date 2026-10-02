@@ -141,6 +141,41 @@ class TestDocx(unittest.TestCase):
                 path, self.details, "", self.rows, self.docs, [], self.png,
                 spec=spec)
 
+    def appendix_next(self, doc):
+        """The heading that follows the "Appendix" label, and the style of
+        the label itself; asserts there is exactly one label."""
+        paras = doc.paragraphs
+        at = [i for i, p in enumerate(paras) if p.text == "Appendix"]
+        self.assertEqual(len(at), 1)
+        label = paras[at[0]]
+        nxt = next(p for p in paras[at[0] + 1:]
+                   if p.style.name.startswith("Heading"))
+        return nxt.text, label
+
+    def test_one_appendix_label_before_the_first_audit_section(self):
+        doc = self.build()
+        heading, label = self.appendix_next(doc)
+        self.assertEqual(heading, "Acquisition metadata")
+        # a plain paragraph, so it stays out of the Contents field, kept
+        # with the heading below it
+        self.assertFalse(label.style.name.startswith("Heading"))
+        self.assertTrue(label.paragraph_format.keep_with_next)
+        self.assertNotIn("Appendix", self.headings(doc))
+
+    def test_the_appendix_label_moves_to_the_files_without_metadata(self):
+        doc = self.build(rs.with_on(rs.default_spec(), "metadata", False))
+        self.assertEqual(self.appendix_next(doc)[0], "Data files")
+
+    def test_no_appendix_label_without_an_audit_section(self):
+        spec = rs.with_on(rs.with_on(rs.default_spec(), "metadata", False),
+                          "files", False)
+        self.assertNotIn("Appendix", self.all_text(self.build(spec)))
+
+    def test_split_audit_sections_still_get_one_appendix_label(self):
+        spec = rs.moved(rs.default_spec(), "figures", 4)
+        self.assertEqual(self.appendix_next(self.build(spec))[0],
+                         "Acquisition metadata")
+
     def test_footer_has_page_fields(self):
         doc = self.build()
         footer = doc.sections[0].footer

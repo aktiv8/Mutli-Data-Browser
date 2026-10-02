@@ -699,8 +699,8 @@ def build_chapters(doc):
     h1(doc, "14. The PDF report and PowerPoint deck")
     para(doc,
         "Contents lists every section with its real page (or slide) number; "
-        "the PDF also gets bookmarks. Slides get a divider slide before a long "
-        "section, and every slide is numbered “n of N”."
+        "the PDF also gets bookmarks. The PDF and the slides get a divider page "
+        "or slide before a long section, and every slide is numbered “n of N”."
     )
     h2(doc, "Quantification")
     para(doc,

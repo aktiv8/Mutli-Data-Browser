@@ -304,8 +304,10 @@ workbook. Sections, in the default results-first order:
   picture of your own (or one you drop in `assets/covers/`), or none, in one of
   six accent colours or your own. Presets never change the cover.
 * **Contents** — the sections and their pages (slides), with the real numbers;
-  the PDF also gets bookmarks. Slides get divider slides before long sections
-  (*Options* tab), and every slide is numbered "n of N".
+  the PDF also gets bookmarks. The PDF and the slides get a divider page /
+  slide before long sections (*Options* tab), the PDF marks its audit sections
+  (metadata, files) with a small "Appendix" label, and every slide is numbered
+  "n of N".
 * **Summary**, then **Quantification** — atomic percent from CasaXPS areas and
   sensitivity factors: a table per sample (with chemical states) or, for a depth
   profile, a chart and a table by level. A region fitted in more than one
@@ -600,13 +602,9 @@ written into each VAMAS block as comment lines.
 Ideas that are planned or open, so you know what to expect (the developer notes
 in `CLAUDE.md` have the detail):
 
-* a **quantification view in the app itself** (the report, the slides and the
-  data browser have one), and choosing **which regions count** in the report's
-  quantification (today only whole samples can be left out);
 * a **viewer for the mosaic** in the app or the data browser (today it is in the
   report and the slides);
-* section **divider pages** in the PDF (the slides have them) and clickable
-  entries in the slides' contents;
+* **clickable entries** in the PDF's contents (the slides have them);
 * opening a saved workbook **without re-reading** the original files, and
   importing / exporting the XPSView `.xpsv` package;
 * a command-line **batch mode** (left out on purpose for now).

@@ -270,6 +270,17 @@ class TestReport(unittest.TestCase):
         page = next(p for p in pages if "Appendix" in p)
         self.assertIn("Data files", page)
 
+    def test_audit_sections_split_by_another_still_get_one_appendix(self):
+        # metadata, figures, files: the figures end the first flow run, so a
+        # per-run decision would print a second "Appendix" before the files
+        spec = rs.moved(rs.default_spec(), "figures", 4)
+        self.assertEqual(rs.order(spec)[-3:], ["metadata", "figures", "files"])
+        pages = self.build(spec)
+        joined = "\n".join(pages)
+        self.assertEqual(joined.count("Appendix"), 1)
+        self.assertIn("Acquisition metadata",
+                      next(p for p in pages if "Appendix" in p))
+
     def test_no_appendix_heading_without_an_audit_section(self):
         spec = rs.with_on(rs.with_on(rs.default_spec(), "metadata", False),
                           "files", False)

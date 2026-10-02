@@ -251,9 +251,19 @@ def _text_section(d, heading, paras):
     return True
 
 
-def _files_section(d, file_rows, sha="short"):
+def _appendix(d):
+    """The small "Appendix" label before the first audit section (the PDF
+    has the same). A plain paragraph kept with the heading below it, not a
+    heading, so it stays out of the Contents field."""
+    d.paragraph("Appendix", size=9, bold=True).paragraph_format \
+        .keep_with_next = True
+
+
+def _files_section(d, file_rows, sha="short", appendix=False):
     if not file_rows:
         return False
+    if appendix:
+        _appendix(d)
     d.heading("Data files", level=1)
     with_sha = sha != "none"
     header = ["File", "Format", "Regions", "Size"] + (["SHA-256"]
@@ -267,7 +277,7 @@ def _files_section(d, file_rows, sha="short"):
     return True
 
 
-def _metadata_section(d, docs, skip=()):
+def _metadata_section(d, docs, skip=(), appendix=False):
     written = False
     for parser in docs:
         if reportspec.doc_key(parser) in skip:
@@ -277,6 +287,8 @@ def _metadata_section(d, docs, skip=()):
             continue
         name = os.path.basename(parser.path or "experiment")
         if not written:
+            if appendix:
+                _appendix(d)
             d.heading("Acquisition metadata", level=1)
         written = True
         d.heading(name, level=2)
@@ -398,6 +410,7 @@ def build_document(path, details, logo, file_rows, docs, figures,
     # PDF and the deck do), else it gets a heading of its own; never twice
     cal_text = cal if cal and not ("methods" in ids and cal in methods) else ""
     written = 0
+    first_audit = next((i for i in ids if i in ("metadata", "files")), None)
     for sid, skip in items:
         if sid == "cover":
             written += _cover_section(d, details, logo, cover, cover_data,
@@ -418,9 +431,11 @@ def build_document(path, details, logo, file_rows, docs, figures,
                 written += _text_section(d, "Energy calibration", [cal_text])
         elif sid == "files":
             written += _files_section(d, file_rows,
-                                      reportspec.option(spec, "sha"))
+                                      reportspec.option(spec, "sha"),
+                                      appendix=sid == first_audit)
         elif sid == "metadata":
-            written += _metadata_section(d, docs, skip)
+            written += _metadata_section(d, docs, skip,
+                                         appendix=sid == first_audit)
         elif sid == "images" and image_pages is not None:
             written += _images_section(d, image_pages)
         elif sid == "figures" and figures:

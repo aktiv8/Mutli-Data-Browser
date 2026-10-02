@@ -69,7 +69,8 @@ LEGACY_DECK = {"title": ("cover", "summary", "methods", "calibration"),
                "images": ("images",), "figures": ("figures",)}
 
 # option -> allowed values: the checksum column of the file list, and whether
-# the slides get a divider slide before a long section ("auto": 5 slides or more),
+# the PDF and the slides get a divider page / slide before a long section
+# ("auto": 5 pages or slides or more),
 # whether overlapping camera pictures are also stitched into a mosaic, the
 # PDF's page size (the deck is always 16:9 regardless of this), and which RSF
 # reference library (if any) fills in for a region with no recorded
@@ -266,7 +267,7 @@ def spec_from_sections(sections, kind="pdf"):
     spec = default_spec()
     spec["sections"] = [{"id": sid, "on": sid in on} for sid in LEGACY_ORDER]
     spec["cover"]["design"] = "none"          # the old reports had no picture
-    spec["options"]["dividers"] = "none"      # ... and no divider slides
+    spec["options"]["dividers"] = "none"      # ... and no divider pages
     spec["options"]["mosaic"] = "off"         # ... and no mosaics
     return spec
 

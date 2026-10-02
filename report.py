@@ -395,9 +395,13 @@ def contents_story(entries, look=None):
 
 
 def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
-                look=None, results=None):
+                look=None, results=None, audit_first="auto"):
     """Flowables of consecutive reportlab sections. ``items`` is
-    ``[(section id, skipped child ids)]``; ``art`` the cover picture."""
+    ``[(section id, skipped child ids)]``; ``art`` the cover picture.
+    ``audit_first`` is the id of the first audit section of the *whole*
+    report (``build_report`` works it out once, so a report whose audit
+    sections are split by other sections still prints one "Appendix"); the
+    default works it out from ``items`` alone."""
     from reportlab.platypus import PageBreak, Paragraph
     import exporters
 
@@ -412,8 +416,11 @@ def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
     # Inserted where each branch starts its own content (after "metadata"'s
     # own PageBreak, not before it), with keepWithNext chaining it to the
     # heading that follows so the two never land on separate pages.
-    audit_start = next((sid for sid, _s in items
-                        if sid in ("metadata", "files")), None)
+    if audit_first == "auto":
+        audit_first = next((sid for sid, _s in items
+                            if sid in ("metadata", "files")), None)
+    audit_start = audit_first if any(
+        sid == audit_first for sid, _s in items) else None
     appendix_style = st["label"].clone("appendix", keepWithNext=1)
 
     def appendix(sid):
@@ -678,6 +685,8 @@ def build_report(path, details, logo, file_rows, docs, figures,
         if art.note and notes is not None:
             notes.append(art.note)
     title = (details.get("title") or "").strip() or "Experiment report"
+    audit_first = next((sid for sid, _s in items
+                        if sid in ("metadata", "files")), None)
     with tempfile.TemporaryDirectory(prefix="xpsc_report_") as tmp:
         parts = []              # in report order: path, pages, marks, sid
 
@@ -695,7 +704,7 @@ def build_report(path, details, logo, file_rows, docs, figures,
                               "marks": [("contents", None, 1)]})
             elif kind == "flow":
                 story = _flow_story(run, details, logo, file_rows, docs, sha,
-                                    art, look, results)
+                                    art, look, results, audit_first)
                 if story:
                     marks = _build_pdf(part, story, details, look, pagesize)
                     add(k, kind, run[0][0], _page_count(mu, part), marks)

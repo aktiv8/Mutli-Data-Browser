@@ -324,9 +324,10 @@ class ReportGeneratorDialog(tk.Toplevel):
                             command=lambda: self.set_option(
                                 "sha", self.sha.get())).pack(
                 anchor="w", padx=(12, 0), pady=2)
-        ttk.Label(tab, text="Divider slides in the PowerPoint").pack(
-            anchor="w", pady=(14, 0))
-        for value, text in (("auto", "Before a section of 5 slides or more"),
+        ttk.Label(tab, text="Divider pages (PDF) and slides (PowerPoint)"
+                  ).pack(anchor="w", pady=(14, 0))
+        for value, text in (("auto", "Before a section of 5 pages or slides "
+                                     "or more"),
                             ("none", "Never")):
             ttk.Radiobutton(tab, text=text, value=value,
                             variable=self.dividers,
