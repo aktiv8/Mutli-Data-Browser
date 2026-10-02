@@ -618,6 +618,59 @@ class TestInTheApp(unittest.TestCase):
         self.assertIn("The X-ray spot size was 400 µm.", text)
         self.assertIn("The instrument was in use for 2 h 00 min", text)
 
+    def test_the_report_gets_at_a_glance_and_timing(self):
+        import reportspec
+        ws = self.ws
+        inv = ws.report_inventory()
+        self.assertLessEqual({"glance", "timing"}, inv.present_ids())
+        facts, sec = ws._glance_parts()
+        got = dict(facts)
+        self.assertEqual(got["Data"], "1 file · 1 sample · 1 spectrum")
+        self.assertEqual(got["Instrument"], "K-Alpha+")
+        self.assertIn("instrument in use 2 h 00 min", got["Counting time"])
+        self.assertEqual(dict(sec.rows)["Instrument in use"], "2 h 00 min")
+        # the Methods sentence is the same as it was: not touched
+        self.assertIn("The instrument was in use for 2 h 00 min",
+                      ws.methods_generated())
+        spec = reportspec.with_on(ws.report_spec, "timing", False)
+        ws.set_report_spec(spec)
+        self.addCleanup(ws.set_report_spec, reportspec.default_spec())
+        self.assertNotIn("Timing", reportspec.describe(spec, inv))
+
+    def test_the_pdf_deck_and_word_document_all_carry_them(self):
+        import reportspec
+        ws = self.ws
+        texts = {}
+        try:
+            import pymupdf
+        except ImportError:
+            pymupdf = None
+        out = lambda n: os.path.join(self.dir, n)         # noqa: E731
+        if pymupdf is not None:
+            ws._build_report(out("g.pdf"), reportspec.default_spec())
+            with pymupdf.open(out("g.pdf")) as d:
+                texts["pdf"] = "\n".join(p.get_text() for p in d)
+        try:
+            ws._build_docx(out("g.docx"), reportspec.default_spec())
+            from docx import Document
+            texts["docx"] = "\n".join(p.text for p in
+                                      Document(out("g.docx")).paragraphs)
+        except ImportError:
+            pass
+        try:
+            ws._build_deck(out("g.pptx"), reportspec.default_spec())
+            from pptx import Presentation
+            texts["pptx"] = "\n".join(
+                s.shapes.title.text for s in Presentation(out("g.pptx")).slides
+                if s.shapes.title is not None)
+        except ImportError:
+            pass
+        if not texts:
+            self.skipTest("no report libraries installed")
+        for kind, text in texts.items():
+            self.assertIn("At a glance", text, kind)
+            self.assertIn("Timing", text, kind)
+
 
 if __name__ == "__main__":
     unittest.main()

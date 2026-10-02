@@ -92,6 +92,7 @@ import viewdata
 import metasummary
 import methods
 import timing
+import glance
 import panelview
 import workbook as wbk
 import annotations
@@ -4050,15 +4051,29 @@ class Workspace:
             spec = reportspec.with_on(spec, "figures", False)
         return spec
 
+    def _glance_parts(self):
+        """``(facts, timing)`` for the "At a glance" and "Timing" sections
+        (``glance.facts`` / ``glance.timing_section``), read from the loaded
+        files as the other sections are."""
+        summary = timing.summarise(self.docs)
+        rows = [md for p in self.docs for md in p.metadata_rows()]
+        facts = glance.facts(
+            rows, self._report_file_rows(), self._results(), summary,
+            figures=len(self._report_figures()),
+            pictures=len(self._image_items()) if self._has_image_pages()
+            else 0)
+        return facts, glance.timing_section(self.docs, summary)
+
     def report_inventory(self):
         """What the loaded data can put in a report (sections with content,
         figures, files): the Report generator's list."""
         d = self._report_details()
+        facts, timing_data = self._glance_parts()
         return reportspec.inventory(
             d, d.get("methods", ""), d.get("calibration", ""),
             self._report_file_rows(), self.docs, self._report_figures(),
             self._has_image_pages(), HAVE_MPL, self._results().children(),
-            self._image_items())
+            self._image_items(), glance=facts, timing=timing_data)
 
     def set_report_spec(self, spec):
         """Remember what the reports contain (config, workbook, the preview's
@@ -4153,6 +4168,7 @@ class Workspace:
         mosaics = reportspec.option(spec, "mosaic") == "on"
         self._pdf_figure_size = pdfstyle.page_size(
             reportspec.option(spec, "page"))[1]
+        facts, timing_data = self._glance_parts()
         return report.build_report(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,
@@ -4162,7 +4178,7 @@ class Workspace:
                                 pdf, left_out, mosaics))
                            if self._has_image_pages() else None),
             cover_data=self.cover_data(), notes=notes,
-            results=self._results())
+            results=self._results(), glance=facts, timing=timing_data)
 
     def _report_ready(self):
         if not self.docs:
@@ -4392,6 +4408,7 @@ class Workspace:
         spec = self._spec_for_output(spec)
         left_out = reportspec.skipped(spec, "images")
         mosaics = reportspec.option(spec, "mosaic") == "on"
+        facts, timing_data = self._glance_parts()
         return pptx_export.build_deck(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,
@@ -4400,7 +4417,7 @@ class Workspace:
                          if self._has_image_pages() else None),
             spec=spec,
             cover_data=self.cover_data(), notes=notes,
-            results=self._results())
+            results=self._results(), glance=facts, timing=timing_data)
 
     def export_powerpoint(self):
         self.generate_report("pptx")
@@ -4415,6 +4432,7 @@ class Workspace:
         spec = self._spec_for_output(spec)
         left_out = reportspec.skipped(spec, "images")
         mosaics = reportspec.option(spec, "mosaic") == "on"
+        facts, timing_data = self._glance_parts()
         return docx_export.build_document(
             path, self._report_details(),
             self.logo, self._report_file_rows(), self.docs,
@@ -4423,7 +4441,7 @@ class Workspace:
                          if self._has_image_pages() else None),
             spec=spec,
             cover_data=self.cover_data(), notes=notes,
-            results=self._results())
+            results=self._results(), glance=facts, timing=timing_data)
 
     def generate_report(self, kind="pdf"):
         """Write the PDF report, the PowerPoint deck, the Word document, or

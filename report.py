@@ -35,8 +35,8 @@ import reportspec
 
 SECTIONS = ("cover", "metadata", "images", "figures")   # the old names
 
-_FLOW = ("cover", "summary", "results", "methods", "calibration", "files",
-         "metadata")
+_FLOW = ("cover", "glance", "summary", "results", "methods", "timing",
+         "calibration", "files", "metadata")
 FOOTER_SIZE = 7.5
 FOOTER_MARGIN = 36                       # points from the page edge
 DIVIDER_MIN = 5                          # report pages in a section that earn
@@ -394,8 +394,73 @@ def contents_story(entries, look=None):
     return story
 
 
+def facts_block(pairs, look=None):
+    """Label / value lines as a quiet two-column table (no header, a hair
+    rule between lines): the "At a glance" block and the top of "Timing"."""
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Table, TableStyle
+
+    look = look or pdfstyle.look()
+    st = pdfstyle.styles(look)
+    rows = [[Paragraph(xml_escape(str(k)), st["label"]),
+             Paragraph(xml_escape(str(v)), st["body"])]
+            for k, v in pairs or ()]
+    if not rows:
+        return None
+    t = Table(rows, colWidths=[44 * mm, 136 * mm], hAlign="LEFT")
+    t.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.4,
+         colors.HexColor(look.tint(0.7))),
+    ]))
+    return t
+
+
+def glance_story(pairs, look=None, sid="glance"):
+    """The "At a glance" heading and block ([] when nothing is recorded)."""
+    from reportlab.platypus import Paragraph
+
+    block = facts_block(pairs, look)
+    if block is None:
+        return []
+    st = pdfstyle.styles(look or pdfstyle.look())
+    return [_mark(Paragraph("At a glance", st["h1"]), sid), block]
+
+
+def timing_story(data, look=None, sid="timing"):
+    """The "Timing" heading, its rows, the counting time of each sample when
+    that says something, and what the files do not record. ``data`` is a
+    ``glance.Timing`` ([] when it has no rows)."""
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, Spacer
+
+    if not data:
+        return []
+    look = look or pdfstyle.look()
+    st = pdfstyle.styles(look)
+    story = [_mark(Paragraph("Timing", st["h1"]), sid),
+             facts_block(data.rows, look)]
+    if data.by_sample:
+        story += [Spacer(1, 4 * mm),
+                  Paragraph("Counting time by sample", st["h2"]),
+                  _grid(["Sample", "File", "Counting time"],
+                        [[Paragraph(xml_escape(s), st["small"]),
+                          Paragraph(xml_escape(f), st["small"]), t]
+                         for s, f, t in data.by_sample],
+                        [70, 70, 40], look, right_from=2)]
+    for note in data.notes:
+        story += [Spacer(1, 2 * mm), Paragraph(xml_escape(note), st["small"])]
+    return story
+
+
 def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
-                look=None, results=None, audit_first="auto"):
+                look=None, results=None, audit_first="auto", glance=None,
+                timing_data=None):
     """Flowables of consecutive reportlab sections. ``items`` is
     ``[(section id, skipped child ids)]``; ``art`` the cover picture.
     ``audit_first`` is the id of the first audit section of the *whole*
@@ -433,12 +498,16 @@ def _flow_story(items, details, logo, file_rows, docs, sha, art=None,
     for sid, skip in items:
         if sid == "cover":
             story += title_block(details, logo, art, look)
+        elif sid == "glance":
+            story += glance_story(glance, look, sid)
         elif sid == "summary":
             story += text_block("Summary", details.get("summary"), look, sid)
         elif sid == "results":
             story += results_story(results, skip, look, sid)
         elif sid == "methods":
             story += text_block("Methods", methods, look, sid)
+        elif sid == "timing":
+            story += timing_story(timing_data, look, sid)
         elif sid == "calibration":
             cal = (details.get("calibration") or "").strip()
             # the methods text usually states it: not twice on the same pages
@@ -699,7 +768,8 @@ def _footer(out, mu, title, sections, look, skip_first):
 
 def build_report(path, details, logo, file_rows, docs, figures,
                  render_figure, sections=SECTIONS, render_images=None,
-                 spec=None, cover_data=None, notes=None, results=None):
+                 spec=None, cover_data=None, notes=None, results=None,
+                 glance=None, timing=None):
     """Write the report to ``path``; returns the number of pages.
 
     ``spec`` (see ``reportspec``) says which sections go in, in which order,
@@ -712,7 +782,10 @@ def build_report(path, details, logo, file_rows, docs, figures,
     ``render_images(pdf)`` does the same for the camera-picture and SnapMap
     pages (None: there are none) and returns either how many it wrote or the
     list of their titles, one per PDF page (each then has its own line in the
-    contents and the bookmarks). ``results`` is the ``resultspages.Results``
+    contents and the bookmarks). ``glance`` is the list of
+    ``(label, value)`` facts of the "At a glance" section and ``timing`` the
+    ``glance.Timing`` of the "Timing" section (None: nothing to show, the
+    section is left out). ``results`` is the ``resultspages.Results``
     the Quantification section is made from (None: there is none)."""
     if spec is None:
         spec = reportspec.spec_from_sections(sections, "pdf")
@@ -752,7 +825,8 @@ def build_report(path, details, logo, file_rows, docs, figures,
                               "marks": [("contents", None, 1)]})
             elif kind == "flow":
                 story = _flow_story(run, details, logo, file_rows, docs, sha,
-                                    art, look, results, audit_first)
+                                    art, look, results, audit_first, glance,
+                                    timing)
                 if story:
                     marks = _build_pdf(part, story, details, look, pagesize)
                     add(k, kind, run[0][0], _page_count(mu, part), marks)

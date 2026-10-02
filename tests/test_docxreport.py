@@ -172,7 +172,8 @@ class TestDocx(unittest.TestCase):
         self.assertNotIn("Appendix", self.all_text(self.build(spec)))
 
     def test_split_audit_sections_still_get_one_appendix_label(self):
-        spec = rs.moved(rs.default_spec(), "figures", 4)
+        spec = rs.moved(rs.default_spec(), "figures", 5)
+        self.assertEqual(rs.order(spec)[-3:], ["metadata", "figures", "files"])
         self.assertEqual(self.appendix_next(self.build(spec))[0],
                          "Acquisition metadata")
 

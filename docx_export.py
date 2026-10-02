@@ -242,6 +242,31 @@ def _contents_section(d, notes):
     return True
 
 
+def _glance_section(d, pairs):
+    """"At a glance": the same single-line facts as the PDF and the slides."""
+    if not pairs:
+        return False
+    d.heading("At a glance", level=1)
+    d.kv_table([(k, v) for k, v in pairs])
+    return True
+
+
+def _timing_section(d, data):
+    """"Timing": the rows, the counting time of each sample when that says
+    something, and what the files do not record."""
+    if not data:
+        return False
+    d.heading("Timing", level=1)
+    d.kv_table([(k, v) for k, v in data.rows])
+    if data.by_sample:
+        d.paragraph("Counting time by sample", bold=True, size=9)
+        d.table(["Sample", "File", "Counting time"],
+                [list(r) for r in data.by_sample], [3.0, 3.0, 1.5])
+    for note in data.notes:
+        d.paragraph(note, size=8, italic=True)
+    return True
+
+
 def _text_section(d, heading, paras):
     if not paras:
         return False
@@ -383,7 +408,8 @@ def _images_section(d, image_pages):
 
 def build_document(path, details, logo, file_rows, docs, figures,
                    render_figure, image_pages=None, spec=None,
-                   cover_data=None, notes=None, results=None):
+                   cover_data=None, notes=None, results=None, glance=None,
+                   timing=None):
     """Write the .docx to ``path``; returns the number of sections written.
 
     ``spec`` (see ``reportspec``) says which sections go in, in which order,
@@ -396,7 +422,9 @@ def build_document(path, details, logo, file_rows, docs, figures,
     figure)`` returns one PNG (bytes) per page of that figure.
     ``image_pages()`` returns the camera and SnapMap pictures as
     ``[{"title", "png", "notes"}]`` (None: none). ``results`` is the
-    ``resultspages.Results`` the Quantification section is made from."""
+    ``resultspages.Results`` the Quantification section is made from.
+    ``glance`` is the list of ``(label, value)`` facts of "At a glance" and
+    ``timing`` the ``glance.Timing`` of "Timing" (None: left out)."""
     if spec is None:
         spec = reportspec.default_spec()
     items = reportspec.active(spec)
@@ -417,6 +445,8 @@ def build_document(path, details, logo, file_rows, docs, figures,
                                       notes)
         elif sid == "contents":
             written += _contents_section(d, notes)
+        elif sid == "glance":
+            written += _glance_section(d, glance)
         elif sid == "summary":
             paras = _paragraphs(details.get("summary"))
             if cal_text and "calibration" in ids:
@@ -426,6 +456,8 @@ def build_document(path, details, logo, file_rows, docs, figures,
             written += _results_section(d, results, skip)
         elif sid == "methods":
             written += _text_section(d, "Methods", _paragraphs(methods))
+        elif sid == "timing":
+            written += _timing_section(d, timing)
         elif sid == "calibration":
             if cal_text and "summary" not in ids:
                 written += _text_section(d, "Energy calibration", [cal_text])

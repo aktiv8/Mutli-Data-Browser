@@ -37,19 +37,21 @@ VERSION = 1
 SECTION_DEFS = (
     ("cover", "Cover page", "Title, customer, date, logo"),
     ("contents", "Contents", "Sections and their pages"),
+    ("glance", "At a glance", "Key facts in one place"),
     ("summary", "Summary", "Your summary text"),
     ("results", "Quantification", "Atomic percent from the fits"),
     ("figures", "Figures", "The saved figures"),
     ("images", "Camera pictures and SnapMaps", "Photos and map sites"),
     ("methods", "Methods", "How the data were acquired"),
+    ("timing", "Timing", "When it ran and for how long"),
     ("calibration", "Energy calibration", "Binding-energy statement"),
     ("metadata", "Acquisition metadata", "Instrument settings, per file"),
     ("files", "Data files", "Names, sizes and checksums"),
 )
 SECTION_IDS = tuple(s[0] for s in SECTION_DEFS)
-SHORT = {"cover": "Cover", "contents": "Contents", "summary": "Summary",
-         "results": "Results", "figures": "Figures",
-         "images": "Pictures", "methods": "Methods",
+SHORT = {"cover": "Cover", "contents": "Contents", "glance": "At a glance",
+         "summary": "Summary", "results": "Results", "figures": "Figures",
+         "images": "Pictures", "methods": "Methods", "timing": "Timing",
          "calibration": "Calibration", "metadata": "Metadata",
          "files": "Files"}
 LABELS = {s[0]: s[1] for s in SECTION_DEFS}
@@ -57,9 +59,16 @@ HINTS = {s[0]: s[2] for s in SECTION_DEFS}
 CHILD_KINDS = {"figures": "figure", "metadata": "file", "results": "sample",
                "images": "picture"}
 
+# Sections added after reports were already being saved: a spec that lists
+# sections but predates one gets it switched OFF (a report made last month
+# does not suddenly grow pages), while a new default spec, "Everything" and
+# an input with no sections at all (garbage) have it on.
+NEW_OFF = frozenset({"glance", "timing"})
+
 # The order the reports had before there was a choice; used for ``sections=``.
-LEGACY_ORDER = ("cover", "contents", "summary", "results", "methods", "calibration", "files",
-                "metadata", "images", "figures")
+LEGACY_ORDER = ("cover", "contents", "glance", "summary", "results", "methods",
+                "timing", "calibration", "files", "metadata", "images",
+                "figures")
 # What each old section name switched on, per output.
 LEGACY_PDF = {"cover": ("cover", "summary", "methods", "calibration", "files"),
               "metadata": ("metadata",), "images": ("images",),
@@ -109,12 +118,14 @@ def sanitise(spec=None):
         if sid in SECTION_IDS and sid not in seen:
             seen.add(sid)
             sections.append({"id": sid, "on": bool(item.get("on", True))})
+    had_sections = bool(seen)                     # a spec that lists some
     for k, sid in enumerate(SECTION_IDS):         # a section the spec predates:
         if sid not in seen:                       # after the one before it
             before = [x for x in SECTION_IDS[:k] if x in seen]
             at = 1 + next((i for i, s in enumerate(sections)
                            if s["id"] == before[-1]), -1) if before else 0
-            sections.insert(at, {"id": sid, "on": True})
+            sections.insert(at, {"id": sid, "on": not (
+                had_sections and sid in NEW_OFF)})
             seen.add(sid)
     out["sections"] = sections
     skip = spec.get("skip")
@@ -284,14 +295,16 @@ def _preset(order, on):
 BUILTIN_PRESETS = {
     "Everything": default_spec(),
     "Customer report": _preset(
-        ("cover", "contents", "summary", "results", "figures", "images",
-         "methods", "calibration"),
-        {"cover", "contents", "summary", "results", "figures", "images",
-         "methods", "calibration"}),
+        ("cover", "contents", "glance", "summary", "results", "figures",
+         "images", "methods", "calibration"),
+        {"cover", "contents", "glance", "summary", "results", "figures",
+         "images", "methods", "calibration"}),
     "Quick look": _preset(("cover", "figures"), {"cover", "figures"}),
     "Audit trail": _preset(
-        ("cover", "contents", "methods", "calibration", "metadata", "files"),
-        {"cover", "contents", "methods", "calibration", "metadata", "files"}),
+        ("cover", "contents", "methods", "timing", "calibration", "metadata",
+         "files"),
+        {"cover", "contents", "methods", "timing", "calibration", "metadata",
+         "files"}),
 }
 MAX_PRESET_NAME = 60
 
@@ -358,12 +371,16 @@ class Inventory:
 
 
 def inventory(details, methods_text, calibration, file_rows, docs, figures,
-              has_images, have_mpl=True, results=(), image_items=()):
+              has_images, have_mpl=True, results=(), image_items=(),
+              glance=None, timing=None):
     """Build the ``Inventory`` from what the workspace holds. ``figures`` are
     the saved figures (or the single 'current view' the reports fall back to);
     ``results`` is ``[(sample key, label)]`` of the samples with a quantification
     (see ``resultspages``); ``image_items`` ``[(key, label)]`` of the camera
-    pictures and SnapMap sites (see ``imagepages.items``)."""
+    pictures and SnapMap sites (see ``imagepages.items``). ``glance`` is the
+    list of facts for "At a glance" and ``timing`` the ``glance.Timing`` of
+    the files (both from the ``glance`` module); a caller that passes neither
+    gets "At a glance" whenever there are files and no "Timing"."""
     inv = Inventory()
 
     def put(sid, ok, why="", n=None):
@@ -375,6 +392,9 @@ def inventory(details, methods_text, calibration, file_rows, docs, figures,
 
     put("cover", True)
     put("contents", True)
+    put("glance", (glance if glance is not None else (file_rows or docs)),
+        "nothing recorded to summarise")
+    put("timing", timing, "no acquisition times recorded in these files")
     put("summary", (details.get("summary") or "").strip(),
         "no summary written (Details ▸ Summary)")
     put("methods", (methods_text or "").strip(), "no methods text")

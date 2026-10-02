@@ -140,7 +140,7 @@ class TestDeck(unittest.TestCase):
                 self.assertTrue(foot[0].endswith(f"{k} of {self.n}"), foot)
 
     def test_the_contents_can_go_last_and_the_numbers_still_hold(self):
-        spec = rs.moved(rs.default_spec(), "contents", 9)
+        spec = rs.moved(rs.default_spec(), "contents", 11)
         slides = self.build(spec)
         self.assertEqual(self.title(slides[-1]), "Contents")
         rows = dict(self.contents_rows(slides))

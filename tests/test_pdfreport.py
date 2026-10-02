@@ -203,7 +203,7 @@ class TestReport(unittest.TestCase):
             self.build(rs.with_on(spec, "contents", True))
 
     def test_the_accent_and_a_moved_contents_page(self):
-        spec = rs.with_cover(rs.moved(rs.default_spec(), "contents", 3),
+        spec = rs.with_cover(rs.moved(rs.default_spec(), "contents", 4),
                              accent="#1F7A8C")
         pages = self.build(spec)
         self.assertNotIn("Contents", pages[1][:40])
@@ -357,7 +357,7 @@ class TestReport(unittest.TestCase):
     def test_audit_sections_split_by_another_still_get_one_appendix(self):
         # metadata, figures, files: the figures end the first flow run, so a
         # per-run decision would print a second "Appendix" before the files
-        spec = rs.moved(rs.default_spec(), "figures", 4)
+        spec = rs.moved(rs.default_spec(), "figures", 5)
         self.assertEqual(rs.order(spec)[-3:], ["metadata", "figures", "files"])
         pages = self.build(spec)
         joined = "\n".join(pages)

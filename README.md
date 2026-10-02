@@ -308,6 +308,12 @@ workbook. Sections, in the default results-first order:
   slide before long sections (*Options* tab), the PDF marks its audit sections
   (metadata, files) with a small "Appendix" label, and every slide is numbered
   "n of N".
+* **At a glance** — right after the Contents, one block of single-line facts:
+  files, samples and spectra, format, instrument, operator, dates, counting
+  time, the elements quantified, and what else is in the report. A line is
+  only written when the files record it. It can be ticked off like any other
+  section (PDF, slides and Word follow together); a report saved before it
+  existed keeps it off.
 * **Summary**, then **Quantification** — atomic percent from CasaXPS areas and
   sensitivity factors: a table per sample (with chemical states) or, for a depth
   profile, a chart and a table by level. A region fitted in more than one
@@ -319,6 +325,12 @@ workbook. Sections, in the default results-first order:
 * **Camera pictures and SnapMaps** — see below; each picture and map site can be
   ticked separately, and overlapping pictures can also be **stitched into a
   mosaic** (*Options* tab).
+* **Timing** (after Methods) — first start, last finish, time in use,
+  counting time and what was not counting (moves, settling, sputtering, dead
+  time), the counting time of each sample, and a note when the files do not
+  record something (a Kratos file records when a run started, not when it
+  ended, so it gets the shorter version). Off in reports saved before it
+  existed.
 * **Methods**, **Energy calibration**, **Acquisition metadata** (the tidied
   metadata of every file) and **Data files** (with checksums; the *Options* tab
   can leave them out) — the audit trail, last.

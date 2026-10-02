@@ -364,6 +364,37 @@ def _text_slides(deck, title, paras, size=16):
                   size=size, space_after=10)
 
 
+def _glance_slides(deck, pairs):
+    """One slide of single-line facts (the same lines as the PDF)."""
+    rows = [[str(k), str(v)] for k, v in pairs]
+    per = int((BOTTOM - TABLE_TOP) / ROW_H)
+    for i in range(0, max(1, len(rows)), per):
+        slide = deck.content_slide(
+            "At a glance" + (" (continued)" if i else ""))
+        _kv_table(deck, slide, TABLE_TOP, rows[i:i + per], 2)
+
+
+def _timing_slides(deck, data):
+    """The Timing rows (and what the files do not record) on one slide, then
+    the counting time of each sample as a table over as many slides as it
+    needs."""
+    rows = [[str(k), str(v)] for k, v in data.rows]
+    slide = deck.content_slide("Timing")
+    _kv_table(deck, slide, TABLE_TOP, rows, 2)
+    if data.notes:
+        top = TABLE_TOP + ROW_H * len(rows) + 0.3
+        deck.text(slide, MARGIN, top, BODY_W, max(0.5, BOTTOM - top),
+                  list(data.notes), size=12, space_after=6)
+    per = int((BOTTOM - TABLE_TOP) / ROW_H) - 1
+    for i in range(0, len(data.by_sample), per):
+        slide = deck.content_slide(
+            "Timing: counting time by sample"
+            + (" (continued)" if i else ""))
+        deck.table(slide, MARGIN, TABLE_TOP, BODY_W, [3.0, 3.0, 1.5],
+                   ["Sample", "File", "Counting time"],
+                   [list(r) for r in data.by_sample[i:i + per]])
+
+
 def _files_slides(deck, file_rows, sha="short"):
     per = int((BOTTOM - TABLE_TOP) / ROW_H) - 1
     with_sha = sha != "none"
@@ -826,7 +857,8 @@ def _assemble(deck, dividers="auto"):
 
 def build_deck(path, details, logo, file_rows, docs, figures, render_images,
                sections=SECTIONS, image_pages=None, spec=None,
-               cover_data=None, notes=None, results=None):
+               cover_data=None, notes=None, results=None, glance=None,
+               timing=None):
     """Write the .pptx to ``path``; returns the number of slides.
 
     ``spec`` (see ``reportspec``) says which sections go in, in which order,
@@ -838,7 +870,9 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
     ``render_images(number, figure)`` returns one PNG (bytes) per page of that
     figure, sized ``FIGURE_SIZE`` inches. ``image_pages()`` returns the camera
     and SnapMap slides as ``[{"title", "png", "notes"}]`` (None: none).
-    ``results`` is the ``resultspages.Results`` of the Quantification slides."""
+    ``results`` is the ``resultspages.Results`` of the Quantification slides.
+    ``glance`` is the list of ``(label, value)`` facts of "At a glance" and
+    ``timing`` the ``glance.Timing`` of "Timing" (None: left out)."""
     if spec is None:
         spec = reportspec.spec_from_sections(sections, "deck")
     items = reportspec.active(spec)
@@ -861,6 +895,8 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
                       kind="cover")
         elif sid == "contents":
             deck.contents_at = len(deck.slides)      # made in ``_assemble``
+        elif sid == "glance" and glance:
+            _glance_slides(deck, glance)
         elif sid == "summary":
             paras = paragraphs(details.get("summary"))
             if cal_text and "calibration" in ids:
@@ -870,6 +906,8 @@ def build_deck(path, details, logo, file_rows, docs, figures, render_images,
             _results_slides(deck, results, skip)
         elif sid == "methods":
             _text_slides(deck, "Methods", paragraphs(methods), size=14)
+        elif sid == "timing" and timing:
+            _timing_slides(deck, timing)
         elif sid == "calibration":
             if cal_text and "summary" not in ids:
                 _text_slides(deck, "Energy calibration", [cal_text])
