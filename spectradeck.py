@@ -3810,9 +3810,18 @@ class Workspace:
         self.casa_quant = casaquant.from_json(book.casa_quant)
         self._refresh_info()
         problems = list(book.warnings)
-        for f in book.files:
-            problems += self._add_file(f.path, file_id=f.id,
-                                       origin=f.original_path)
+        # one refresh of the tree for the lot, as _add_files does: a refresh
+        # per file made opening cost grow with the square of the file count
+        # (108 separate files: 3.9 s against 0.5 s)
+        many = len(book.files) >= 3
+        try:
+            for f in book.files:
+                problems += self._add_file(f.path, file_id=f.id,
+                                           origin=f.original_path,
+                                           refresh=not many)
+        finally:
+            if many:
+                self._finish_adding()
         self.casa_csv_imports = list(book.csv_imports)
         problems += self._reapply_csv_imports()
         self.details, self.logo = book.details, book.logo
