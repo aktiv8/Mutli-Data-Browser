@@ -51,6 +51,10 @@ def doc(path, regions):
 class TestCasaLabelsAcrossMultipleSurveys(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        # a Workspace applies its theme to matplotlib's global settings;
+        # give them back so other tests see the defaults
+        import matplotlib
+        cls._rc = matplotlib.rcParams.copy()
         try:
             cls.root = tk.Tk()
         except tk.TclError:
@@ -68,6 +72,8 @@ class TestCasaLabelsAcrossMultipleSurveys(unittest.TestCase):
     def tearDownClass(cls):
         ee.load_file = cls._load
         cls.root.destroy()
+        import matplotlib
+        matplotlib.rcParams.update(cls._rc)
 
     def setUp(self):
         ws = self.ws

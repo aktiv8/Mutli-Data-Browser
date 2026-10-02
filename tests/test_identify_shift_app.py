@@ -65,10 +65,6 @@ class TestIdentifyOnAShiftedSurvey(unittest.TestCase):
             raise unittest.SkipTest("no display")
         cls.root.withdraw()
         cls.rc = dict(ee.matplotlib.rcParams)
-        # a withdrawn root never maps the flow frames, so their reflow would
-        # reschedule itself forever inside the dialog's update_idletasks
-        cls._reflow = ee.FlowFrame._reflow
-        ee.FlowFrame._reflow = lambda self: setattr(self, "_pending", False)
         cls.docs = {
             "a.vms": doc("a.vms", [survey("A", 0.0, ((O1S_SHOWN, 9000.0),))]),
             "b.vms": doc("b.vms", [survey("B", SHIFT)]),
@@ -80,7 +76,6 @@ class TestIdentifyOnAShiftedSurvey(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         ee.load_file = cls._load
-        ee.FlowFrame._reflow = cls._reflow
         ee.matplotlib.rcParams.update(cls.rc)
         cls.root.destroy()
 

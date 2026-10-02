@@ -521,9 +521,11 @@ class FlowFrame(ttk.Frame):
     def _reflow(self):
         self._pending = False
         width = self.winfo_width()
-        if width <= 1:                # not mapped/laid out yet
-            self._schedule_reflow()
-            return
+        if width <= 1:                # not mapped/laid out yet: <Map> and
+            return                    # <Configure> call us again once it is
+                                      # (re-arming here spun the event loop
+                                      # while hidden, and hung update_idletasks
+                                      # on a withdrawn root)
         x = y = row_h = 0
         for widget, (pl, pr), (pt, pb) in self._items:
             w = widget.winfo_reqwidth() + pl + pr
