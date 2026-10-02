@@ -4108,15 +4108,20 @@ class Workspace:
         only a sample with at least one region ticked in the tree is
         included. The report spec's own "rsf" option (off by default) picks
         an RSF reference library to fall back to for a region with none of
-        its own -- see ``rsf.py``/``quant.normalise``. Remembered until the
-        files, the ticks, the annotations, the quantification or that option
-        change."""
+        its own -- see ``rsf.py``/``quant.normalise``. The regions the user
+        ticked or unticked in the Quantification tab
+        (``quant_panel.view.include``) decide what counts instead of the
+        automatic rules where they differ (not the tab's transmission
+        choice: reports apply none). Remembered until the files, the ticks,
+        the annotations, the quantification, those region ticks or that
+        option change."""
         rsf_option = reportspec.option(self._spec_for_output(None), "rsf")
+        hand = dict(self.quant_panel.view.include)
         key = (tuple(id(p) for p in self.docs), self._ann_serial,
               id(self.casa_quant),
               len(self.casa_quant.samples) if self.casa_quant else 0,
               frozenset(self.checked), rsf_option,
-              bool(self.csv_curves_var.get()))
+              bool(self.csv_curves_var.get()), frozenset(hand.items()))
         if self._results_memo is None or self._results_memo[0] != key:
             rsf_table = self.rsf_entries() if rsf_option != "off" else None
             self._results_memo = (key, resultspages.collect(
@@ -4124,8 +4129,20 @@ class Workspace:
                 lambda p: reportspec.doc_key(p), self.casa_quant,
                 ticked=lambda r: id(r) in self.checked,
                 rsf_table=rsf_table, rsf_library=rsf_option,
-                prefer_csv=bool(self.csv_curves_var.get())))
+                prefer_csv=bool(self.csv_curves_var.get()),
+                overrides=hand))
         return self._results_memo[1]
+
+    def quant_hand_count(self):
+        """How many regions the report counts (or leaves out) differently
+        from its automatic rules because of the user's ticks in the
+        Quantification tab."""
+        return sum(len(s.by_hand[0]) + len(s.by_hand[1])
+                   for s in self._results().samples)
+
+    def reset_quant_ticks(self):
+        """Back to the automatic choice of what counts, for every sample."""
+        self.quant_panel.reset_all_ticks()
 
     def _build_report(self, path, spec=None, notes=None):
         spec = self._spec_for_output(spec)

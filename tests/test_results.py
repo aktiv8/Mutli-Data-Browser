@@ -500,6 +500,143 @@ class TestCollect(unittest.TestCase):
         self.assertEqual(len(res.samples), 1)
 
 
+def unsettled(n, rows, spectra=None):
+    """A ``Level`` whose entries are in place but nothing is decided yet."""
+    lv = rp.Level(n)
+    lv.entries = [{"spectrum": (spectra[i] if spectra else r["region"]),
+                   "row": r} for i, r in enumerate(rows)]
+    return lv
+
+
+def hand_key(sample, li, region, spectrum=None):
+    """The content key of the entry for ``region`` at level ``li``."""
+    lv = sample.levels[li]
+    ei = next(i for i, e in enumerate(lv.entries)
+              if e["row"]["region"] == region
+              and (spectrum is None or e["spectrum"] == spectrum))
+    return rp.entry_key(sample.key, lv.level, lv.entries, ei)
+
+
+class TestHandChoices(unittest.TestCase):
+    """The user's own ticks (``collect(overrides=)`` /
+    ``settle_sample``) decide what counts instead of the automatic rules."""
+
+    def three(self):
+        return sample("S", [unsettled(None, [
+            row("Ti 2p", 2.0, 100.0), row("O 1s", 1.0, 100.0),
+            row("C 1s", 0.25, 30.0)])])
+
+    def pct(self, s, li=0):
+        return {e["row"]["region"]: x["at_pct"]
+                for e, x in zip(s.levels[li].entries, s.levels[li].res)}
+
+    def test_no_overrides_changes_nothing(self):
+        a, b = self.three(), self.three()
+        rp.settle_sample(a)
+        rp.settle_sample(b, {})
+        self.assertEqual(self.pct(a), self.pct(b))
+        self.assertEqual(a.by_hand, ([], []))
+        self.assertEqual(a.notes, [])
+
+    def test_unticking_a_region_renormalises_and_says_so(self):
+        s = self.three()
+        rp.settle_sample(s, {hand_key(s, 0, "O 1s"): False})
+        got = self.pct(s)
+        self.assertIsNone(got["O 1s"])
+        self.assertAlmostEqual(got["Ti 2p"] + got["C 1s"], 100.0)
+        lv = s.levels[0]
+        o = next(x for e, x in zip(lv.entries, lv.res)
+                 if e["row"]["region"] == "O 1s")
+        self.assertEqual(o["why"], "not included")
+        self.assertEqual(s.by_hand, (["O 1s"], []))
+        self.assertEqual(s.notes, ["Which regions count in S was set by hand "
+                                   "(left out: O 1s)."])
+
+    def survey_and_scan(self):
+        return sample("S", [unsettled(None, [row("C 1s", 0.25, 30.0),
+                                             row("C 1s", 0.25, 30.0),
+                                             row("O 1s", 1.0, 30.0)],
+                                      ["Survey", "C 1s", "O 1s"])])
+
+    def test_ticking_a_counted_once_region_counts_it_without_a_stale_note(
+            self):
+        auto = self.survey_and_scan()
+        rp.settle_sample(auto)                          # the automatic way
+        self.assertEqual(auto.levels[0].include, [False, True, True])
+        self.assertEqual(len(auto.notes), 1)
+        s = self.survey_and_scan()
+        rp.settle_sample(s, {hand_key(s, 0, "C 1s", "Survey"): True})
+        lv = s.levels[0]
+        self.assertEqual(lv.include, [True, True, True])
+        self.assertEqual(lv.why, ["", "", ""])
+        self.assertAlmostEqual(lv.res[0]["at_pct"], 100 * 120 / 270, places=6)
+        self.assertFalse(any("fitted in more than one spectrum" in n
+                             for n in s.notes))
+        self.assertEqual(s.by_hand, ([], ["C 1s in Survey"]))
+        self.assertIn("counted although the automatic rules would not: "
+                      "C 1s in Survey", s.notes[-1])
+
+    def test_ticking_a_non_preferred_line_counts_it(self):
+        s = sample("S", [unsettled(None, [row("Pt 4f", 15.45, 200.0),
+                                          row("Pt 4d", 19.8, 300.0)])])
+        rp.settle_sample(s, {hand_key(s, 0, "Pt 4d"): True})
+        self.assertEqual(s.levels[0].include, [True, True])
+        self.assertFalse(any("fitted from more than one line" in n
+                             for n in s.notes))
+        self.assertEqual(s.by_hand, ([], ["Pt 4d"]))
+
+    def test_unticking_the_preferred_line_leaves_the_other_out_too(self):
+        s = sample("S", [unsettled(None, [row("Pt 4f", 15.45, 200.0),
+                                          row("Pt 4d", 19.8, 300.0),
+                                          row("O 1s", 1.0, 50.0)])])
+        rp.settle_sample(s, {hand_key(s, 0, "Pt 4f"): False})
+        lv = s.levels[0]
+        self.assertEqual(lv.include, [False, False, True])
+        self.assertEqual(lv.res[0]["why"], "not included")
+        self.assertEqual(lv.res[1]["why"], "not the preferred line")
+        self.assertFalse(any("fitted from more than one line" in n
+                             for n in s.notes))
+
+    def test_a_choice_equal_to_the_automatic_one_or_for_nothing_is_ignored(
+            self):
+        s = self.three()
+        rp.settle_sample(s, {hand_key(s, 0, "O 1s"): True,         # as is
+                             ("S", None, "Gone", "Gone", 0): False,
+                             ("other", None, "O 1s", "O 1s", 0): False})
+        self.assertEqual(s.by_hand, ([], []))
+        self.assertEqual(s.notes, [])
+
+    def test_only_the_level_it_was_made_at_changes(self):
+        s = sample("D", [unsettled(i, [row("Ti 2p", 2.0, 100.0),
+                                       row("O 1s", 1.0, 100.0)])
+                         for i in range(3)])
+        rp.settle_sample(s, {hand_key(s, 1, "O 1s"): False})
+        self.assertIsNone(self.pct(s, 1)["O 1s"])
+        self.assertEqual(self.pct(s, 0)["O 1s"], self.pct(s, 2)["O 1s"])
+        self.assertEqual(s.by_hand, (["O 1s at level 1"], []))
+        series = {x["name"]: x["values"]
+                  for x in rp.profile_series(s)["series"]}
+        self.assertIsNone(series["O 1s"][1])
+        self.assertIsNotNone(series["O 1s"][0])
+
+    @unittest.skipUnless(HAVE_NP, "numpy not installed")
+    def test_collect_applies_them(self):
+        from test_metasummary import Doc
+        from test_quant import linear_region
+        docs = [Doc([linear_region()], "fits.vms")]
+        auto = rp.collect(docs)
+        s = auto.samples[0]
+        key = rp.entry_key(s.key, s.levels[0].level, s.levels[0].entries, 0)
+        self.assertEqual(s.by_hand, ([], []))
+        hand = rp.collect(docs, overrides={key: False})
+        lv = hand.samples[0].levels[0]
+        self.assertEqual(lv.include, [False])
+        self.assertIsNone(lv.res[0]["at_pct"])
+        self.assertEqual(hand.samples[0].by_hand, (["Ti 2p"], []))
+        same = rp.collect(docs, overrides={})
+        self.assertEqual(same.samples[0].notes, s.notes)
+
+
 @unittest.skipUnless(HAVE_NP, "numpy not installed")
 class TestCasaxpsOverride(unittest.TestCase):
     """CasaXPS's own exported quantification (Quant_survey.txt etc., see
@@ -629,9 +766,9 @@ class TestPdf(Tmp):
         self.details = {"title": "T", "summary": "Fine.",
                         "methods": "Recorded."}
 
-    def build(self, spec=None, results="default"):
+    def build(self, spec=None, results="default", name="r.pdf"):
         import report
-        path = os.path.join(self.dir, "r.pdf")
+        path = os.path.join(self.dir, name)
         report.build_report(
             path, self.details, "", [], self.docs, [], lambda *a: 0,
             spec=spec or rs.default_spec(),
@@ -664,6 +801,16 @@ class TestPdf(Tmp):
         text = "\n".join(self.build(spec))
         self.assertNotIn("Film A", text)
         self.assertIn("Etched", text)
+
+    def test_a_region_left_out_by_hand_is_out_of_the_numbers_and_said(self):
+        s = self.results.samples[0]
+        auto = "\n".join(self.build())
+        self.assertNotIn("set by hand", auto)
+        rp.settle_sample(s, {hand_key(s, 0, "O 1s"): False})
+        text = "\n".join(self.build(name="hand.pdf"))
+        self.assertIn("set by hand", text)
+        self.assertIn("left out: O 1s", text)
+        self.assertIn("not included", text)
 
     def test_nothing_to_quantify_leaves_the_section_out(self):
         text = "\n".join(self.build(results=None))
@@ -739,6 +886,20 @@ class TestDeck(Tmp):
         self.assertIn("Quantification", got)
         self.assertEqual(self.title(slides[got["Film A"] - 1]),
                          "Quantification – Film A")
+
+    def test_a_region_left_out_by_hand_is_in_the_table_and_the_notes(self):
+        s = self.results.samples[0]
+        rp.settle_sample(s, {hand_key(s, 0, "O 1s"): False})
+        slides = self.build()
+        titles = [self.title(sl) for sl in slides]
+        table = slides[titles.index(
+            "Quantification – Film A: composition table")]
+        cells = [sh for sh in table.shapes if sh.has_table][0].table
+        rows = {cells.cell(r, 0).text: cells.cell(r, 5).text
+                for r in range(1, len(cells.rows))}
+        self.assertEqual(rows["O 1s"], "not included")
+        self.assertIn("set by hand",
+                      table.notes_slide.notes_text_frame.text)
 
     def test_a_sample_can_be_left_out_or_the_section_absent(self):
         spec = rs.with_child(rs.default_spec(), "results", "f1/Film A", False)

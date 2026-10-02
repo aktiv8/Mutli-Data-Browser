@@ -164,6 +164,12 @@ class QuantPanel(ttk.Frame):
         self.view.reset(self.sample.key if self.sample else None)
         self._show_sample()
 
+    def reset_all_ticks(self):
+        """Back to the automatic choice for every sample (the Report
+        generator's reset)."""
+        self.view.reset()
+        self._show_sample()
+
     # -- data --------------------------------------------------------------
     def refresh(self):
         """Reload from the app's ticked regions and this panel's own RSF

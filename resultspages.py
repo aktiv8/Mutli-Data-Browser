@@ -100,6 +100,9 @@ class Sample:
     rsf_table: list | None = None    # quant.normalise's RSF-fallback args,
     rsf_library: str = "scofield"    # carried so profile_series() can reuse
                                      # them when it re-normalises fresh
+    by_hand: tuple = ((), ())        # (left out, counted anyway): the
+                                     # regions whose automatic choice the
+                                     # user reversed (collect(overrides=))
 
     @property
     def is_profile(self):
@@ -140,13 +143,24 @@ CASAXPS_NOTE = ("Quantification for this sample is CasaXPS's own exported "
 
 
 def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
-           rsf_table=None, rsf_library="scofield", prefer_csv=False):
+           rsf_table=None, rsf_library="scofield", prefer_csv=False,
+           overrides=None):
     """Read the CasaXPS fits of the loaded files (``display`` maps a region to
     the copy that is drawn, with the user's names and binding-energy shift).
 
     ``rsf_table``/``rsf_library`` are ``quant.normalise``'s own RSF-fallback
     args (a list from ``rsf.load_rsf()``, off by default) -- carried onto
     each ``Sample`` so ``profile_series`` can reuse them later.
+
+    ``overrides`` is the user's own choice of which regions count,
+    ``{entry_key: bool}`` (``quantview.ViewState.include``): a region ticked
+    here counts although the automatic rules ("counted once", "not the
+    preferred line") left it out, an unticked one is left out. It is applied
+    after those rules, the automatic notes about a region the user touched
+    are not written (they would contradict the table), and one note per
+    sample says what was chosen by hand (``Sample.by_hand``). An entry equal
+    to the automatic choice, or naming a region that is not here, changes
+    nothing. Not the transmission choice: the report applies none.
 
     ``prefer_csv`` quantifies every fit region that has a complete CasaXPS
     CSV match (``casacsv.py``) from CasaXPS's own exported background and
@@ -224,11 +238,7 @@ def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
     for k in order:
         sample = by_sample[k]
         sample.levels.sort(key=lambda x: (x.level is None, x.level or 0))
-        for level in sample.levels:
-            _settle(level, sample.label, sample.notes)
-            _prefer_lines(level, sample.label, sample.notes, rsf_table,
-                         rsf_library)
-        sample.notes = list(dict.fromkeys(sample.notes))
+        settle_sample(sample, overrides, rsf_table, rsf_library)
         _element_note(sample)
         _source_note(sample)
         _rsf_note(sample)
@@ -254,6 +264,27 @@ def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
     return out
 
 
+def settle_sample(sample, overrides=None, rsf_table=None,
+                  rsf_library="scofield"):
+    """Decide what counts at every level of ``sample`` and normalise it: the
+    automatic rules (``_settle``, ``_prefer_lines``), then the user's own
+    ticks (``overrides``, see ``collect``). Fills ``Level.include`` / ``why``
+    / ``res``, ``Sample.by_hand`` and the notes that say what was done."""
+    left_out, counted = [], []
+    for level in sample.levels:
+        hand = _hand_lookup(overrides, sample.key, level)
+        _settle(level, sample.label, sample.notes, hand)
+        _prefer_lines(level, sample.label, sample.notes, rsf_table,
+                      rsf_library, hand)
+        for ei, now in _apply_overrides(level, hand, rsf_table, rsf_library):
+            name = _entry_name(level, ei, len(sample.levels) > 1)
+            (counted if now else left_out).append(name)
+    sample.notes = list(dict.fromkeys(sample.notes))
+    sample.by_hand = (left_out, counted)
+    if left_out or counted:
+        sample.notes.append(_hand_note(sample.label, left_out, counted))
+
+
 def _same(a, b):
     """Two names alike apart from case and spaces ("C 1s" and "C1s")."""
     strip = lambda t: "".join(str(t).lower().split())        # noqa: E731
@@ -269,7 +300,71 @@ def element_of(region):
     return m.group(1) if m else ""
 
 
-def _settle(level, label, notes):
+def _hand_lookup(overrides, skey, level):
+    """``hand(ei)`` -> the user's tick for entry ``ei`` of ``level`` (True /
+    False), or None when they made none; None for no overrides at all."""
+    if not overrides:
+        return None
+    return lambda ei: overrides.get(entry_key(skey, level.level,
+                                              level.entries, ei))
+
+
+def _touched(hand, entries, match):
+    """True when the user ticked or unticked any entry that ``match``
+    selects (an automatic note about those would contradict them)."""
+    return hand is not None and any(
+        hand(i) is not None for i, e in enumerate(entries) if match(e))
+
+
+def _apply_overrides(level, hand, rsf_table=None, rsf_library="scofield"):
+    """Apply the user's ticks to a settled level and normalise again.
+    Returns ``[(entry index, now counted)]`` for the entries whose automatic
+    choice was reversed. A reversed exclusion has no reason; a row the user
+    unticked says "not included"."""
+    if hand is None:
+        return []
+    changed = []
+    for i in range(len(level.entries)):
+        want = hand(i)
+        if want is None or bool(want) == level.include[i]:
+            continue
+        level.include[i] = bool(want)
+        level.why[i] = "" if want else "not included"
+        changed.append((i, bool(want)))
+    if changed:
+        level.res = quant.normalise(
+            [e["row"] for e in level.entries], level.include,
+            rsf_table=rsf_table, rsf_library=rsf_library)
+        for res, why in zip(level.res, level.why):
+            if why:
+                res["why"] = why
+    return changed
+
+
+def _entry_name(level, ei, several_levels):
+    """"C 1s" (+ " in Survey" when it is a survey's fit, + " at level 3")."""
+    e = level.entries[ei]
+    name = e["row"]["region"]
+    if not _same(e["spectrum"], name):
+        name += f" in {e['spectrum']}"
+    if several_levels:
+        n = level.level if level.level is not None else "-"
+        name += f" at level {n}"
+    return name
+
+
+def _hand_note(label, left_out, counted):
+    bits = []
+    if left_out:
+        bits.append("left out: " + ", ".join(left_out))
+    if counted:
+        bits.append("counted although the automatic rules would not: "
+                    + ", ".join(counted))
+    return (f"Which regions count in {label} was set by hand ("
+            + "; ".join(bits) + ").")
+
+
+def _settle(level, label, notes, hand=None):
     """Decide what counts at one level, then normalise it. A region name that
     is fitted in more than one spectrum counts once: the dedicated scan (the
     spectrum named after the region) if there is one, else the first."""
@@ -290,8 +385,11 @@ def _settle(level, label, notes):
         else:
             src = entries[keep]["spectrum"]
             level.why.append("counted once")
-            notes.append(f"{name} is fitted in more than one spectrum of "
-                         f"{label}; only the fit in {src} is counted.")
+            if not _touched(hand, entries,
+                            lambda o: o["row"]["region"] == name):
+                notes.append(f"{name} is fitted in more than one spectrum "
+                             f"of {label}; only the fit in {src} is "
+                             "counted.")
     level.res = quant.normalise([e["row"] for e in entries], level.include)
     for res, why in zip(level.res, level.why):
         if why:
@@ -312,7 +410,8 @@ _PREFERRED_LINE = {"Pt": "4f", "Au": "4f", "Ir": "4f", "Os": "4f", "Re": "4f",
                    "Pb": "4f", "Bi": "4f"}
 
 
-def _prefer_lines(level, label, notes, rsf_table=None, rsf_library="scofield"):
+def _prefer_lines(level, label, notes, rsf_table=None, rsf_library="scofield",
+                  hand=None):
     """After ``_settle``: when more than one of an element's distinct region
     names is still included and one of them is that element's known
     preferred line (``_PREFERRED_LINE``), the others are excluded (``why =
@@ -344,6 +443,9 @@ def _prefer_lines(level, label, notes, rsf_table=None, rsf_library="scofield"):
         for name in losers:
             level.include[regions[name]] = False
             level.why[regions[name]] = "not the preferred line"
+        if _touched(hand, entries, lambda o: element_of(
+                o["row"]["region"]) == el):
+            continue
         notes.append(
             f"{el} is fitted from more than one line ({preferred_name}, "
             + ", ".join(losers) + f") in {label}; only {preferred_name}, "

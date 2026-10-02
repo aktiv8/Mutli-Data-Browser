@@ -251,6 +251,47 @@ class TestQuantPanelInApp(unittest.TestCase):
         self.assertEqual(panel.view.include, {})
         self.assertEqual(self._first_row(panel)[1], quant_ui.TICK_ON)
 
+    def test_the_report_follows_the_tabs_ticks(self):
+        ws, panel = self._ticked_panel()
+        auto = ws._results()
+        self.assertEqual(auto.samples[0].levels[0].include, [True])
+        self.assertEqual(ws.quant_hand_count(), 0)
+        panel.toggle_row(next(iter(panel._row_entry)))
+        hand = ws._results()                      # the memo notices the tick
+        self.assertIsNot(hand, auto)
+        sample = hand.samples[0]
+        self.assertEqual(sample.levels[0].include, [False])
+        self.assertEqual(sample.by_hand, (["Ti 2p"], []))
+        self.assertEqual(ws.quant_hand_count(), 1)
+        self.assertIs(ws._results(), hand)        # and keeps it until then
+        # the tab still shows the automatic choice as its default
+        self.assertEqual(panel.sample.levels[0].include, [True])
+        ws.reset_quant_ticks()
+        self.assertEqual(ws.quant_hand_count(), 0)
+        self.assertEqual(ws._results().samples[0].levels[0].include, [True])
+        self.assertEqual(self._first_row(panel)[1], quant_ui.TICK_ON)
+
+    def test_the_transmission_choice_does_not_reach_the_report(self):
+        ws, panel = self._ticked_panel()
+        before = ws._results()
+        panel.view.transmission = True
+        self.assertIs(ws._results(), before)
+
+    def test_the_report_generator_says_when_ticks_change_the_report(self):
+        import reportgen_ui
+        ws, panel = self._ticked_panel()
+        dlg = reportgen_ui.ReportGeneratorDialog(ws.root, ws)
+        self.addCleanup(dlg.close)
+        self.assertEqual(dlg.hand.grid_info(), {})            # nothing to say
+        panel.toggle_row(next(iter(panel._row_entry)))
+        dlg.refresh_hand()
+        self.assertTrue(dlg.hand.grid_info())
+        self.assertIn("1 region counted by your own ticks",
+                      dlg.hand_text.cget("text"))
+        dlg.reset_hand()
+        self.assertEqual(dlg.hand.grid_info(), {})
+        self.assertEqual(ws.quant_hand_count(), 0)
+
     def test_transmission_is_offered_only_when_a_row_has_it(self):
         ws, panel = self._ticked_panel()
         self.assertEqual(str(panel.trans_check.cget("state")), "disabled")

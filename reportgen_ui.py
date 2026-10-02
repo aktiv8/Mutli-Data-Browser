@@ -130,6 +130,16 @@ class ReportGeneratorDialog(tk.Toplevel):
                                  justify="left")
         self.summary.grid(row=3, column=0, columnspan=2, sticky="w",
                           pady=(8, 0))
+        # shown only while the Quantification tab's region ticks differ
+        # from the automatic choice (refresh_hand)
+        self.hand = ttk.Frame(left)
+        self.hand.grid(row=4, column=0, columnspan=2, sticky="ew",
+                       pady=(6, 0))
+        self.hand_text = ttk.Label(self.hand, style="Muted.TLabel",
+                                   wraplength=330, justify="left")
+        self.hand_text.pack(side="left", fill="x", expand=True)
+        ttk.Button(self.hand, text="Reset",
+                   command=self.reset_hand).pack(side="right")
 
         right = ttk.Notebook(body)
         right.grid(row=1, column=1, sticky="nsew")
@@ -390,6 +400,23 @@ class ReportGeneratorDialog(tk.Toplevel):
                 self.tree.selection_set(iid)
         self.summary.config(text="Report: " + reportspec.describe(
             self.spec, self.inv))
+        self.refresh_hand()
+
+    def refresh_hand(self):
+        """The line under the section list that says how many regions the
+        Quantification tab's ticks change in the report, with a Reset."""
+        n = self.app.quant_hand_count()
+        if not n:
+            self.hand.grid_remove()
+            return
+        self.hand_text.config(text=(
+            f"{n} region{'s' if n != 1 else ''} counted by your own ticks "
+            "in the Quantification tab, not the automatic rules."))
+        self.hand.grid()
+
+    def reset_hand(self):
+        self.app.reset_quant_ticks()
+        self.refresh_hand()
 
     def _click(self, event):
         iid = self.tree.identify_row(event.y)
