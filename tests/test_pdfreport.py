@@ -104,13 +104,13 @@ class TestReport(unittest.TestCase):
         pdf.savefig(f)
         return 1
 
-    def build(self, spec=None, figs=None):
+    def build(self, spec=None, figs=None, images=None):
         import report
         path = os.path.join(self.dir, "r.pdf")
         self.n = report.build_report(
             path, self.details, "", self.rows, self.docs,
             self.figs if figs is None else figs, self.render,
-            spec=spec or rs.default_spec())
+            spec=spec or rs.default_spec(), render_images=images)
         self.doc = mupdf.open(path)
         self.addCleanup(self.doc.close)
         return [p.get_text() for p in self.doc]
@@ -269,6 +269,90 @@ class TestReport(unittest.TestCase):
         self.assertEqual(joined.count("Appendix"), 1)
         page = next(p for p in pages if "Appendix" in p)
         self.assertIn("Data files", page)
+
+    # -- clickable contents, and a line for every picture page ---------------
+    def titled_pages(self, titles):
+        """A ``render_images`` that writes one page per title and returns the
+        titles, the way ``Workspace._report_image_pages`` does."""
+        def render_images(pdf):
+            from matplotlib.figure import Figure
+            for t in titles:
+                f = Figure(figsize=(11.7, 8.3))
+                f.text(0.5, 0.5, f"picture page {t}")
+                pdf.savefig(f)
+            return list(titles)
+        return render_images
+
+    def contents_links(self):
+        """``[(printed title, target page 1-based)]`` for every link on the
+        printed contents, read back from the PDF."""
+        out = []
+        for p in range(1, self.doc.page_count):
+            page = self.doc[p]
+            if "Contents" not in page.get_text()[:40] and not out:
+                continue
+            for link in page.get_links():
+                if link["kind"] != mupdf.LINK_GOTO:
+                    continue
+                out.append((page.get_textbox(link["from"]).strip(),
+                            link["page"] + 1))
+            if out and "Data files" in page.get_text():
+                break
+        return out
+
+    def assert_links_match_bookmarks(self):
+        links = self.contents_links()
+        toc = [(t, p) for _l, t, p in self.doc.get_toc() if t != "Contents"]
+        self.assertTrue(links)
+        for title, page in toc:
+            self.assertIn((title, page), links, title)
+        self.assertFalse([t for t, _p in links if t.isdigit()],
+                         "page numbers are not links")
+        return links
+
+    def test_every_title_on_the_contents_is_a_link_to_its_page(self):
+        self.build()
+        self.assert_links_match_bookmarks()
+
+    def test_the_links_follow_a_divider_page_too(self):
+        pages = self.build(figs=self.sixfigs())
+        links = dict(self.assert_links_match_bookmarks())
+        # the divided section's own link goes to its divider, not its figure
+        self.assertIn("6 pages", pages[links["Figures"] - 1])
+
+    def test_each_picture_page_gets_its_own_contents_line(self):
+        titles = ["Camera pictures (1 of 2)", "Camera pictures (2 of 2)",
+                  "SnapMap – Pt foil"]
+        pages = self.build(images=self.titled_pages(titles))
+        toc = self.doc.get_toc()
+        names = [t for _l, t, _p in toc]
+        head = names.index(rs.LABELS["images"])
+        self.assertEqual(names[head + 1:head + 4], titles)
+        self.assertEqual({l for l, t, _p in toc if t in titles}, {2})
+        for lvl, title, page in toc:
+            if title in titles:
+                self.assertIn(f"picture page {title}", pages[page - 1])
+                self.assertIn(title, pages[1])            # printed contents
+        self.assert_links_match_bookmarks()
+
+    def test_one_picture_page_is_one_contents_line(self):
+        self.build(images=self.titled_pages(["Camera pictures (1 of 1)"]))
+        names = [t for _l, t, _p in self.doc.get_toc()]
+        self.assertIn(rs.LABELS["images"], names)
+        self.assertNotIn("Camera pictures (1 of 1)", names)
+
+    def test_a_plain_count_from_render_images_still_works(self):
+        def count_only(pdf):
+            from matplotlib.figure import Figure
+            for _ in range(3):
+                pdf.savefig(Figure(figsize=(11.7, 8.3)))
+            return 3
+        self.build(images=count_only)
+        toc = self.doc.get_toc()
+        self.assertEqual([l for l, t, _p in toc if t == rs.LABELS["images"]],
+                         [1])
+        self.assertEqual([t for l, t, _p in toc
+                          if l == 2 and "picture" in t.lower()], [])
 
     def test_audit_sections_split_by_another_still_get_one_appendix(self):
         # metadata, figures, files: the figures end the first flow run, so a

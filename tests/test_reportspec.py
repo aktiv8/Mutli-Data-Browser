@@ -690,6 +690,25 @@ class TestInTheApp(unittest.TestCase):
             for name in ("_has_image_pages", "_image_items"):
                 del ws.__dict__[name]
 
+    def test_the_pdf_gets_the_title_of_every_picture_page(self):
+        """What ``_report_image_pages`` hands ``build_report`` is the title of
+        each page it wrote, so the contents can list each one."""
+        from matplotlib.backends.backend_pdf import PdfPages
+        import imagepages as ip
+        import test_imagepages
+        if not test_imagepages.HAVE:
+            self.skipTest("matplotlib, numpy and Pillow needed")
+        ws = self.ws
+        ws._image_page_plan = lambda skip=(), mosaics=False: ip.plan(
+            [test_imagepages.site_doc(2)])
+        ws._pdf_figure_size = (11.7, 8.3)
+        try:
+            with PdfPages(os.path.join(self.dir, "p.pdf")) as pdf:
+                titles = ws._report_image_pages(pdf)
+        finally:
+            del ws.__dict__["_image_page_plan"]
+        self.assertEqual(titles, ["Camera pictures", "SnapMap – S1"])
+
     def test_the_pictures_left_out_reach_the_report_and_the_deck(self):
         ws = self.ws
         seen = []

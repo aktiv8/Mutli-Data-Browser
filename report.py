@@ -593,6 +593,52 @@ def _renumber(entries, divided, number):
     return out
 
 
+def _find_title(out, mu, pnos, title, after):
+    """Where ``title`` is printed on the contents pages ``pnos`` (page
+    indexes of ``out``) after the position ``after`` = ``(k, y)`` (the
+    previous row): ``(k, rect)`` of the first such hit, or None. The page
+    numbers' column is left out of the search, and a long title that wraps is
+    found by its first words."""
+    for probe in (title, title[:30]):
+        best = None
+        for k, pno in enumerate(pnos):
+            if k < after[0]:
+                continue
+            page = out[pno]
+            clip = mu.Rect(0, 0, page.rect.width * 0.85, page.rect.height)
+            for r in page.search_for(probe, clip=clip):
+                if (k, round(r.y0, 1)) > (after[0], round(after[1], 1)) \
+                        and (best is None or (k, r.y0) < (best[0], best[1].y0)):
+                    best = (k, r)
+        if best is not None:
+            return best
+    return None
+
+
+def _link_contents(out, mu, parts, contents, entries, number):
+    """Make each title on the printed contents a link to its page, the way
+    the deck's contents rows are. ``entries`` is the renumbered list that
+    also made the contents and the bookmarks, so the three agree; the title
+    is found on the page by searching for it in reading order (the parts were
+    joined with ``insert_pdf``, so reportlab's own links did not survive), and
+    a row whose title cannot be found is left unlinked. The page numbers are
+    not links, and nothing about how the page looks changes."""
+    start = _starts(parts)[parts.index(contents)]
+    pnos = [number[("page", start + k)] - 1 for k in range(contents["pages"])]
+    after = (0, -1.0)
+    for sid, _lvl, title, at in entries:
+        if sid == "contents":
+            continue
+        hit = _find_title(out, mu, pnos, title, after)
+        if hit is None:
+            continue
+        k, rect = hit
+        out[pnos[k]].insert_link({"kind": mu.LINK_GOTO, "from": rect,
+                                  "page": at - 1, "to": mu.Point(0, 0),
+                                  "zoom": 0})
+        after = (k, rect.y0)
+
+
 def _draw_divider(out, mu, sid, count, look, pagesize):
     """A full-bleed page naming a section and how many report pages it has,
     the PDF equivalent of ``pptx_export._divider_slide``."""
@@ -664,7 +710,9 @@ def build_report(path, details, logo, file_rows, docs, figures,
     ``render_figure(pdf, number, figure)`` draws that figure's pages onto a
     matplotlib ``PdfPages`` and returns how many it wrote.
     ``render_images(pdf)`` does the same for the camera-picture and SnapMap
-    pages (None: there are none). ``results`` is the ``resultspages.Results``
+    pages (None: there are none) and returns either how many it wrote or the
+    list of their titles, one per PDF page (each then has its own line in the
+    contents and the bookmarks). ``results`` is the ``resultspages.Results``
     the Quantification section is made from (None: there is none)."""
     if spec is None:
         spec = reportspec.spec_from_sections(sections, "pdf")
@@ -712,8 +760,16 @@ def build_report(path, details, logo, file_rows, docs, figures,
                 from matplotlib.backends.backend_pdf import PdfPages
                 with PdfPages(part) as pdf:
                     written = render_images(pdf)
+                # a list is the title of each page written (one PDF page
+                # each): every one earns a line in the contents; a plain
+                # count keeps the section as one line
+                if isinstance(written, (list, tuple)):
+                    marks = [("images", str(t), i)
+                             for i, t in enumerate(written, 1)]
+                else:
+                    marks = [("images", None, 1)]
                 add(k, kind, "images", written and _page_count(mu, part),
-                    [("images", None, 1)])
+                    marks)
             elif kind == "figures" and figures:
                 from matplotlib.backends.backend_pdf import PdfPages
                 skip = run[0][1]
@@ -780,6 +836,11 @@ def build_report(path, details, logo, file_rows, docs, figures,
             try:
                 out.set_toc(outline)
             except Exception:                # noqa: BLE001 - bookmarks are extra
+                pass
+        if contents is not None and contents in parts:
+            try:
+                _link_contents(out, mu, parts, contents, entries, number)
+            except Exception:                # noqa: BLE001 - links are extra
                 pass
         _footer(out, mu, title, final_sections, look,
                 skip_first=bool(items) and items[0][0] == "cover")

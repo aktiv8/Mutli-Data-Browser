@@ -3992,14 +3992,16 @@ class Workspace:
 
     def _report_image_pages(self, pdf, skip=(), mosaics=False):
         """Camera sheets, mosaics and SnapMap pages onto a PdfPages, sized to
-        match the report's page (see ``_report_figure_pages``); returns how
-        many (``skip``: keys of pictures and sites left out)."""
-        def consume(_pg, page):
+        match the report's page (see ``_report_figure_pages``); returns the
+        title of each page written, in order (``report.build_report`` gives
+        every one a line in the Contents and the bookmarks; an empty list when
+        there are none; ``skip``: keys of pictures and sites left out)."""
+        def consume(pg, page):
             pdf.savefig(page)
-            return 1
-        return len(self._render_image_pages(
+            return pg.title
+        return self._render_image_pages(
             self._image_page_plan(skip=skip, mosaics=mosaics), consume,
-            self._pdf_figure_size, (0.0, 0.03, 1.0, 0.93)))
+            self._pdf_figure_size, (0.0, 0.03, 1.0, 0.93))
 
     def _deck_image_pages(self, skip=(), mosaics=False):
         """The same pages as slide pictures: ``[{"title", "png", "notes"}]``,
