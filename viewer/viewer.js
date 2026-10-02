@@ -462,15 +462,18 @@
   };
   V.lineLabel = function (line) { return line[0] + ' ' + line[1]; };
   /* the lines within `win` eV of a binding energy, most plausible first: nearest, a
-     secondary line (rank > 1) needs to be about 0.8 eV closer per rank step, and the
-     elements met on almost every sample get a head start */
+     secondary line (rank > 1) needs to be about 0.8 eV closer per rank step, common
+     elements get a head start and a rare element's secondary line pays el.rare */
   V.candidates = function (be, win, el, hv) {
     var out = [];
     el.lines.forEach(function (line, i) {
       var lb = V.lineBe(line, hv, el.hv), d = lb - be;
       if (Math.abs(d) > win) return;
       var rank = line[4] === null || line[4] === undefined ? 1 : line[4];
-      var key = Math.abs(d) + 0.8 * (rank - 1) - (rank === 1 && el.common.indexOf(line[0]) >= 0 ? el.bonus : 0);
+      var common = el.common.indexOf(line[0]) >= 0;
+      var key = Math.abs(d) + 0.8 * (rank - 1);
+      if (common && rank === 1) key -= el.bonus;
+      else if (!common && rank > 1) key += el.rare || 0;
       out.push({ d: d, be: lb, line: line, label: V.lineLabel(line), key: key, i: i });
     });
     out.sort(function (a, b) { return a.key - b.key || a.i - b.i; });

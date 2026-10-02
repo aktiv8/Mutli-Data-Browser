@@ -367,7 +367,9 @@ def element_table(lines):
     return {"lines": [[e["el"], e["line"], e.get("be"), e.get("ke"),
                        e.get("rank", 1)] for e in lines],
             "common": sorted(xpslines.COMMON),
-            "bonus": xpslines.COMMON_BONUS, "hv": xpslines.DEFAULT_HV}
+            "bonus": xpslines.COMMON_BONUS,
+            "rare": xpslines.RARE_SECONDARY_PENALTY,
+            "hv": xpslines.DEFAULT_HV}
 
 
 def rsf_table(entries):
