@@ -21,8 +21,9 @@ column), dividing the transmission function out, which depth level to show
 (or the depth profile, in one of three modes) and writing the table as a CSV
 -- lives in ``quantview.ViewState``; the numbers are recomputed from the
 report's rows, never edited, and the report itself is not touched. The
-ticks are for this session (like the HTML page's); the transmission choice
-and the RSF library are saved with the workbook state.
+ticks are keyed by what a region is (``quantview.entry_key``), so they
+survive the tree being re-ticked and are saved, with the transmission choice
+and the RSF library, in the workbook state.
 """
 
 from __future__ import annotations
@@ -179,7 +180,6 @@ class QuantPanel(ttk.Frame):
         # a sample with no fit of its own (CasaXPS's own export only) is
         # already shown in the "CasaXPS quant" tab -- not duplicated here
         self.samples = [s for s in results.samples if s.levels]
-        self.view.sync(self.samples)
         self.sample_box["values"] = [s.label for s in self.samples]
         has_t = quantview.transmission_available(self.samples)
         self.trans_check.configure(state="normal" if has_t else "disabled")
@@ -259,8 +259,8 @@ class QuantPanel(ttk.Frame):
         if ei is None or self.sample is None or self._level_of_row is None:
             return
         lv = self.sample.levels[self._level_of_row]
-        self.view.toggle(self.sample.key, self._level_of_row, ei,
-                         lv.include[ei])
+        self.view.toggle(quantview.entry_key(
+            self.sample, self._level_of_row, ei), lv.include[ei])
         self._show_sample()
 
     # -- output --------------------------------------------------------------

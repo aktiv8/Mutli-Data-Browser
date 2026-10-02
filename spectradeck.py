@@ -3483,6 +3483,7 @@ class Workspace:
             "csv_curves": bool(self.csv_curves_var.get()),
             "quant_rsf": self.quant_panel.rsf_choice(),
             "quant_transmission": bool(self.quant_panel.view.transmission),
+            "quant_include": self.quant_panel.view.to_json(),
             "ident_show": {k: bool(v.get())
                           for k, v in self.ident_vars.items()},
             "axis_colour": self.axis_choice,
@@ -3542,6 +3543,12 @@ class Workspace:
         if "quant_transmission" in st:
             self.quant_panel.set_transmission(
                 bool(st["quant_transmission"]))
+        view = self.quant_panel.view
+        if "quant_include" in st:            # after refresh(): files are loaded
+            before = view.to_json()
+            view.load_json(st["quant_include"])
+            if view.to_json() != before:     # a figure page can re-apply it
+                self.quant_panel.refresh()
         ids = st.get("ident_show")
         if isinstance(ids, dict):
             for k, v in self.ident_vars.items():
@@ -3659,6 +3666,7 @@ class Workspace:
         self.casa_quant = None
         self._casa_quant_scanned = set()
         self.casa_csv_imports = []
+        self.quant_panel.view.reset()       # another workbook's region ticks
         self._refresh_info()
 
     def new_workbook(self):

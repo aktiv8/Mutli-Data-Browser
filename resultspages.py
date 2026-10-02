@@ -55,6 +55,22 @@ PROFILE_AXES = (("depth", "Depth (nm)"), ("etch", "Etch time (s)"),
                 ("fluence", "Ion fluence (ions/cm²)"), ("level", "Level"))
 
 
+def entry_key(sample_key, level, entries, ei):
+    """A region's identity by what it is, not where it sits in a list:
+    ``(sample key, level number, spectrum name, region name, occurrence)``
+    where ``occurrence`` counts earlier entries of the level that share the
+    spectrum and region names (two spectra with one display name). Stable
+    across a reload (``Sample.key`` is built from the workbook file id) and
+    when other spectra are ticked or unticked, so a user's choice of what
+    counts can be saved and handed to the report builders. ``entries`` is
+    ``Level.entries``."""
+    e = entries[ei]
+    spectrum, region = e["spectrum"], e["row"]["region"]
+    occ = sum(1 for o in entries[:ei] if o["spectrum"] == spectrum
+              and o["row"]["region"] == region)
+    return (sample_key, level, spectrum, region, occ)
+
+
 @dataclass
 class Level:
     """One sample at one depth level (``level`` None: not a depth profile)."""

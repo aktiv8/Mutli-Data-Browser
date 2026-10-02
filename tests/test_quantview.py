@@ -43,7 +43,7 @@ class TestTicks(unittest.TestCase):
 
     def test_unticking_a_region_shares_the_total_between_the_rest(self):
         names = [e["row"]["region"] for e in self.s.levels[0].entries]
-        self.st.toggle(self.s.key, 0, names.index("C 1s"), True)
+        self.st.toggle(qv.entry_key(self.s, 0, names.index("C 1s")), True)
         eff = qv.effective(self.s, 0, self.st)
         got = pct(eff)
         self.assertIsNone(got["C 1s"])
@@ -53,9 +53,9 @@ class TestTicks(unittest.TestCase):
         self.assertIsNotNone(pct(self.s.levels[0])["C 1s"])
 
     def test_toggling_back_to_the_default_forgets_the_choice(self):
-        self.assertFalse(self.st.toggle(self.s.key, 0, 1, True))
+        self.assertFalse(self.st.toggle(qv.entry_key(self.s, 0, 1), True))
         self.assertTrue(any(qv.changed(self.s, 0, self.st)))
-        self.assertTrue(self.st.toggle(self.s.key, 0, 1, True))
+        self.assertTrue(self.st.toggle(qv.entry_key(self.s, 0, 1), True))
         self.assertFalse(any(qv.changed(self.s, 0, self.st)))
         self.assertEqual(self.st.include, {})
 
@@ -66,7 +66,7 @@ class TestTicks(unittest.TestCase):
         s = sample("T", [lv])
         eff = qv.effective(s, 0, self.st)
         self.assertEqual(eff.res[2]["why"], "counted once")   # default kept
-        self.st.toggle(s.key, 0, 2, False)
+        self.st.toggle(qv.entry_key(s, 0, 2), False)
         eff = qv.effective(s, 0, self.st)
         self.assertIsNotNone(eff.res[2]["at_pct"])
         self.assertEqual(eff.res[2]["why"], "")
@@ -76,22 +76,22 @@ class TestTicks(unittest.TestCase):
     def test_unticking_a_default_exclusion_keeps_the_reports_reason(self):
         lv = level(None, [row("C 1s", 0.25, 30.0), row("C 1s", 0.25, 60.0)])
         s = sample("T", [lv])
-        self.st.toggle(s.key, 0, 0, True)            # untick the one counted
+        self.st.toggle(qv.entry_key(s, 0, 0), True)   # untick the one counted
         eff = qv.effective(s, 0, self.st)
         self.assertEqual(eff.res[0]["why"], "not included")
         self.assertEqual(eff.res[1]["why"], "counted once")
 
     def test_reset_forgets_one_sample_or_all(self):
         other = sample("U", [three_element_level(None)])
-        self.st.toggle(self.s.key, 0, 0, True)
-        self.st.toggle(other.key, 0, 0, True)
+        self.st.toggle(qv.entry_key(self.s, 0, 0), True)
+        self.st.toggle(qv.entry_key(other, 0, 0), True)
         self.st.reset(self.s.key)
-        self.assertEqual(list(self.st.include), [(other.key, 0, 0)])
+        self.assertEqual([k[0] for k in self.st.include], [other.key])
         self.st.reset()
         self.assertEqual(self.st.include, {})
 
     def test_composition_cells_follow_the_ticks(self):
-        self.st.toggle(self.s.key, 0, 0, True)           # Ti 2p out
+        self.st.toggle(qv.entry_key(self.s, 0, 0), True)   # Ti 2p out
         cells = {c[0]: c for k, c in qv.composition(self.s, 0, self.st)
                  if k == "region"}
         self.assertEqual(cells["Ti 2p"][5], "not included")
@@ -147,16 +147,42 @@ class TestLevelsAndProfile(unittest.TestCase):
         one = sample("O", [three_element_level(None)])
         self.assertEqual(self.st.shown(one), 0)           # not a profile
 
-    def test_ticks_are_dropped_when_the_regions_change(self):
-        self.st.sync([self.s])
-        self.st.toggle(self.s.key, 0, 0, True)
-        self.st.sync([self.s])                            # same regions
-        self.assertEqual(len(self.st.include), 1)
+    def test_a_tick_belongs_to_its_region_not_its_position(self):
+        """Another spectrum coming or going shifts positions; the tick stays
+        on the region it was made for, and one whose region is gone is just
+        ignored."""
+        ei = [e["row"]["region"] for e in self.s.levels[0].entries]             .index("O 1s")
+        self.st.toggle(qv.entry_key(self.s, 0, ei), True)       # O 1s out
         again = sample("D", [three_element_level(i, etch=10.0 * i)
                              for i in range(3)])
-        again.levels[0].entries.pop()                     # a spectrum left
-        self.st.sync([again])
-        self.assertEqual(self.st.include, {})
+        again.levels[0].entries.pop(0)                    # Ti 2p left
+        got = {e["row"]["region"]: inc for e, inc in
+               zip(again.levels[0].entries,
+                   qv.includes(again, 0, self.st))}
+        self.assertEqual(got, {"O 1s": False, "C 1s": True})
+        again.levels[0].entries.pop(0)                    # O 1s left too
+        qv.includes(again, 0, self.st)                    # no error
+        self.assertEqual(len(self.st.include), 1)
+
+    def test_two_spectra_with_one_name_get_separate_keys(self):
+        lv = level(None, [row("C 1s", 0.25, 30.0), row("C 1s", 0.25, 60.0)])
+        s = sample("T", [lv])
+        self.assertNotEqual(qv.entry_key(s, 0, 0), qv.entry_key(s, 0, 1))
+        self.assertEqual(qv.entry_key(s, 0, 1)[-1], 1)
+
+    def test_the_ticks_round_trip_through_json_and_bad_input_is_ignored(self):
+        self.st.toggle(qv.entry_key(self.s, 0, 0), True)
+        self.st.toggle(qv.entry_key(self.s, 2, 1), True)
+        rows = self.st.to_json()
+        import json
+        other = qv.ViewState()
+        other.load_json(json.loads(json.dumps(rows)))
+        self.assertEqual(other.include, self.st.include)
+        other.load_json([["x"], "junk", [1, 2, 3, 4, 5, 6],
+                         ["k", None, "sp", "reg", 0, True]])
+        self.assertEqual(other.include, {("k", None, "sp", "reg", 0): True})
+        other.load_json("not a list")
+        self.assertEqual(other.include, {})
 
     def test_level_labels_say_what_is_known(self):
         lv = three_element_level(2, etch=40.0, depth=2.5)
@@ -182,7 +208,7 @@ class TestLevelsAndProfile(unittest.TestCase):
         before = qv.profile(self.s, self.st)["series"][0]["values"]
         ei = [e["row"]["region"] for e in self.s.levels[1].entries] \
             .index("C 1s")
-        self.st.toggle(self.s.key, 1, ei, True)
+        self.st.toggle(qv.entry_key(self.s, 1, ei), True)
         series = {x["name"]: x["values"]
                   for x in qv.profile(self.s, self.st)["series"]}
         self.assertIsNone(series["C 1s"][1])
@@ -211,7 +237,7 @@ class TestCsv(unittest.TestCase):
         self.assertEqual(sum(r == list(quant.CSV_HEADER) for r in got), 1)
 
     def test_ticks_and_transmission_reach_the_file(self):
-        self.st.toggle(self.a.key, 0, 2, True)           # C 1s of level 0
+        self.st.toggle(qv.entry_key(self.a, 0, 2), True)   # C 1s of level 0
         got = qv.csv_table([self.a], self.st)
         c1s = [r for r in got if r[3] == "C 1s" and r[1] == "0"
                and r[9] == ""]

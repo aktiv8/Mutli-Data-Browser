@@ -27,9 +27,21 @@ PROFILE_MODES = (("element", "Element (at %)"),
                  ("share", "State share of its region (%)"))
 
 
+def entry_key(sample, li, ei):
+    """The content key of entry ``ei`` of level ``li`` (see
+    ``resultspages.entry_key``)."""
+    lv = sample.levels[li]
+    return resultspages.entry_key(sample.key, lv.level, lv.entries, ei)
+
+
 class ViewState:
-    """The user's choices. ``include`` maps ``(sample key, level index, entry
-    index)`` to a tick; a missing key follows the level's own default."""
+    """The user's choices. ``include`` maps an entry's content key
+    (``entry_key``) to a tick; a missing key follows the level's own default.
+    Keys name the region (sample, level, spectrum, region), not its position,
+    so a tick survives other spectra being ticked in the tree, is ignored
+    once its region is gone, and can be saved (``Workspace.capture_state``)
+    and handed to the report builders (``resultspages.collect(overrides=)``).
+    """
 
     def __init__(self):
         self.include = {}
@@ -37,19 +49,18 @@ class ViewState:
         self.level = {}                 # sample key -> level index; None = the
                                         # depth profile
         self.profile_mode = "element"
-        self._sigs = {}                 # sample key -> signature(sample)
 
-    def ticked(self, skey, li, ei, default):
-        return self.include.get((skey, li, ei), default)
+    def ticked(self, key, default):
+        return self.include.get(key, default)
 
-    def toggle(self, skey, li, ei, default):
+    def toggle(self, key, default):
         """Flip one tick; returns the new value. A tick that is back at the
         default is forgotten, so ``changed`` stays truthful."""
-        now = not self.ticked(skey, li, ei, default)
+        now = not self.ticked(key, default)
         if now == default:
-            self.include.pop((skey, li, ei), None)
+            self.include.pop(key, None)
         else:
-            self.include[(skey, li, ei)] = now
+            self.include[key] = now
         return now
 
     def reset(self, skey=None):
@@ -73,24 +84,24 @@ class ViewState:
             return None
         return self.level_index(sample)
 
-    def sync(self, samples):
-        """Forget the ticks of any sample whose regions are no longer the
-        ones they were made for (a file added, a spectrum unticked, a rename):
-        a tick is stored by position, so it must not slide onto another
-        row."""
-        for s in samples:
-            sig = signature(s)
-            if self._sigs.get(s.key, sig) != sig:
-                self.reset(s.key)
-            self._sigs[s.key] = sig
+    def to_json(self):
+        """The ticks as a list of ``[sample key, level, spectrum, region,
+        occurrence, tick]`` (stable order) for the workbook state."""
+        return [list(k) + [bool(v)]
+                for k, v in sorted(self.include.items(), key=repr)]
 
-
-def signature(sample):
-    """Which regions a sample's levels hold, in order (what a tick refers
-    to)."""
-    return tuple((lv.level, tuple((e["spectrum"], e["row"]["region"])
-                                  for e in lv.entries))
-                 for lv in sample.levels)
+    def load_json(self, rows):
+        """Replace the ticks from ``to_json`` output; anything malformed is
+        skipped (a state written by another build must not break opening)."""
+        out = {}
+        for r in rows if isinstance(rows, list) else []:
+            if (isinstance(r, (list, tuple)) and len(r) == 6
+                    and isinstance(r[0], str) and isinstance(r[2], str)
+                    and isinstance(r[3], str) and isinstance(r[4], int)
+                    and (r[1] is None or isinstance(r[1], int))
+                    and isinstance(r[5], bool)):
+                out[tuple(r[:5])] = r[5]
+        self.include = out
 
 
 def level_label(lv, i):
@@ -114,14 +125,14 @@ def transmission_available(samples):
 def includes(sample, li, state):
     """The tick of every entry of one level of ``sample``."""
     lv = sample.levels[li]
-    return [state.ticked(sample.key, li, ei, lv.include[ei])
+    return [state.ticked(entry_key(sample, li, ei), lv.include[ei])
             for ei in range(len(lv.entries))]
 
 
 def changed(sample, li, state):
     """Per entry: does the user's tick differ from the default?"""
     lv = sample.levels[li]
-    return [(sample.key, li, ei) in state.include
+    return [entry_key(sample, li, ei) in state.include
             for ei in range(len(lv.entries))]
 
 

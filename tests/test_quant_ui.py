@@ -209,6 +209,48 @@ class TestQuantPanelInApp(unittest.TestCase):
         self.assertEqual(panel.samples, [])
         self.assertEqual(self._rows(panel), [])
 
+    def _first_row(self, panel):
+        return next(r for r in self._rows(panel) if r[0] in panel._row_entry)
+
+    def test_region_ticks_are_part_of_the_saved_state(self):
+        ws, panel = self._ticked_panel()
+        self.assertEqual(ws.capture_state()["quant_include"], [])
+        panel.toggle_row(next(iter(panel._row_entry)))
+        saved = ws.capture_state()["quant_include"]
+        self.assertEqual(len(saved), 1)
+        self.assertIs(saved[0][-1], False)
+        self.assertEqual(saved[0][0], panel.sample.key)
+        panel.reset_ticks()                              # as in a new session
+        self.assertEqual(self._first_row(panel)[1], quant_ui.TICK_ON)
+        ws.apply_state({"quant_include": saved})
+        self.assertEqual(self._first_row(panel)[1], quant_ui.TICK_OFF)
+        self.assertEqual(self._first_row(panel)[2][5], "not included")
+
+    def test_a_state_without_ticks_leaves_the_live_ones_alone(self):
+        ws, panel = self._ticked_panel()
+        panel.toggle_row(next(iter(panel._row_entry)))
+        ws.apply_state({})
+        self.assertEqual(self._first_row(panel)[1], quant_ui.TICK_OFF)
+
+    def test_a_tick_survives_the_spectrum_being_unticked_in_the_tree(self):
+        ws, panel = self._ticked_panel()
+        region = ws.docs[0].regions[0]
+        panel.toggle_row(next(iter(panel._row_entry)))
+        ws.checked.discard(id(region))
+        panel.refresh()
+        self.assertEqual(panel.samples, [])
+        ws.checked.add(id(region))
+        panel.refresh()
+        self.assertEqual(self._first_row(panel)[1], quant_ui.TICK_OFF)
+
+    def test_a_new_workbook_starts_with_every_region_ticked(self):
+        ws, panel = self._ticked_panel()
+        panel.toggle_row(next(iter(panel._row_entry)))
+        self.assertTrue(panel.view.include)
+        ws._reset_workbook()
+        self.assertEqual(panel.view.include, {})
+        self.assertEqual(self._first_row(panel)[1], quant_ui.TICK_ON)
+
     def test_transmission_is_offered_only_when_a_row_has_it(self):
         ws, panel = self._ticked_panel()
         self.assertEqual(str(panel.trans_check.cget("state")), "disabled")
