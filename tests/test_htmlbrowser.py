@@ -703,6 +703,57 @@ class TestFits(unittest.TestCase):
         self.assertNotIn("fit", by["C 1s"])
         self.assertIn("fit", by["Ti 2p"])
 
+    def hand_key(self, docs, region="Ti 2p"):
+        """The content key the desktop gives a region (from collect)."""
+        import resultspages as rp
+        res = rp.collect(docs)
+        for s in res.samples:
+            for lv in s.levels:
+                for i, e in enumerate(lv.entries):
+                    if e["row"]["region"] == region:
+                        return rp.entry_key(s.key, lv.level, lv.entries, i)
+        self.fail("no such region")
+
+    def test_the_users_region_ticks_become_the_pages_own_keys(self):
+        d = doc("fit.vms", [fitted_region()])
+        self.assertNotIn("quant_include", hb.build_payload([d]))
+        key = self.hand_key([d])
+        p = hb.build_payload([d], quant_overrides={key: False})
+        sid = p["samples"][0]["regions"][0]["id"]
+        self.assertEqual(p["quant_include"], {sid + ":0": False})
+        p = hb.build_payload([d], quant_overrides={key: True})
+        self.assertEqual(p["quant_include"], {sid + ":0": True})
+        # and it survives encoding, as the page reads it
+        back = hb.decode_payload(hb.encode_payload(p))
+        self.assertEqual(back["quant_include"], {sid + ":0": True})
+
+    def test_a_tick_for_nothing_here_is_ignored(self):
+        d = doc("fit.vms", [fitted_region()])
+        key = self.hand_key([d])
+        other = ("elsewhere.vms/S",) + key[1:]
+        gone = key[:3] + ("O 1s", 0)
+        second = key[:4] + (1,)
+        p = hb.build_payload([d], quant_overrides={other: False,
+                                                    gone: False,
+                                                    second: False})
+        self.assertNotIn("quant_include", p)
+        self.assertNotIn("quant_include",
+                         hb.build_payload([d], quant_overrides={}))
+
+    def test_ticks_follow_the_display_names_and_the_right_spectrum(self):
+        a, b = fitted_region(), fitted_region()
+        b.sample = "Other"
+        d = doc("fit.vms", [a, b])
+        import resultspages as rp
+        res = rp.collect([d])
+        self.assertEqual(len(res.samples), 2)
+        s = next(x for x in res.samples if x.label == "Other")
+        key = rp.entry_key(s.key, s.levels[0].level, s.levels[0].entries, 0)
+        p = hb.build_payload([d], quant_overrides={key: False})
+        by = {sm["name"]: sm for sm in p["samples"]}
+        sid = by["Other"]["regions"][0]["id"]
+        self.assertEqual(p["quant_include"], {sid + ":0": False})
+
     def test_notes_come_along(self):
         r = fitted_region()
         r.fit.regions[0].background = "E Tougaard"

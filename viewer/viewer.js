@@ -303,6 +303,15 @@
     });
     return seed;
   };
+  /* start a Quantification tick map from the app's own choice (payload.quant_include,
+     {entry key: bool}); only booleans are taken. Seeded before the tab is first drawn,
+     and preferredDefaults only fills keys that are absent, so it never overrides these */
+  V.seedInclude = function (include, seed) {
+    Object.keys(seed || {}).forEach(function (k) {
+      if (typeof seed[k] === 'boolean') include[k] = seed[k];
+    });
+    return include;
+  };
   /* the fit rows of these spectra grouped by sample and level, in order of appearance;
      an entry's key is stable, so a page can remember which rows are ticked */
   V.quantGroups = function (specs) {
@@ -2642,6 +2651,7 @@
       '. Self-contained: it needs no network and opens in any modern browser.';
     buildTree();
     buildTabs();
+    V.seedInclude(S.q.include, data.quant_include);
     renderQuant(); renderFigures(); renderNotes(); renderMethods(); renderHolder(); renderMeta(); renderCameras(); renderMaps();
     $('boot').hidden = true; $('app').hidden = false;
     showTab('plot');

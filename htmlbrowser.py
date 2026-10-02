@@ -38,6 +38,8 @@ import casaquant
 import holder
 import quant
 import readers.base as rbase
+import reportspec
+import resultspages
 import rsf as rsf_lib
 import snapshot
 import themes
@@ -416,7 +418,7 @@ def _meta(md):
 def build_payload(docs, display=None, details=None, methods_text="",
                   calibration="", figures=(), calib=None, generated=None,
                   cameras=True, snapmaps=True, lines=None, casa_quant=None,
-                  rsf_entries=None, prefer_csv=False):
+                  rsf_entries=None, prefer_csv=False, quant_overrides=None):
     """The data of the browser as a JSON-able dict.
 
     ``figures`` is ``[{"name", "caption", "pages": [png bytes]}]``; ``calib``
@@ -436,7 +438,13 @@ def build_payload(docs, display=None, details=None, methods_text="",
     guessed" stance ``quant.py`` takes on the desktop). ``prefer_csv`` draws
     and quantifies every fit region that has a complete CasaXPS CSV match
     (``casacsv.py``) from CasaXPS's own exported curves instead of the
-    reconstruction, and ``build_notes`` says how many did."""
+    reconstruction, and ``build_notes`` says how many did.
+    ``quant_overrides`` is the user's own choice of which fitted regions
+    count, ``{resultspages.entry_key: bool}`` (the Quantification tab's
+    ticks): the page starts its Quantification and Depth profile tabs with
+    those rows ticked or unticked (``quant_include``, keyed by the page's
+    own ``<spectrum id>:<fit row>``) instead of its defaults; the user can
+    still change them there. A key naming no region here is ignored."""
     details = details or {}
     element_lines = xpslines.load_lines() if lines is None else lines
     rsf_entries = rsf_lib.load_rsf() if rsf_entries is None else rsf_entries
@@ -444,6 +452,7 @@ def build_payload(docs, display=None, details=None, methods_text="",
     map_src = []                     # (parser, region, shown region, its dict)
     n_regions = 0
     fit_budget, fit_dropped, fit_csv = [FIT_BUDGET], 0, 0
+    hand, seen_keys = [], {}      # [(page region dict, fit row, tick)]
     label_map = {}                       # (id(parser), original sample) -> label
     casa_names = set(casa_quant.samples) if casa_quant else set()
     for fi, p in enumerate(docs):
@@ -507,6 +516,14 @@ def build_payload(docs, display=None, details=None, methods_text="",
                    if getattr(d, "fit", None) else None)
             if fit:
                 reg["fit"] = fit
+                if quant_overrides:
+                    skey = f"{reportspec.doc_key(p)}/{r.sample}"
+                    for ri, frow in enumerate(fit["rows"]):
+                        base = (skey, d.etch_level, d.name, frow["region"])
+                        occ = seen_keys[base] = seen_keys.get(base, -1) + 1
+                        tick = quant_overrides.get(base + (occ,))
+                        if tick is not None:
+                            hand.append((reg, ri, bool(tick)))
                 fit_dropped += bool(fit.pop("dropped"))
                 if prefer_csv:
                     fit_csv += sum(1 for fr in d.fit.regions
@@ -545,6 +562,7 @@ def build_payload(docs, display=None, details=None, methods_text="",
         s["id"] = f"s{i}"
         for j, r in enumerate(s["regions"]):
             r["id"] = f"s{i}r{j}"
+    quant_include = {f"{reg['id']}:{ri}": tick for reg, ri, tick in hand}
 
     figs = []
     for f in figures:
@@ -573,6 +591,7 @@ def build_payload(docs, display=None, details=None, methods_text="",
         "build_notes": notes,
         "palette": {"light": list(light["cycle"]), "dark": list(dark["cycle"]),
                     "bg": {"light": light["plot_bg"], "dark": dark["plot_bg"]}},
+        **({"quant_include": quant_include} if quant_include else {}),
     }
 
 

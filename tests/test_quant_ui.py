@@ -271,6 +271,19 @@ class TestQuantPanelInApp(unittest.TestCase):
         self.assertEqual(ws._results().samples[0].levels[0].include, [True])
         self.assertEqual(self._first_row(panel)[1], quant_ui.TICK_ON)
 
+    def test_the_html_page_and_the_workbook_cache_carry_the_ticks(self):
+        ws, panel = self._ticked_panel()
+        self.assertNotIn("quant_include", ws.browser_payload())
+        panel.toggle_row(next(iter(panel._row_entry)))
+        page = ws.browser_payload()
+        sid = page["samples"][0]["regions"][0]["id"]
+        self.assertEqual(page["quant_include"], {sid + ":0": False})
+        ws.cache_var.set(True)
+        cached = ws._results_cache()
+        self.assertEqual(cached["quant_include"], {sid + ":0": False})
+        panel.reset_ticks()
+        self.assertNotIn("quant_include", ws.browser_payload())
+
     def test_the_transmission_choice_does_not_reach_the_report(self):
         ws, panel = self._ticked_panel()
         before = ws._results()

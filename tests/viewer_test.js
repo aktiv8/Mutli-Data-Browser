@@ -284,6 +284,26 @@ function near(a, b, msg, tol) {
       // an already-excluded entry is not treated as a surviving competitor
       eq(V.preferredDefaults(entries, { a: false }), {}, 'nothing left to prefer when Pt 4f is already unticked');
     }
+    {
+      // the app's own region ticks (payload.quant_include) start the tick map
+      const inc = {};
+      V.seedInclude(inc, { 's0r0:0': false, 's0r0:1': true, bad: 'no', worse: 1 });
+      eq(inc, { 's0r0:0': false, 's0r0:1': true }, 'only booleans are seeded');
+      V.seedInclude(inc, undefined);
+      V.seedInclude(inc, null);
+      eq(inc, { 's0r0:0': false, 's0r0:1': true }, 'a missing payload key changes nothing');
+      // renderFitQuant fills preferredDefaults only where a key is absent, so
+      // the app's explicit tick on a non-preferred line wins
+      const entries = [{ key: 'a', row: { region: 'Pt 4f' } }, { key: 'b', row: { region: 'Pt 4d' } }];
+      const ticks = V.seedInclude({}, { b: true });
+      const seed = V.preferredDefaults(entries, ticks);
+      Object.keys(seed).forEach((k) => { if (!(k in ticks)) ticks[k] = seed[k]; });
+      eq(ticks, { b: true }, 'the app tick on Pt 4d beats the default');
+      const unticked = V.seedInclude({}, { a: false });
+      const seed2 = V.preferredDefaults(entries, unticked);
+      Object.keys(seed2).forEach((k) => { if (!(k in unticked)) unticked[k] = seed2[k]; });
+      eq(unticked, { a: false }, 'with Pt 4f unticked nothing else is defaulted off');
+    }
     eq(V.quantStates({ components: [{ gk: 'i1', state: 'A', area: 3 }, { gk: 'i1', state: 'A', area: 1 }, { gk: 'nB', state: 'B', area: -2 }] }, 40)
       .map((s) => s.name + ':' + s.at), ['A:40', 'B:0'], 'states share the row, negative areas count as zero');
   }
