@@ -2197,6 +2197,17 @@ class Workspace:
         fid, sample, name = self._marker_key(r)
         return self.ann.shift_for(fid, sample, name, r.calibration_shift)
 
+    def identify_frame(self, r):
+        """``(shift, hv)`` for looking lines up on ``r`` as it is drawn: the
+        line tables hold calibrated binding energies, so a click or a peak is
+        matched in the shown frame (the photon energy moves with the shift,
+        which keeps an Auger line at its unchanged kinetic energy) and a
+        marker is stored as shown minus ``shift`` (``Workspace`` adds it back
+        when drawing)."""
+        shift = self._marker_shift(r)
+        hv = r.photon_energy
+        return shift, (hv + shift if hv else hv)
+
     def identify_markers(self, r):
         return self.ann.markers_for(*self._marker_key(r))
 
@@ -2416,10 +2427,11 @@ class Workspace:
         self._ann_changed(relabel=False)
 
     def identify_auto(self, r):
-        found = xpslines.auto_label(r.energy, r.counts, self.element_lines(),
-                                    hv=r.photon_energy)
+        shift, hv = self.identify_frame(r)
+        found = xpslines.auto_label([e + shift for e in r.energy], r.counts,
+                                    self.element_lines(), hv=hv)
         for be, label in found:
-            self.ann.add_marker(*self._marker_key(r), be, label)
+            self.ann.add_marker(*self._marker_key(r), be - shift, label)
         self._ann_changed(relabel=False)
         return len(found)
 
@@ -3129,16 +3141,18 @@ class Workspace:
                         seen.add(mkey)
                         marks.append((be, m["label"], bool(m.get("kin"))))
                     if prim and want_nearby:
-                        hv_r = reg.photon_energy
+                        hv_r = self.identify_frame(reg)[1]
                         for m in prim:
                             if m.get("kin"):
                                 continue
-                            for be, lbl, tier in xpslines.nearby_lines(
-                                    m["be"], self.IDENT_NEARBY_WINDOW, lines,
+                            # tables are in the shown frame: search there
+                            # and draw what comes back as it is
+                            for pos, lbl, tier in xpslines.nearby_lines(
+                                    m["be"] + shift_r,
+                                    self.IDENT_NEARBY_WINDOW, lines,
                                     hv=hv_r, exclude=m["label"],
                                     secondary=bool(ident_show.get("secondary")),
                                     auger=bool(ident_show.get("auger"))):
-                                pos = be + shift_r
                                 nkey = (round(pos, 3), lbl, False, tier)
                                 if nkey in seen:
                                     continue
@@ -3215,9 +3229,9 @@ class Workspace:
                 "colours": list(base["cycle"])[1:] or list(base["cycle"]),
                 "state_colour": self.fit_state_colour}
 
-    def _binding_at(self, event):
-        """Binding energy (as measured, before any shift) under the pointer,
-        or None if it cannot be told."""
+    def displayed_be(self, event):
+        """Binding energy under the pointer *as drawn* (after any shift, the
+        frame the line tables are in), or None if it cannot be told."""
         ax = event.inaxes
         info = self._axinfo.get(ax)
         if ax is None or event.xdata is None or info is None:
@@ -3227,6 +3241,17 @@ class Workspace:
             if not hv:
                 return None
             x = hv - x
+        return x
+
+    def _binding_at(self, event):
+        """Binding energy (as measured, before any shift) under the pointer,
+        or None if it cannot be told. The shift is the first spectrum's of
+        the panel; a tool that works on one chosen spectrum should take
+        ``displayed_be`` and remove that spectrum's own shift."""
+        x = self.displayed_be(event)
+        if x is None:
+            return None
+        ax = event.inaxes
         key = self._axmap.get(ax)
         shift = 0.0
         if key is not None:
@@ -3357,7 +3382,7 @@ class Workspace:
             return
         if self._click_cb is not None and event.inaxes is not None:
             if not str(getattr(self.toolbar, "mode", "")):
-                be = self._binding_at(event)
+                be = self.displayed_be(event)    # the callback un-shifts
                 if be is not None:
                     self._click_cb(be, event)
                 return
@@ -3455,6 +3480,7 @@ class Workspace:
             "fit_show": {k: bool(v.get()) for k, v in self.fit_vars.items()},
             "csv_curves": bool(self.csv_curves_var.get()),
             "quant_rsf": self.quant_panel.rsf_choice(),
+            "quant_transmission": bool(self.quant_panel.view.transmission),
             "ident_show": {k: bool(v.get())
                           for k, v in self.ident_vars.items()},
             "axis_colour": self.axis_choice,
@@ -3511,6 +3537,9 @@ class Workspace:
         if rsf in quant_ui.RSF_CHOICES:
             self.quant_panel.rsf_var.set(quant_ui.RSF_LABELS[rsf])
             self.quant_panel.refresh()
+        if "quant_transmission" in st:
+            self.quant_panel.set_transmission(
+                bool(st["quant_transmission"]))
         ids = st.get("ident_show")
         if isinstance(ids, dict):
             for k, v in self.ident_vars.items():

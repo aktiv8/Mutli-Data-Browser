@@ -15,6 +15,7 @@ DEFAULT_HV = 1486.6                      # Al K-alpha
 COMMON = {"C", "O", "N", "Si", "Na", "Cl", "S", "Ca", "Al", "F", "K", "P",
           "Fe", "Zn", "Cu", "Ti", "Mg", "B"}
 COMMON_BONUS = 1.0
+RARE_SECONDARY_PENALTY = 1.5
 
 
 def load_lines(path=None):
@@ -58,10 +59,25 @@ def candidates(be, window, lines, hv=None):
         d = line_be(e, hv) - be
         if abs(d) <= window:
             out.append((d, e))
-    out.sort(key=lambda t: abs(t[0]) + 0.8 * (t[1].get("rank", 1) - 1)
-             - (COMMON_BONUS if t[1]["el"] in COMMON
-                and t[1].get("rank", 1) == 1 else 0.0))
+    out.sort(key=_plausibility)
     return out
+
+
+def _plausibility(item):
+    """Sort key of a ``(delta, entry)`` candidate (smaller wins): distance,
+    plus 0.8 eV per rank step, minus the head start of a common element's
+    main line, plus a penalty on a rarer element's secondary line (a rank-2
+    line of an element nobody expects must be clearly closer to beat a main
+    line of a common one: an O 1s peak 2 eV off no longer reads "At 4d3/2")."""
+    d, e = item
+    rank = e.get("rank", 1)
+    common = e["el"] in COMMON
+    key = abs(d) + 0.8 * (rank - 1)
+    if common and rank == 1:
+        key -= COMMON_BONUS
+    elif not common and rank > 1:
+        key += RARE_SECONDARY_PENALTY
+    return key
 
 
 def find_peaks(energy, counts, prominence=0.04, min_sep=3.0, smooth=5,

@@ -53,6 +53,7 @@ class TestIdentifyDialog(unittest.TestCase):
         self.markers = []
         self.predefined = []
         self.casa_labelled = []
+        self.shift = 0.0
 
     def fake_app(self):
         return SimpleNamespace(
@@ -64,6 +65,7 @@ class TestIdentifyDialog(unittest.TestCase):
             element_lines=lambda: xpslines.load_lines(),
             calibration_label=lambda r: r.name,
             identify_markers=lambda r: self.markers,
+            identify_frame=lambda r: (self.shift, r.photon_energy + self.shift),
             identify_add=self._fake_add,
             identify_remove=lambda r, m: None,
             identify_clear=lambda r: None,
@@ -139,6 +141,32 @@ class TestIdentifyDialog(unittest.TestCase):
         self.assertEqual(region_name, "Fe 2p")
         self.assertAlmostEqual(be, 709.9)
         self.assertIn(label, ("Fe2p3/2 aFe2O3 peak 1", "Fe2p3/2 Metal"))
+
+    def test_a_charge_corrected_click_is_looked_up_as_shown(self):
+        """The click arrives as drawn (O 1s at 531.0 after a +2.5 eV
+        correction); the table is calibrated, so O 1s must be offered, and
+        the marker is stored as measured (shown minus the shift)."""
+        self.shift = 2.5
+        dlg = self.dialog(regions=[self.region(name="O 1s")])
+        dlg._on_click(531.0)
+        labels = [xpslines.label_of(e) for k, _d, e in dlg.rows
+                  if k == "line"]
+        self.assertIn("O 1s", labels)
+        idx = next(i for i, (k, _d, e) in enumerate(dlg.rows)
+                   if k == "line" and xpslines.label_of(e) == "O 1s")
+        dlg.cand_list.selection_clear(0, "end")
+        dlg.cand_list.selection_set(idx)
+        dlg._add()
+        _name, be, label = self.added[0]
+        self.assertEqual(label, "O 1s")
+        self.assertAlmostEqual(be, 531.0 - 2.5)
+
+    def test_the_default_window_is_wide_enough_for_a_chemical_shift(self):
+        dlg = self.dialog(regions=[self.region(name="Si 2p")])
+        dlg._on_click(102.0)           # SiO2: ~2.6 eV above Si 2p3/2 (99.4)
+        labels = [xpslines.label_of(e) for k, _d, e in dlg.rows
+                  if k == "line"]
+        self.assertIn("Si 2p3/2", labels)
 
     def test_core_level_restricts_which_states_are_offered(self):
         dlg = self.dialog(regions=[self.region(name="C 1s")])

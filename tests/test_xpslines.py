@@ -69,6 +69,35 @@ class TestCandidates(unittest.TestCase):
         self.assertTrue(c)
         self.assertLessEqual(abs(c[0][0]), abs(c[-1][0]) + 1.6)
 
+    def test_o1s_at_the_edge_of_the_window_beats_a_rare_secondary_line(self):
+        # O 1s at 531.0 clicked at 533.0 (2 eV away) used to lose to a
+        # rank-2 line of a rare element (At 4d3/2) sitting right on the click
+        for be in (532.5, 533.0):
+            self.assertEqual(label(be), "O 1s", be)
+        e, y = survey([(532.9, 9000)])
+        self.assertEqual([lbl for _be, lbl in xl.auto_label(e, y, LINES)],
+                         ["O 1s"])
+
+    def test_a_main_line_only_loses_at_its_own_energy_to_a_true_overlap(self):
+        # the four genuine coincidences (a rare element's main line sitting
+        # on a common element's): nothing else may beat a main line on its
+        # own energy
+        allowed = {"Pr 3d5/2", "Ho 4d", "Hg 4f7/2", "Th 4f7/2"}
+        lost = set()
+        for e in LINES:
+            if e.get("rank", 1) == 1 and "be" in e:
+                c = xl.candidates(e["be"], 2.0, LINES, 1486.6)
+                if c and c[0][1] is not e:
+                    lost.add(xl.label_of(e))
+        self.assertLessEqual(lost, allowed)
+
+    def test_rare_secondary_lines_are_still_offered(self):
+        # the penalty reorders; it never hides a line from the list
+        labels = [xl.label_of(e) for _d, e in
+                  xl.candidates(533.0, 2.0, LINES, 1486.6)]
+        self.assertIn("O 1s", labels)
+        self.assertIn("At 4d3/2", labels)
+
     def test_auger_lines_follow_the_photon_energy(self):
         # O KL1 (ke=506): an Auger line's binding-energy position is
         # hv-dependent (BE = hv - KE), unlike every photoelectron line. The

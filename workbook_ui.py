@@ -834,7 +834,7 @@ class IdentifyDialog(tk.Toplevel):
                          lambda e: self._refresh_markers())
         ttk.Label(top, text="Window ± (eV)").grid(
             row=1, column=0, sticky="w", pady=(6, 0))
-        self.window = tk.StringVar(value="2.0")
+        self.window = tk.StringVar(value="3.0")
         ttk.Entry(top, textvariable=self.window, width=7).grid(
             row=1, column=1, sticky="w", pady=(6, 0))
         self.hint = ttk.Label(body, style="Muted.TLabel", wraplength=470,
@@ -909,12 +909,15 @@ class IdentifyDialog(tk.Toplevel):
         try:
             return max(0.1, float(self.window.get()))
         except ValueError:
-            return 2.0
+            return 3.0
 
     def _on_click(self, be, event=None):
+        """``be`` is the binding energy under the click *as drawn*; the line
+        tables are in that (calibrated) frame, so the candidates are looked
+        up there with the chosen spectrum's own shift and photon energy."""
         self.clicked = be
         reg = self._region()
-        hv = reg.photon_energy
+        _shift, hv = self.app.identify_frame(reg)
         line_cands = self.xl.candidates(be, self._win(), self.lines, hv)
         state_cands = self.cs.state_candidates(be, self._win(), self.states,
                                                core_level=reg.name)
@@ -937,7 +940,7 @@ class IdentifyDialog(tk.Toplevel):
         self._on_select()
         extra = f", {len(state_cands)} chemical state(s) ({self.STATE_MARK}" \
                 "prefixed)" if state_cands else ""
-        self.hint.config(text=f"Peak at {be:.2f} eV measured: "
+        self.hint.config(text=f"Peak at {be:.2f} eV: "
                               f"{len(line_cands)} candidate line(s){extra} "
                               f"within ±{self._win():g} eV.")
 
@@ -956,7 +959,9 @@ class IdentifyDialog(tk.Toplevel):
             return
         kind, _d, e = self.rows[sel[0]]
         label = self.cs.label_of(e) if kind == "state" else self.xl.label_of(e)
-        self.app.identify_add(self._region(), self.clicked, label)
+        reg = self._region()
+        shift = self.app.identify_frame(reg)[0]
+        self.app.identify_add(reg, self.clicked - shift, label)
         self._refresh_markers()
 
     def _auto(self):
