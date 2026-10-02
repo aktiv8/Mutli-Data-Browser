@@ -19,17 +19,18 @@ import vamasmeta
 # ==========================================================================
 #  EXPORTERS
 # ==========================================================================
-def fit_columns(r, pre=""):
+def fit_columns(r, pre="", prefer_csv=False):
     """CSV columns ``[(header, values)]`` for a region's CasaXPS fit: the
     background, each component (above the background, as CasaXPS draws it)
     and the envelope, on the spectrum's own points, in its own units. Empty
-    when the region has no fit (or numpy is missing)."""
+    when the region has no fit (or numpy is missing). ``prefer_csv`` uses
+    imported CasaXPS curves where a region has a complete match."""
     fit = getattr(r, "fit", None)
     if fit is None or not r.photon_energy:
         return []
     try:
         cvs = casafit.curves(fit, r.energy, r.counts, r.photon_energy,
-                             *r.dwell_and_scans())
+                             *r.dwell_and_scans(), prefer_csv=prefer_csv)
     except ImportError:
         return []
     cols = []
@@ -44,7 +45,7 @@ def fit_columns(r, pre=""):
     return cols
 
 
-def export_csv(regions, path, include_fits=True):
+def export_csv(regions, path, include_fits=True, prefer_csv=False):
     """Export selected regions to a single CSV (wide format). A region with a
     CasaXPS fit gets its background, components and envelope as extra
     columns (``include_fits=False`` leaves them out)."""
@@ -58,7 +59,7 @@ def export_csv(regions, path, include_fits=True):
         cols.append((f"{pre}{r.name} {r.energy_label} ({r.energy_units})", r.energy))
         cols.append((f"{pre}{r.name} {r.count_label} ({r.count_units})", r.counts))
         if include_fits:
-            cols += fit_columns(r, pre)
+            cols += fit_columns(r, pre, prefer_csv)
         maxlen = max(maxlen, len(r.counts))
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)

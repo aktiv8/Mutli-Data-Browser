@@ -1282,15 +1282,16 @@ class Workspace:
             value=bool(cfg.get("fit_use_csv_curves", False)))
         self._csv_curves_cb = ttk.Checkbutton(
             self.fit_frame, text="Use CasaXPS CSV curves",
-            variable=self.csv_curves_var, command=self._schedule_render,
+            variable=self.csv_curves_var, command=self._csv_curves_toggled,
             state="disabled")
         self._csv_curves_cb.pack(side="left", padx=(10, 0))
         tip(self._csv_curves_cb,
             "Use literal curves from an imported CasaXPS CSV export "
             "(Tools ▸ Import CasaXPS CSV export…) instead of "
             "reconstructing them -- useful for validating the "
-            "reconstruction. Enabled once a CSV export has matched at "
-            "least one open region.")
+            "reconstruction. Also used for the quantification, the HTML "
+            "browser, reports and CSV export. Enabled once a CSV export "
+            "has matched at least one open region.")
         ctl3.add(self.fit_frame)
 
         self.ident_frame = ttk.Frame(ctl3)
@@ -2383,6 +2384,10 @@ class Workspace:
         return any(fr.csv_curves is not None
                   for p in self.docs for r in p.regions if r.fit
                   for fr in r.fit.regions)
+
+    def _csv_curves_toggled(self):
+        self._schedule_render()
+        self.quant_panel.refresh()
 
     def _refresh_csv_curves_availability(self):
         have = self._any_csv_curves()
@@ -3656,7 +3661,8 @@ class Workspace:
             payload = htmlbrowser.build_payload(
                 self.docs, self._display_for_export, self._report_details(),
                 self.methods_text(), self.calibration_statement(), [], None,
-                cameras=False, snapmaps=False, casa_quant=self.casa_quant)
+                cameras=False, snapmaps=False, casa_quant=self.casa_quant,
+                prefer_csv=bool(self.csv_curves_var.get()))
         except htmlbrowser.ViewerError:
             return None
         for f, p in zip(payload["files"], self.docs):
@@ -4070,14 +4076,16 @@ class Workspace:
         key = (tuple(id(p) for p in self.docs), self._ann_serial,
               id(self.casa_quant),
               len(self.casa_quant.samples) if self.casa_quant else 0,
-              frozenset(self.checked), rsf_option)
+              frozenset(self.checked), rsf_option,
+              bool(self.csv_curves_var.get()))
         if self._results_memo is None or self._results_memo[0] != key:
             rsf_table = self.rsf_entries() if rsf_option != "off" else None
             self._results_memo = (key, resultspages.collect(
                 self.docs, self._display,
                 lambda p: reportspec.doc_key(p), self.casa_quant,
                 ticked=lambda r: id(r) in self.checked,
-                rsf_table=rsf_table, rsf_library=rsf_option))
+                rsf_table=rsf_table, rsf_library=rsf_option,
+                prefer_csv=bool(self.csv_curves_var.get())))
         return self._results_memo[1]
 
     def _build_report(self, path, spec=None, notes=None):
@@ -4128,7 +4136,8 @@ class Workspace:
         return htmlbrowser.build_payload(
             self.docs, self._display_for_export, self._report_details(),
             self.methods_text(), self.calibration_statement(), figures,
-            self.calib, casa_quant=self.casa_quant)
+            self.calib, casa_quant=self.casa_quant,
+            prefer_csv=bool(self.csv_curves_var.get()))
 
     def export_html_browser(self):
         if not self._report_ready():
@@ -4225,8 +4234,9 @@ class Workspace:
                 "methods.txt", "the methods text",
                 data=(details["methods"] + "\n").encode("utf-8")))
         if "spectra" in sections:
-            sp, sn = handover.spectra_parts(self.docs,
-                                            self._display_for_export)
+            sp, sn = handover.spectra_parts(
+                self.docs, self._display_for_export,
+                prefer_csv=bool(self.csv_curves_var.get()))
             parts += sp
             notes += sn
         if "metadata" in sections:
@@ -5212,7 +5222,8 @@ class Workspace:
         inst = parser.instrument if parser else {}
         try:
             if fmt == "csv":
-                n = export_csv(regions, path)
+                n = export_csv(regions, path,
+                               prefer_csv=bool(self.csv_curves_var.get()))
             else:
                 n = export_vamas(
                     regions, path,

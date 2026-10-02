@@ -54,7 +54,7 @@ def state_of(comp, region):
     return f"n{comp['name']}", comp["name"]
 
 
-def fit_rows(r, curves=False):
+def fit_rows(r, curves=False, prefer_csv=False):
     """One row per distinct fit region of ``r`` (a Region with ``fit``), or [].
 
     Keys: region, background, rsf, area, area_t (with the transmission function
@@ -70,7 +70,10 @@ def fit_rows(r, curves=False):
     fwhm, area, shape, rsf, plus ``gk`` / ``state``: its chemical state's key
     and name). With ``curves=True`` a row also has ``curves``: ``i0`` (index of
     the first point of the region in the spectrum) and the background, envelope
-    and component curves from there on, in the spectrum's own counts."""
+    and component curves from there on, in the spectrum's own counts.
+    ``prefer_csv`` uses the literal CasaXPS-exported curves of every region
+    that has a complete CSV match (``casafit.curves``), so its area, RMS and
+    chi-square come from CasaXPS's own background, not the reconstruction."""
     fit = getattr(r, "fit", None)
     if (fit is None or fit.is_empty() or not r.photon_energy or not r.energy
             or not r.counts):
@@ -81,7 +84,8 @@ def fit_rows(r, curves=False):
         return []
     hv = float(r.photon_energy)
     dwell, scans = r.dwell_and_scans()
-    cvs = casafit.curves(fit, r.energy, r.counts, hv, dwell, scans)
+    cvs = casafit.curves(fit, r.energy, r.counts, hv, dwell, scans,
+                         prefer_csv=prefer_csv)
     if not cvs:
         return []
     k = (dwell * scans) if dwell else 1.0

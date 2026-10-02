@@ -604,5 +604,61 @@ class TestCurvesPreferCsv(unittest.TestCase):
         self.assertEqual(len(with_csv.components), len(without.components))
 
 
+# ------------------------------------- the option reaches quant / HTML browser
+@unittest.skipUnless(HAVE_NP, "numpy not installed")
+class TestPreferCsvConsumers(unittest.TestCase):
+    """The "use CasaXPS CSV curves" choice must reach every consumer of
+    ``casafit.curves``, not only the desktop plot: quantification rows, the
+    HTML browser's fit block and payload, and the CSV export columns."""
+
+    def _region(self):
+        fit, be, counts, hv = TestCurvesPreferCsv()._build()
+        return _mk_region("R", "S", be, counts, hv, dwell=1.0, fit=fit)
+
+    @staticmethod
+    def _flat(values, v):
+        vals = [x for x in values if x is not None and x == x]
+        return bool(vals) and all(abs(x - v) < 1e-6 for x in vals)
+
+    def test_fit_rows_follow_the_flag(self):
+        import quant
+        r = self._region()
+        on = quant.fit_rows(r, curves=True, prefer_csv=True)[0]
+        off = quant.fit_rows(r, curves=True)[0]
+        self.assertTrue(self._flat(on["curves"]["bg"], 2.0))
+        self.assertFalse(self._flat(off["curves"]["bg"], 2.0))
+
+    def test_html_fit_block_follows_the_flag(self):
+        import htmlbrowser
+        r = self._region()
+        on = htmlbrowser._fit_block(r, [10 ** 6], prefer_csv=True)
+        off = htmlbrowser._fit_block(r, [10 ** 6])
+        self.assertTrue(self._flat(on["rows"][0]["curve"]["bg"], 2.0))
+        self.assertFalse(self._flat(off["rows"][0]["curve"]["bg"], 2.0))
+
+    def test_html_payload_says_which_source_it_used(self):
+        import htmlbrowser
+        r = self._region()
+        doc = readers.SpectrumFile()
+        doc.path, doc.format_name, doc.regions = "a.vms", "Test", [r]
+        doc.instrument = {}
+        doc._finish()
+        on = htmlbrowser.build_payload([doc], prefer_csv=True)
+        off = htmlbrowser.build_payload([doc])
+        self.assertTrue(any("CasaXPS's own exported curves" in n
+                            for n in on["build_notes"]))
+        self.assertFalse(any("exported curves" in n
+                             for n in off["build_notes"]))
+
+    def test_csv_export_columns_follow_the_flag(self):
+        import exporters
+        r = self._region()
+        on = dict(exporters.fit_columns(r, prefer_csv=True))
+        off = dict(exporters.fit_columns(r))
+        key = "R fit: background"
+        self.assertTrue(self._flat(on[key], 2.0))
+        self.assertFalse(self._flat(off[key], 2.0))
+
+
 if __name__ == "__main__":
     unittest.main()

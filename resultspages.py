@@ -124,13 +124,17 @@ CASAXPS_NOTE = ("Quantification for this sample is CasaXPS's own exported "
 
 
 def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
-           rsf_table=None, rsf_library="scofield"):
+           rsf_table=None, rsf_library="scofield", prefer_csv=False):
     """Read the CasaXPS fits of the loaded files (``display`` maps a region to
     the copy that is drawn, with the user's names and binding-energy shift).
 
     ``rsf_table``/``rsf_library`` are ``quant.normalise``'s own RSF-fallback
     args (a list from ``rsf.load_rsf()``, off by default) -- carried onto
     each ``Sample`` so ``profile_series`` can reuse them later.
+
+    ``prefer_csv`` quantifies every fit region that has a complete CasaXPS
+    CSV match (``casacsv.py``) from CasaXPS's own exported background and
+    curves rather than the reconstruction; a sample note says so.
 
     ``casa_quant`` (a ``casaquant.CasaQuant``, see that module) is preferred
     over a fit for any sample it names: no fit-derived level is built for
@@ -150,7 +154,7 @@ def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
     key_of = key_of or reportspec.doc_key
     out = Results()
     by_sample, order = {}, []
-    approx = set()
+    approx, csv_used = set(), set()
     casa_names = set(casa_quant.samples) if casa_quant else set()
     ticked_casa_names = casa_names if ticked is None else set()
     if casa_names and ticked is not None:
@@ -177,7 +181,7 @@ def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
                     or "sample")
             if casaquant.strip_sample_prefix(label) in casa_names:
                 continue                # CasaXPS's own export is preferred
-            rows = quant.fit_rows(d)
+            rows = quant.fit_rows(d, prefer_csv=prefer_csv)
             if not rows:
                 continue
             k = (key_of(p), r.sample)
@@ -194,6 +198,9 @@ def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
                 level = Level(lv, r.etch_time, _num(md, "Depth (nm)"),
                               _num(md, "Fluence (ions/cm²)"))
                 sample.levels.append(level)
+            if prefer_csv and any(fr.csv_curves is not None
+                                  for fr in d.fit.regions):
+                csv_used.add(label)
             for row in rows:
                 level.entries.append({"spectrum": d.name, "row": row})
                 if row["basis"] != "data" or row["approximate"]:
@@ -210,6 +217,11 @@ def collect(docs, display=None, key_of=None, casa_quant=None, ticked=None,
         _source_note(sample)
         _rsf_note(sample)
         _rsf_hint_note(sample)
+        if sample.label in csv_used:
+            sample.notes.append(
+                f"Where CasaXPS's own exported fit curves were imported for "
+                f"{sample.label}, the background and areas come from them "
+                "rather than from the reconstruction.")
         if sample.label in approx:
             sample.notes.append(
                 "The background under some of the fits of "

@@ -86,7 +86,8 @@ class QuantPanel(ttk.Frame):
         results = resultspages.collect(
             app.docs, app._display, lambda p: reportspec.doc_key(p),
             app.casa_quant, ticked=lambda r: id(r) in app.checked,
-            rsf_table=rsf_table, rsf_library=rsf_key)
+            rsf_table=rsf_table, rsf_library=rsf_key,
+            prefer_csv=bool(app.csv_curves_var.get()))
         # a sample with no fit of its own (CasaXPS's own export only) is
         # already shown in the "CasaXPS quant" tab -- not duplicated here
         self.samples = [s for s in results.samples if s.levels]

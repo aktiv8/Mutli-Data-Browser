@@ -324,14 +324,14 @@ def _round_curve(values):
         None if v is None else round_sig(v, FIT_DIGITS) for v in values]
 
 
-def _fit_block(d, budget):
+def _fit_block(d, budget, prefer_csv=False):
     """The CasaXPS fit of a (display) region for the page, or None: for every
     fit region its numbers (``quant.fit_rows``: RSF, area, limits, components
     with their positions) and the curves that draw it (background, envelope,
     components from the region's first point on, so ``y - env`` is the
     residual). ``budget`` is a one-item list counting the curve values left;
     curves that would not fit are left out and the table stays."""
-    rows = quant.fit_rows(d, curves=True)
+    rows = quant.fit_rows(d, curves=True, prefer_csv=prefer_csv)
     if not rows:
         return None
     out, dropped = [], False
@@ -414,7 +414,7 @@ def _meta(md):
 def build_payload(docs, display=None, details=None, methods_text="",
                   calibration="", figures=(), calib=None, generated=None,
                   cameras=True, snapmaps=True, lines=None, casa_quant=None,
-                  rsf_entries=None):
+                  rsf_entries=None, prefer_csv=False):
     """The data of the browser as a JSON-able dict.
 
     ``figures`` is ``[{"name", "caption", "pages": [png bytes]}]``; ``calib``
@@ -431,14 +431,17 @@ def build_payload(docs, display=None, details=None, methods_text="",
     any embedded fit (curve overlay, CSV) are unaffected. ``rsf_entries``
     (default: ``rsf.load_rsf()``) is the RSF reference table the page's own
     quantification fallback offers (off by default, the same "nothing is
-    guessed" stance ``quant.py`` takes on the desktop)."""
+    guessed" stance ``quant.py`` takes on the desktop). ``prefer_csv`` draws
+    and quantifies every fit region that has a complete CasaXPS CSV match
+    (``casacsv.py``) from CasaXPS's own exported curves instead of the
+    reconstruction, and ``build_notes`` says how many did."""
     details = details or {}
     element_lines = xpslines.load_lines() if lines is None else lines
     rsf_entries = rsf_lib.load_rsf() if rsf_entries is None else rsf_entries
     samples, files, notes = [], [], []
     map_src = []                     # (parser, region, shown region, its dict)
     n_regions = 0
-    fit_budget, fit_dropped = [FIT_BUDGET], 0
+    fit_budget, fit_dropped, fit_csv = [FIT_BUDGET], 0, 0
     label_map = {}                       # (id(parser), original sample) -> label
     casa_names = set(casa_quant.samples) if casa_quant else set()
     for fi, p in enumerate(docs):
@@ -498,10 +501,14 @@ def build_payload(docs, display=None, details=None, methods_text="",
             auto = auto_labels(d, element_lines)
             if auto:
                 reg["auto"] = auto
-            fit = _fit_block(d, fit_budget) if getattr(d, "fit", None) else None
+            fit = (_fit_block(d, fit_budget, prefer_csv)
+                   if getattr(d, "fit", None) else None)
             if fit:
                 reg["fit"] = fit
                 fit_dropped += bool(fit.pop("dropped"))
+                if prefer_csv:
+                    fit_csv += sum(1 for fr in d.fit.regions
+                                   if fr.csv_curves is not None)
             entry["regions"].append(reg)
             if snapmaps and r.extra.get("cube") is not None:
                 map_src.append((p, r, d, reg))
@@ -510,6 +517,14 @@ def build_payload(docs, display=None, details=None, methods_text="",
     if not n_regions:
         raise ViewerError("There are no spectra with data to put in the "
                           "browser.")
+    if prefer_csv:
+        notes.append(
+            f"{fit_csv} fit region(s) are drawn and quantified from "
+            "CasaXPS's own exported curves (CSV import); any other fit "
+            "is reconstructed from its stored parameters."
+            if fit_csv else
+            "CasaXPS exported curves were requested but none matched a fit "
+            "here; all fits are reconstructed from their stored parameters.")
     if fit_dropped:
         notes.append(f"Fit curves were left out of {fit_dropped} "
                      f"spectr{'um' if fit_dropped == 1 else 'a'} to keep the "

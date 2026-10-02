@@ -102,7 +102,7 @@ def sample_groups(docs, display=None):
     return out
 
 
-def spectra_parts(docs, display=None):
+def spectra_parts(docs, display=None, prefer_csv=False):
     """VAMAS and CSV parts, one pair per sample. Returns ``(parts, notes)``;
     ``notes`` lists samples that could not be written."""
     parts, notes = [], []
@@ -123,7 +123,7 @@ def spectra_parts(docs, display=None):
                     operator=inst.get("Acquisition computer", ""),
                     experiment_id=os.path.basename(p.path or ""),
                     sample_id=sample or "Sample", metadata=metas)
-                exporters.export_csv(regions, c)
+                exporters.export_csv(regions, c, prefer_csv=prefer_csv)
                 with open(v, "rb") as fh:
                     vdata = fh.read()
                 with open(c, "rb") as fh:
