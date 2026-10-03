@@ -70,6 +70,16 @@ class TestFind(unittest.TestCase):
         self.assertEqual(ea.find("khervefitting", {}, roots=[os.path.dirname(base)]),
                          new)
 
+    def test_an_unzipped_download_in_the_users_folders_is_found(self):
+        home = os.path.join(self.tmp, "home")
+        exe = touch(os.path.join(home, "Downloads", "CasaXPS_64bit",
+                                 "CasaXPS.exe"))
+        with mock.patch.object(ea.os.path, "expanduser", return_value=home):
+            roots = ea._scan_roots()
+        downloads = os.path.join(home, "Downloads")
+        self.assertIn(downloads, roots)
+        self.assertEqual(ea.find("casaxps", {}, roots=[downloads]), exe)
+
     def test_nothing_installed_gives_none(self):
         self.assertIsNone(ea.find("casaxps", {}, roots=[self.tmp]))
 
@@ -139,15 +149,46 @@ class TestLauncherButtons(unittest.TestCase):
         import matplotlib
         matplotlib.rcParams.update(cls._rc)
 
-    def test_a_button_only_for_a_program_that_was_found(self):
+    def tearDown(self):
+        self.ws.cfg.pop("external_hidden", None)
+        self.ws.ribbon.refresh_launchers()
+
+    def test_a_program_not_found_still_has_a_button_to_locate_it(self):
+        """The first click is how someone else's copy gets set up."""
         ws = self.ws
-        found = {"casaxps": __file__, "khervefitting": None}
-        with mock.patch.object(ws, "external_path", side_effect=found.get):
-            ws.ribbon.refresh_launchers()
-        self.assertEqual(len(ws.ribbon._launchers), 1)
         with mock.patch.object(ws, "external_path", return_value=None):
             ws.ribbon.refresh_launchers()
-        self.assertEqual(ws.ribbon._launchers, [])
+        self.assertEqual(len(ws.ribbon._launchers), 2)
+        self.assertTrue(all(not own for _b, own in ws.ribbon._launchers))
+
+    def test_first_click_asks_where_it_is_then_starts_it(self):
+        ws = self.ws
+        with mock.patch.object(ws, "external_path", return_value=None), \
+                mock.patch.object(ws, "locate_external",
+                                  return_value="C:/x/CasaXPS.exe") as loc, \
+                mock.patch.object(ea, "launch", return_value="") as launch:
+            ws.launch_external("casaxps")
+        loc.assert_called_once_with("casaxps")
+        launch.assert_called_once_with("C:/x/CasaXPS.exe")
+
+    def test_cancelling_the_locate_dialog_starts_nothing(self):
+        ws = self.ws
+        with mock.patch.object(ws, "external_path", return_value=None), \
+                mock.patch.object(ws, "locate_external", return_value=None), \
+                mock.patch.object(ea, "launch") as launch:
+            ws.launch_external("casaxps")
+        launch.assert_not_called()
+
+    def test_a_hidden_button_is_skipped_and_can_come_back(self):
+        ws = self.ws
+        with mock.patch.object(ee, "save_config"), \
+                mock.patch.object(ws, "external_path", return_value=None):
+            ws.set_external_hidden("casaxps", True)
+            self.assertEqual(len(ws.ribbon._launchers), 1)
+            self.assertFalse(ws.launcher_vars["casaxps"].get())
+            ws.set_external_hidden("casaxps", False)
+            self.assertEqual(len(ws.ribbon._launchers), 2)
+            self.assertTrue(ws.launcher_vars["casaxps"].get())
 
     def test_clicking_launches_the_found_program(self):
         ws = self.ws

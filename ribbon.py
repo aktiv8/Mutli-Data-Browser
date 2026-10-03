@@ -221,9 +221,11 @@ class Ribbon(ttk.Frame):
                                   master=self)
 
     def refresh_launchers(self):
-        """One small icon button per program that has been found, left of
-        About (so they sit on every tab and with the buttons folded away);
-        right-click one to point at a different copy."""
+        """One small icon button per program, left of About (so they sit on
+        every tab and with the buttons folded away). A program that has not
+        been found still gets its button, with a drawn icon: the first click
+        asks where it is and remembers the answer. Right-click one to point
+        at a different copy or to hide it."""
         app = self.app
         old = {b for b, _own in self._launchers}
         self.items = [it for it in self.items if it[0] not in old]
@@ -233,10 +235,10 @@ class Ribbon(ttk.Frame):
         anchor = self.about
         for key, info in reversed(list(externalapps.APPS.items())):
             # packed right to left, so CasaXPS ends up left of KherveFitting
-            path = app.external_path(key)
-            if not path:
+            if app.external_hidden(key):
                 continue
-            img = self._launcher_image(key, path)
+            path = app.external_path(key)
+            img = self._launcher_image(key, path) if path else None
             b = ttk.Button(self._strip, style="Tool.TButton",
                            command=lambda k=key: app.launch_external(k))
             if img is not None:
@@ -248,7 +250,9 @@ class Ribbon(ttk.Frame):
                 b.configure(text=info["name"])
             b.pack(side="right", after=anchor, padx=(0, 2))
             b.bind("<Button-3>", lambda e, k=key: self._launcher_menu(e, k))
-            app.tooltip(b, f"{info['tip']}\n{path}")
+            app.tooltip(b, f"{info['tip']}\n{path}" if path else
+                        f"{info['name']} was not found. Click to show where "
+                        f"{info['exe']} is (remembered).")
             self._launchers.append((b, img is not None))
             anchor = b
         self.refresh_icons()
@@ -256,7 +260,7 @@ class Ribbon(ttk.Frame):
     def _launcher_menu(self, event, key):
         app = self.app
         menu = app._menu(self)
-        menu.add_command(label=f"{externalapps.APPS[key]['tip']}",
+        menu.add_command(label=externalapps.APPS[key]["tip"],
                          command=lambda: app.launch_external(key))
         menu.add_separator()
         menu.add_command(label="Locate…",
@@ -264,6 +268,9 @@ class Ribbon(ttk.Frame):
         if (app.cfg.get("external_apps") or {}).get(key):
             menu.add_command(label="Forget the saved location",
                              command=lambda: app.forget_external(key))
+        menu.add_separator()
+        menu.add_command(label="Hide this button (Tools menu brings it back)",
+                         command=lambda: app.set_external_hidden(key, True))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:

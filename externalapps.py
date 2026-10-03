@@ -154,6 +154,14 @@ def _scan_roots():
             roots.append(os.environ[var])
     if os.environ.get("LOCALAPPDATA"):
         roots.append(os.path.join(os.environ["LOCALAPPDATA"], "Programs"))
+    # an unzipped download sits wherever the user put it
+    home = os.path.expanduser("~")
+    roots += [os.path.join(home, d) for d in
+              ("Desktop", "Downloads", "Documents", "Applications")] + [home]
+    if sys.platform == "darwin":
+        roots.append("/Applications")
+    elif not IS_WINDOWS:
+        roots += ["/opt", os.path.join(home, ".local", "share")]
     seen, out = set(), []
     for r in roots:
         k = os.path.normcase(r)

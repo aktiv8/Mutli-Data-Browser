@@ -790,6 +790,15 @@ class Workspace:
         for key, info in externalapps.APPS.items():
             tm.add_command(label=f"Locate {info['name']}…",
                            command=lambda k=key: self.locate_external(k))
+        self.launcher_vars = {
+            key: tk.BooleanVar(value=not self.external_hidden(key))
+            for key in externalapps.APPS}
+        for key, info in externalapps.APPS.items():
+            tm.add_checkbutton(
+                label=f"Show the {info['name']} button",
+                variable=self.launcher_vars[key],
+                command=lambda k=key: self.set_external_hidden(
+                    k, not self.launcher_vars[k].get()))
         bar.add_cascade(label="Tools", menu=tm)
         viewm = tk.Menu(bar, tearoff=0)
         self.themes.register_menu(viewm)
@@ -939,6 +948,18 @@ class Workspace:
         (self.cfg.get("external_apps") or {}).pop(key, None)
         save_config(self.cfg)
         self._launchers_changed()
+
+    def external_hidden(self, key):
+        return bool((self.cfg.get("external_hidden") or {}).get(key))
+
+    def set_external_hidden(self, key, hidden):
+        """Hide or bring back the toolbar button of one program."""
+        self.cfg.setdefault("external_hidden", {})[key] = bool(hidden)
+        save_config(self.cfg)
+        var = getattr(self, "launcher_vars", {}).get(key)
+        if var is not None:
+            var.set(not hidden)
+        self.ribbon.refresh_launchers()
 
     def _launchers_changed(self):
         externalapps.forget()

@@ -437,9 +437,11 @@ def build_chapters(doc):
         "“Tick every … region (all samples)” and “Untick every … region (all "
         "samples)” act on every region of that name in every loaded file — "
         "tick all the C 1s, then untick the odd ones out, to build a report "
-        "figure. CasaXPS and KherveFitting, when installed, have a small icon "
-        "button beside About (right-click one to point at another copy; Tools "
-        "→ Open / Locate has the same)."
+        "figure. CasaXPS and KherveFitting have a small icon button beside "
+        "About. If the program is not found automatically, the first click asks "
+        "you to show where it is and remembers the answer; right-click a "
+        "button to point at another copy or hide it (Tools → Open / Locate / "
+        "Show the … button has the same)."
     )
     add_figure(doc, "The file tree with several spectra ticked and their colour swatches.")
 
