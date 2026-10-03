@@ -16,6 +16,7 @@ import functools
 import tkinter as tk
 from tkinter import ttk
 
+import externalapps
 import themes
 
 TABS = ("Home", "Analyse", "Report", "View")
@@ -187,6 +188,10 @@ class Ribbon(ttk.Frame):
         self.about.pack(side="right")
         self._track(self.about, "about", False)
         app.tooltip(self.about, "About this program.")
+        self._launchers = []            # buttons for CasaXPS / KherveFitting
+        self._launch_images = []        # PhotoImages must stay referenced
+        self._strip = strip
+        self.refresh_launchers()
 
         self.body = ttk.Frame(self, style="Ribbon.TFrame")
         self.pages = {}
@@ -199,6 +204,70 @@ class Ribbon(ttk.Frame):
         self._show()
         self.refresh_icons()
         self.refresh_state()
+
+    # -- launchers for the other programs -----------------------------------
+    def _launcher_image(self, key, path):
+        """The program's own icon at the toolbar's size, else None (the
+        drawn stand-in is used then)."""
+        try:
+            from PIL import Image, ImageTk
+        except ImportError:
+            return None
+        img = externalapps.icon_image(path)
+        if img is None:
+            return None
+        size = self.icons.size if self.icons is not None else 20
+        return ImageTk.PhotoImage(img.resize((size, size), Image.LANCZOS),
+                                  master=self)
+
+    def refresh_launchers(self):
+        """One small icon button per program that has been found, left of
+        About (so they sit on every tab and with the buttons folded away);
+        right-click one to point at a different copy."""
+        app = self.app
+        old = {b for b, _own in self._launchers}
+        self.items = [it for it in self.items if it[0] not in old]
+        for b in old:
+            b.destroy()
+        self._launchers, self._launch_images = [], []
+        anchor = self.about
+        for key, info in reversed(list(externalapps.APPS.items())):
+            # packed right to left, so CasaXPS ends up left of KherveFitting
+            path = app.external_path(key)
+            if not path:
+                continue
+            img = self._launcher_image(key, path)
+            b = ttk.Button(self._strip, style="Tool.TButton",
+                           command=lambda k=key: app.launch_external(k))
+            if img is not None:
+                self._launch_images.append(img)
+                b.configure(image=img)
+            elif self.icons is not None:
+                self._track(b, "casa" if key == "casaxps" else "kfit", False)
+            else:
+                b.configure(text=info["name"])
+            b.pack(side="right", after=anchor, padx=(0, 2))
+            b.bind("<Button-3>", lambda e, k=key: self._launcher_menu(e, k))
+            app.tooltip(b, f"{info['tip']}\n{path}")
+            self._launchers.append((b, img is not None))
+            anchor = b
+        self.refresh_icons()
+
+    def _launcher_menu(self, event, key):
+        app = self.app
+        menu = app._menu(self)
+        menu.add_command(label=f"{externalapps.APPS[key]['tip']}",
+                         command=lambda: app.launch_external(key))
+        menu.add_separator()
+        menu.add_command(label="Locate…",
+                         command=lambda: app.locate_external(key))
+        if (app.cfg.get("external_apps") or {}).get(key):
+            menu.add_command(label="Forget the saved location",
+                             command=lambda: app.forget_external(key))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
     # -- building ---------------------------------------------------------
     def _resolve(self, target):

@@ -308,6 +308,22 @@ def about(p):
     p.line([(12, 11), (12, 17)], a=True)
 
 
+@icon
+def casa(p):
+    """Stand-in for the CasaXPS launcher: a peak on a baseline."""
+    p.line([(3, 20), (21, 20)])
+    p.line([(3, 19), (8, 18.5), (10, 14), (12, 5), (14, 14), (16, 18.5),
+            (21, 19)], a=True)
+
+
+@icon
+def kfit(p):
+    """Stand-in for the KherveFitting launcher: a fitted doublet."""
+    p.line([(3, 20), (21, 20)])
+    p.line([(3, 19.5), (6, 19), (8, 13), (10, 6), (12, 13), (13, 10),
+            (15, 5), (17, 12), (19, 18.5), (21, 19.5)], a=True)
+
+
 NAMES = tuple(ICONS)
 
 

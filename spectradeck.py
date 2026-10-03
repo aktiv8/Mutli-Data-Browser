@@ -82,6 +82,7 @@ from readers import (Region, ImageBlob, TreeNode, SpectrumFile, EscapeParser,
 from readers import khervefitting_kfit
 from readers.base import canon_region_name
 import about_ui
+import externalapps
 import fonts
 import holder
 import icons
@@ -782,6 +783,13 @@ class Workspace:
                        command=self.import_casaxps_csv)
         tm.add_command(label="Rename…   (F2)", command=self.rename_selected)
         tm.add_command(label="Notes…", command=self.notes_selected)
+        tm.add_separator()
+        for key, info in externalapps.APPS.items():
+            tm.add_command(label=f"Open {info['name']}",
+                           command=lambda k=key: self.launch_external(k))
+        for key, info in externalapps.APPS.items():
+            tm.add_command(label=f"Locate {info['name']}…",
+                           command=lambda k=key: self.locate_external(k))
         bar.add_cascade(label="Tools", menu=tm)
         viewm = tk.Menu(bar, tearoff=0)
         self.themes.register_menu(viewm)
@@ -791,6 +799,8 @@ class Workspace:
         viewm.add_command(label="Untick all", command=self.untick_all)
         viewm.add_command(label="Tick matching regions everywhere",
                           command=self._tick_matching)
+        viewm.add_command(label="Untick matching regions everywhere",
+                          command=self._untick_matching)
         viewm.add_separator()
         viewm.add_command(label="Show/hide file tree",
                           command=lambda: self._toggle_pane("tree"))
@@ -893,6 +903,46 @@ class Workspace:
         r = getattr(self, "ribbon", None)
         if r is not None:
             r.refresh_state()
+
+    # -- the other programs (CasaXPS, KherveFitting) -------------------------
+    def external_path(self, key):
+        """Where program ``key`` is installed (the user's own choice first),
+        or None; see ``externalapps.find``."""
+        return externalapps.find(key, self.cfg)
+
+    def launch_external(self, key):
+        """Start CasaXPS / KherveFitting; asks where it is when not found."""
+        path = self.external_path(key) or self.locate_external(key)
+        if not path:
+            return
+        problem = externalapps.launch(path)
+        if problem:
+            messagebox.showwarning(externalapps.APPS[key]["name"],
+                                   f"{path} did not start:\n{problem}")
+
+    def locate_external(self, key):
+        """Let the user point at the program; remembered in the config."""
+        app = externalapps.APPS[key]
+        exe = "*.exe" if sys.platform == "win32" else "*"
+        path = filedialog.askopenfilename(
+            parent=self.root, title=f"Locate {app['name']}",
+            initialfile=app["exe"],
+            filetypes=[(app["name"], exe), ("All files", "*.*")])
+        if not path:
+            return None
+        self.cfg.setdefault("external_apps", {})[key] = path
+        save_config(self.cfg)
+        self._launchers_changed()
+        return path
+
+    def forget_external(self, key):
+        (self.cfg.get("external_apps") or {}).pop(key, None)
+        save_config(self.cfg)
+        self._launchers_changed()
+
+    def _launchers_changed(self):
+        externalapps.forget()
+        self.ribbon.refresh_launchers()
 
     def show_about(self):
         about_ui.AboutDialog(self.root, self)
@@ -2677,23 +2727,37 @@ class Workspace:
         self._refresh_boxes()
         self._schedule_render(reset_page=True)
 
-    def _tick_matching(self, row=None):
-        """Tick every region sharing the given row's name, in every loaded file."""
+    def _matching_ids(self, row=None):
+        """``id`` of every region sharing the given row's name, in every
+        loaded file (empty when the row is empty or spans several names)."""
         if row is None:
             sel = self.tree.selection()
             row = sel[0] if sel else self.tree.focus()
         if not row:
-            return
-        regs = self._regions_of([row])
-        keys = {normalise_name(r.name) for r in regs}
+            return set()
+        keys = {normalise_name(r.name) for r in self._regions_of([row])}
         if len(keys) != 1:
-            return
+            return set()
         key = next(iter(keys))
-        ids = {id(r) for p in self.docs for r in regions_under(p.tree)
-               if r.decodable and r.counts and normalise_name(r.name) == key}
+        return {id(r) for p in self.docs for r in regions_under(p.tree)
+                if r.decodable and r.counts and normalise_name(r.name) == key}
+
+    def _tick_matching(self, row=None):
+        """Tick every region sharing the given row's name, in every loaded file."""
+        ids = self._matching_ids(row)
         if not ids:
             return
         self.checked |= ids
+        self._refresh_boxes()
+        self._schedule_render()
+
+    def _untick_matching(self, row=None):
+        """The opposite of ``_tick_matching``: take every region sharing the
+        given row's name off the plot, in every loaded file."""
+        ids = self._matching_ids(row) & self.checked
+        if not ids:
+            return
+        self.checked -= ids
         self._refresh_boxes()
         self._schedule_render()
 
@@ -2762,6 +2826,11 @@ class Workspace:
                 menu.add_command(
                     label=f"Tick every '{match_name}' region (all samples)…",
                     command=lambda: self._tick_matching(row))
+                ticked = bool(self._matching_ids(row) & self.checked)
+                menu.add_command(
+                    label=f"Untick every '{match_name}' region (all samples)…",
+                    state="normal" if ticked else "disabled",
+                    command=lambda: self._untick_matching(row))
             menu.add_separator()
             exp = self._menu(menu)
             exp.add_command(label="CSV…",

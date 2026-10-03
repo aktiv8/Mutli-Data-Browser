@@ -104,6 +104,26 @@ class TestTickMatchingInApp(unittest.TestCase):
         ws = self.ws
         ws._tick_matching("")
         self.assertEqual(ws.checked, set())
+        ws._untick_matching("")
+        self.assertEqual(ws.checked, set())
+
+    def test_untick_matching_clears_only_that_name_everywhere(self):
+        ws = self.ws
+        c1s_a = self.docs["a.vms"].regions[0]
+        c1s_b = self.docs["b.vms"].regions[0]
+        o1s_a = self.docs["a.vms"].regions[1]
+        ws.checked = {id(c1s_a), id(c1s_b), id(o1s_a)}
+
+        ws._untick_matching(self._row_for(c1s_a))
+
+        self.assertEqual(ws.checked, {id(o1s_a)})
+
+    def test_both_menus_offer_untick_matching(self):
+        import inspect
+        self.assertIn("_untick_matching",
+                      inspect.getsource(ee.Workspace._build_menu))
+        self.assertIn("_untick_matching",
+                      inspect.getsource(ee.Workspace._context_menu))
 
 
 if __name__ == "__main__":

@@ -433,7 +433,13 @@ def build_chapters(doc):
         "Space. Ticking a sample, region folder or whole file ticks everything "
         "beneath it; a partly-ticked parent shows a bar. Filter narrows the tree "
         "without losing your ticks. Right-click a row to tick or untick a whole "
-        "subtree, export from there down, or remove a file."
+        "subtree, export from there down, or remove a file. On a single region, "
+        "“Tick every … region (all samples)” and “Untick every … region (all "
+        "samples)” act on every region of that name in every loaded file — "
+        "tick all the C 1s, then untick the odd ones out, to build a report "
+        "figure. CasaXPS and KherveFitting, when installed, have a small icon "
+        "button beside About (right-click one to point at another copy; Tools "
+        "→ Open / Locate has the same)."
     )
     add_figure(doc, "The file tree with several spectra ticked and their colour swatches.")
 
