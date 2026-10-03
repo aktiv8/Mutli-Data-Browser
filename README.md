@@ -34,6 +34,7 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `snapmap.py`, `snapmap_ui.py` | SnapMap pixels (a spectrum at every pixel), the map viewer and its dialog |
 | `snapshot.py` | camera-image geometry: stage position ↔ picture pixel |
 | `exporters.py` | CSV, VAMAS and metadata (CSV/PDF) writers |
+| `nexus_export.py` | NeXus NXxps (`.nxs`) writer (h5py) |
 | `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
 | `report.py`, `pdfstyle.py` | the experiment report PDF (contents, bookmarks, section footer) and its typeface and colours |
 | `pptx_export.py` | the PowerPoint export (python-pptx): contents, dividers, quantification, figures |
@@ -217,7 +218,10 @@ skip it.
    preview lets you change panels per page, portrait/landscape and whether to
    use only the traces currently in view; **Save as…** writes exactly what you
    see. Without PyMuPDF the PDF opens in your default viewer instead.
-9. **Export** — *Ticked spectra to CSV / VAMAS* writes exactly what is ticked.
+9. **Export** — *Ticked spectra to CSV / VAMAS / NeXus* writes exactly what is ticked.
+   The NeXus file (`.nxs`, NXxps, needs the optional `h5py`) has one entry per
+   spectrum with the instrument settings, the charge correction and any CasaXPS
+   fit; fields the instrument file never recorded are left out, not guessed.
    *Regions and levels…* opens the export dialog (pre-set to your ticks) for
    picking regions or depth-profile levels. VAMAS output is CasaXPS-compatible:
    a kinetic-energy abscissa with **Intensity** and the spectrometer
@@ -382,7 +386,7 @@ untouched keeps following the data). It appears on the report cover, on a
 
 **Hand-over package** (Workbook menu → *Hand-over package (ZIP)…*) puts an
 experiment in one ZIP for a customer or collaborator: the report PDF, the
-methods, **one VAMAS and one CSV file per sample** (display names and energy
+methods, **one VAMAS and one CSV file per sample** (plus a NeXus file when h5py is installed) (display names and energy
 shifts applied), the metadata as CSV, every saved figure as a PNG, optionally
 the interactive data browser and the workbook itself, a `README.txt` listing
 it all, and `SHA256SUMS.txt` (`sha256sum -c SHA256SUMS.txt` checks the

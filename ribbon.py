@@ -43,10 +43,11 @@ PAGES = {
         ("v", "Export", "export", [
             ("Ticked spectra to CSV…", ("export_ticked", "csv")),
             ("Ticked spectra to VAMAS…", ("export_ticked", "vamas")),
+            ("Ticked spectra to NeXus…", ("export_ticked", "nexus")),
             ("Regions and levels…", "open_export"), None,
             ("Metadata to CSV…", "export_meta_csv"),
             ("Metadata to PDF…", "export_meta_pdf"),
-        ], "Write spectra or metadata to CSV, VAMAS or PDF.", True),
+        ], "Write spectra or metadata to CSV, VAMAS, NeXus or PDF.", True),
         ("Image", "image", "save_plot_image",
          "Save the plot as PNG, SVG or PDF.", True),
         ("Close all", "close", "close_all",

@@ -90,6 +90,20 @@ class TestSpectra(unittest.TestCase):
         self.assertEqual(parts[0].desc, "VAMAS (ISO 14976), 2 spectra")
         self.assertIn("1 spectrum", parts[2].desc)
 
+    def test_nexus_part_is_added_on_request(self):
+        import nexus_export
+        d = doc("a.vms", [region("C 1s", "A")])
+        parts, notes = ho.spectra_parts([d], nexus=True)
+        arcs = [p.arc for p in parts]
+        if nexus_export.HAVE_H5PY:
+            self.assertEqual(notes, [])
+            self.assertEqual(arcs, ["spectra/vamas/A.vms", "spectra/csv/A.csv",
+                                    "spectra/nexus/A.nxs"])
+            self.assertTrue(parts[2].data.startswith(b"\x89HDF"))
+        else:
+            self.assertEqual(len(arcs), 2)
+            self.assertIn("h5py", notes[0])
+
     def test_vamas_is_readable_again(self):
         d = doc("a.vms", [region("C 1s", "A")])
         parts, _ = ho.spectra_parts([d])

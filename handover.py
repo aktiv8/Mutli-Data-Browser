@@ -10,6 +10,7 @@ experiment in one ZIP.
     <name>/metadata/Quant_*.txt CasaXPS's own exported quantification (optional)
     <name>/spectra/vamas/<sample>.vms   one VAMAS file per sample
     <name>/spectra/csv/<sample>.csv     the same spectra as CSV
+    <name>/spectra/nexus/<sample>.nxs   the same as NeXus NXxps (when h5py is installed)
     <name>/figures/figure_01_<name>.png the saved figures
     <name>/workbook/<name>.xpscontainer the workbook (optional)
     <name>/SHA256SUMS.txt      checksum of every file above
@@ -32,6 +33,7 @@ from dataclasses import dataclass
 
 import appinfo
 import exporters
+import nexus_export
 
 TOOL = appinfo.NAME
 
@@ -102,12 +104,16 @@ def sample_groups(docs, display=None):
     return out
 
 
-def spectra_parts(docs, display=None, prefer_csv=False):
-    """VAMAS and CSV parts, one pair per sample. Returns ``(parts, notes)``;
-    ``notes`` lists samples that could not be written."""
+def spectra_parts(docs, display=None, prefer_csv=False, nexus=False):
+    """VAMAS and CSV parts (and, with ``nexus``, a NeXus one) per sample.
+    Returns ``(parts, notes)``; ``notes`` lists samples that could not be
+    written and says once when NeXus was asked for without h5py."""
     parts, notes = [], []
-    used_v, used_c = set(), set()
+    used_v, used_c, used_n = set(), set(), set()
     multi = len(docs) > 1
+    if nexus and not nexus_export.HAVE_H5PY:
+        nexus = False
+        notes.append("NeXus files left out: the h5py package is not installed.")
     for p, sample, regions, metas in sample_groups(docs, display):
         base = safe_stem(sample, "unnamed sample")
         if multi:
@@ -128,6 +134,18 @@ def spectra_parts(docs, display=None, prefer_csv=False):
                     vdata = fh.read()
                 with open(c, "rb") as fh:
                     cdata = fh.read()
+                ndata = None
+                if nexus:                    # never costs the other two
+                    try:
+                        nx = os.path.join(tmp, "a.nxs")
+                        nexus_export.export_nexus(
+                            regions, nx, metadata=metas, instrument=inst,
+                            prefer_csv=prefer_csv)
+                        with open(nx, "rb") as fh:
+                            ndata = fh.read()
+                    except Exception as exc:
+                        notes.append(f"{sample or 'unnamed sample'} (NeXus): "
+                                     f"{exc}")
         except (ValueError, OSError) as exc:
             notes.append(f"{sample or 'unnamed sample'}: {exc}")
             continue
@@ -139,6 +157,10 @@ def spectra_parts(docs, display=None, prefer_csv=False):
         parts.append(Part(
             f"spectra/csv/{unique_name(base, used_c)}.csv",
             f"CSV, {what} (energy and intensity columns)", data=cdata))
+        if ndata is not None:
+            parts.append(Part(
+                f"spectra/nexus/{unique_name(base, used_n)}.nxs",
+                f"NeXus NXxps (HDF5), {what}", data=ndata))
     return parts, notes
 
 

@@ -133,6 +133,7 @@ from plots import (draw_holder_markers as plots_draw_markers,
 from pdf_preview import PdfPreview, HAVE_PDF, open_external
 from exporters import (export_csv, export_vamas, export_metadata_csv,
                        export_metadata_pdf)
+from nexus_export import export_nexus
 
 
 # ==========================================================================
@@ -709,6 +710,8 @@ class Workspace:
                           command=lambda: self.export_ticked("csv"))
         filem.add_command(label="Export ticked spectra → VAMAS…",
                           command=lambda: self.export_ticked("vamas"))
+        filem.add_command(label="Export ticked spectra → NeXus…",
+                          command=lambda: self.export_ticked("nexus"))
         filem.add_command(label="Export spectra (choose regions/levels)…",
                           command=self.open_export)
         filem.add_separator()
@@ -2722,6 +2725,8 @@ class Workspace:
                             command=lambda: self._write_export(regions, "csv"))
             exp.add_command(label="VAMAS…",
                             command=lambda: self._write_export(regions, "vamas"))
+            exp.add_command(label="NeXus…",
+                            command=lambda: self._write_export(regions, "nexus"))
             menu.add_cascade(label=f"Export from here down ({n})", menu=exp)
         else:
             menu.add_command(label="(no decodable spectra here)",
@@ -4321,7 +4326,7 @@ class Workspace:
         if "spectra" in sections:
             sp, sn = handover.spectra_parts(
                 self.docs, self._display_for_export,
-                prefer_csv=bool(self.csv_curves_var.get()))
+                prefer_csv=bool(self.csv_curves_var.get()), nexus=True)
             parts += sp
             notes += sn
         if "metadata" in sections:
@@ -5299,6 +5304,9 @@ class Workspace:
         if fmt == "csv":
             path = filedialog.asksaveasfilename(
                 defaultextension=".csv", filetypes=[("CSV", "*.csv")])
+        elif fmt == "nexus":
+            path = filedialog.asksaveasfilename(
+                defaultextension=".nxs", filetypes=[("NeXus", "*.nxs")])
         else:
             path = filedialog.asksaveasfilename(
                 defaultextension=".vms",
@@ -5311,6 +5319,10 @@ class Workspace:
             if fmt == "csv":
                 n = export_csv(regions, path,
                                prefer_csv=bool(self.csv_curves_var.get()))
+            elif fmt == "nexus":
+                n = export_nexus(
+                    regions, path, metadata=metas, instrument=inst,
+                    prefer_csv=bool(self.csv_curves_var.get()))
             else:
                 n = export_vamas(
                     regions, path,
@@ -5562,6 +5574,9 @@ class ExportDialog(tk.Toplevel):
                         variable=self.fmt).pack(anchor="w", padx=8, pady=2)
         ttk.Radiobutton(fmt_frame, text="VAMAS / ISO 14976 (.vms)",
                         value="vamas", variable=self.fmt).pack(anchor="w",
+                                                               padx=8, pady=2)
+        ttk.Radiobutton(fmt_frame, text="NeXus NXxps (.nxs, needs h5py)",
+                        value="nexus", variable=self.fmt).pack(anchor="w",
                                                                padx=8, pady=2)
         self.incl_tf = tk.BooleanVar(value=True)
         ttk.Checkbutton(

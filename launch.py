@@ -39,7 +39,7 @@ STAMP = os.path.join(VENV_DIR, ".requirements.sha1")
 REQUIRED = ["matplotlib>=3.5", "pillow>=9.0", "reportlab>=3.6", "pymupdf>=1.24",
             "python-pptx>=0.6.23", "python-docx>=1.1"]
 OPTIONAL = ["tkinterdnd2>=0.3",         # drag-and-drop of files onto the window
-            "h5py>=3.8"]                # KherveFitting .kfit files
+            "h5py>=3.8"]                # .kfit files, NeXus export
 
 
 def log(msg):
@@ -111,7 +111,8 @@ def pip_install():
             "proxy settings and try:  python launch.py --reinstall")
         sys.exit(res.returncode)
     optional_why = {"tkinterdnd2": "drag-and-drop of files onto the window",
-                    "h5py": "opening KherveFitting .kfit files"}
+                    "h5py": "opening KherveFitting .kfit files and "
+                            "writing NeXus .nxs files"}
     for pkg in OPTIONAL:                     # best effort: the app runs without
         res = subprocess.run([py, "-m", "pip", "install", pkg])
         if res.returncode != 0:
