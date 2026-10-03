@@ -153,6 +153,50 @@ class TestCasaLabelsAcrossMultipleSurveys(unittest.TestCase):
 
         self.assertEqual(len(found), 2, found)
 
+    def _add_high_res(self):
+        """A C 1s scan (20 eV wide) with a CasaXPS region of its own."""
+        n, hv = 41, 1486.6
+        e = [295.0 - i * 20.0 / (n - 1) for i in range(n)]
+        r = Region(name="C 1s", index=1, offset=0, energy=e,
+                   counts=[100.0] * n, decodable=True, sample="Sample A",
+                   photon_energy=hv, source="a.vms", count_units="counts/s")
+        r.fit = casafit.Fit(regions=[casafit.FitRegion(
+            name="C1s", background="none", start_ke=hv - 295.0,
+            end_ke=hv - 275.0)], components=[])
+        self.docs["c.vms"] = doc("c.vms", [r])
+        self.ws._add_file("c.vms", file_id="c", refresh=False)
+        self.ws._finish_adding()
+        self.ws.checked = {id(x) for d in self.ws.docs for x in d.regions}
+        return r
+
+    def test_high_resolution_scans_are_not_labelled_from_casa(self):
+        """Only surveys are offered to 'Label from CasaXPS regions': a C 1s
+        scan has a CasaXPS region too, but naming the line the panel shows
+        is clutter."""
+        ws = self.ws
+        try:
+            hi = self._add_high_res()
+            found = ws.predefined_regions()
+        finally:
+            self.docs.pop("c.vms", None)
+        self.assertNotIn(hi, found)
+        self.assertEqual({r.name for r in found}, {"Survey"})
+
+    def test_panel_identify_opens_the_dialog_on_that_panels_spectra(self):
+        import workbook_ui
+        ws = self.ws
+        opened = []
+        orig = workbook_ui.IdentifyDialog
+        workbook_ui.IdentifyDialog = lambda root, app, regs: opened.append(regs)
+        try:
+            key, _rs = ws._groups()[0]
+            ws.identify_panel(key)
+        finally:
+            workbook_ui.IdentifyDialog = orig
+        self.assertEqual(len(opened), 1)
+        self.assertEqual({r.name for r in opened[0]}, {"Survey"})
+        self.assertEqual(len(opened[0]), 2)       # both surveys share the panel
+
 
 if __name__ == "__main__":
     unittest.main()

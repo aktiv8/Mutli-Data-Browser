@@ -976,7 +976,7 @@ class IdentifyDialog(tk.Toplevel):
             total += n
             labelled += bool(n)
         self.hint.config(text=f"{total} region(s) labelled from CasaXPS "
-                              f"across {labelled} spectrum/spectra.")
+                              f"across {labelled} survey(s).")
         self._refresh_markers()
 
     def _refresh_markers(self):

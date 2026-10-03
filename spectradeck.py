@@ -2047,13 +2047,17 @@ class Workspace:
         return regs[:60]
 
     def predefined_regions(self):
-        """Every ticked binding-energy region carrying its own CasaXPS
+        """Every ticked binding-energy *survey* carrying its own CasaXPS
         'Regions' definitions -- used by 'Label from CasaXPS regions' so it
         covers every plotted Survey, not just whatever row is highlighted in
         the tree (that scoping is what calibration_regions()/sel_regions is
-        for; this button's job is different: label everything on screen)."""
+        for; this button's job is different: label everything on screen).
+        High-resolution scans (C 1s, O 1s ...) have CasaXPS regions of their
+        own, but a label naming the very line a panel shows is clutter, so
+        they are left out."""
         return [r for r in self._ticked_regions()
-                if viewdata.is_binding(r) and r.fit and r.fit.regions]
+                if viewdata.is_binding(r) and r.is_survey
+                and r.fit and r.fit.regions]
 
     def calibration_label(self, r):
         p = self.region_parser.get(id(r))
@@ -2214,8 +2218,8 @@ class Workspace:
             self._rsf_entries = rsf_lib.load_rsf()
         return self._rsf_entries
 
-    def open_identify(self):
-        regs = self.calibration_regions()
+    def open_identify(self, regions=None):
+        regs = self.calibration_regions() if regions is None else regions
         if not regs:
             messagebox.showinfo(
                 "Identify peaks", "Select or tick a survey (or any "
@@ -2227,6 +2231,12 @@ class Workspace:
                                    "empty.")
             return
         workbook_ui.IdentifyDialog(self.root, self, regs)
+
+    def identify_panel(self, key):
+        """Identify peaks on the spectra of one panel (its right-click menu)."""
+        regs = [r for k, rs in self._groups() if k == key for r in rs
+                if r.decodable and r.counts and viewdata.is_binding(r)]
+        self.open_identify(regs[:60])
 
     def _marker_key(self, r):
         p = self.region_parser.get(id(r))
@@ -3404,6 +3414,9 @@ class Workspace:
                          state="disabled" if series else "normal")
         root.add_cascade(label="Nearby lines", menu=pm["ident"],
                          state="disabled" if series else "normal")
+        root.add_command(label="Identify peaks…",
+                         state="disabled" if series else "normal",
+                         command=lambda: self.identify_panel(key))
         root.add_separator()
         root.add_command(label="Use the page's view",
                          state="normal" if key in self.panel_views

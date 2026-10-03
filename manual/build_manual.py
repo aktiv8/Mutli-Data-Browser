@@ -612,7 +612,8 @@ def build_chapters(doc):
     )
     h2(doc, "Identify peaks")
     para(doc,
-        "Tools → Identify peaks…: click a survey peak to list candidate "
+        "Tools → Identify peaks… (or right-click a spectrum → Identify peaks…): "
+        "click a survey peak to list candidate "
         "element lines, add the one you want as a marker, or use Auto-label to "
         "label every peak at once. Markers follow binding-energy calibrations and "
         "the kinetic-energy axis. Line positions are approximate typical values "
