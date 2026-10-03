@@ -27,6 +27,7 @@ import os
 import re
 
 import appinfo
+import nexus_settings
 import timing
 import viewdata
 
@@ -104,24 +105,33 @@ def background_function(kind):
     return None
 
 
-def start_time(r):
+def offset_text(hours):
+    """'+01:00', '-05:30', '+00:00' for a UTC offset in hours."""
+    minutes = int(round(abs(hours) * 60))
+    return f"{'-' if hours < 0 else '+'}{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _stamp(when, r, utc_offset):
+    if when is None:
+        return ""
+    text = when.strftime("%Y-%m-%dT%H:%M:%S")
+    if str(r.extra.get("tz") or "").upper() == "UTC":
+        return text + "+00:00"              # the reader knows the zone
+    if utc_offset is not None:              # the user said what it is
+        return text + offset_text(utc_offset)
+    return text                             # not known: not guessed
+
+
+def start_time(r, utc_offset=None):
     """ISO 8601 start of the acquisition: with its zone when the reader knows
-    it ('UTC' -> +00:00), otherwise the bare local time; '' when unknown."""
-    when = timing.parse_ts(r.extra.get("t_start")) or timing.parse_ts(r.date)
-    if when is None:
-        return ""
-    text = when.strftime("%Y-%m-%dT%H:%M:%S")
-    return text + "+00:00" if str(r.extra.get("tz") or "").upper() == "UTC" \
-        else text
+    it ('UTC' -> +00:00) or the user gave the offset, otherwise the bare
+    local time; '' when unknown."""
+    return _stamp(timing.parse_ts(r.extra.get("t_start"))
+                  or timing.parse_ts(r.date), r, utc_offset)
 
 
-def end_time(r):
-    when = timing.parse_ts(r.extra.get("t_end"))
-    if when is None:
-        return ""
-    text = when.strftime("%Y-%m-%dT%H:%M:%S")
-    return text + "+00:00" if str(r.extra.get("tz") or "").upper() == "UTC" \
-        else text
+def end_time(r, utc_offset=None):
+    return _stamp(timing.parse_ts(r.extra.get("t_end")), r, utc_offset)
 
 
 # -- small HDF5 helpers --------------------------------------------------------
@@ -161,22 +171,26 @@ def _nan_list(values):
 
 
 # -- one entry -------------------------------------------------------------------
-def _write_entry(entry, r, md, exp_md, inst, fit_rows):
+def _write_entry(entry, r, md, exp_md, inst, fit_rows, settings=None):
     import numpy as np
     inst = inst or {}
+    settings = nexus_settings.sanitise(settings)   # what the user entered
     binding = viewdata.is_binding(r)
     entry.attrs["NX_class"] = "NXentry"
     _put(entry, "definition", "NXxps").attrs["version"] = NXDL_VERSION
     _put(entry, "method", "XPS")
     _put(entry, "title", " ".join(x for x in (r.sample, r.name) if x))
-    _put(entry, "start_time", start_time(r))
-    _put(entry, "end_time", end_time(r))
+    off = settings.get("utc_offset_hours")
+    _put(entry, "start_time", start_time(r, off))
+    _put(entry, "end_time", end_time(r, off))
     prog = _put(entry, "program_name", appinfo.NAME)
     prog.attrs["version"] = appinfo.VERSION
-    if inst.get("Operator") or inst.get("Institution"):
-        user = _group(entry, "user", "NXuser")
-        _put(user, "name", inst.get("Operator"))
-        _put(user, "affiliation", inst.get("Institution"))
+    operator = settings.get("operator") or inst.get("Operator")
+    if operator:                  # NXuser needs a name; an affiliation alone
+        user = _group(entry, "user", "NXuser")       # stays in ``metadata``
+        _put(user, "name", operator)
+        _put(user, "affiliation",
+             settings.get("affiliation") or inst.get("Institution"))
 
     # --- instrument -------------------------------------------------------
     ins = _group(entry, "instrument", "NXinstrument")
@@ -184,13 +198,16 @@ def _write_entry(entry, r, md, exp_md, inst, fit_rows):
         dev = _group(ins, "device_information", "NXfabrication")
         _put(dev, "model", inst["Instrument"])
     ana = _group(ins, "electronanalyzer", "NXelectronanalyzer")
-    _put(ana, "work_function", number(inst.get("Work function (eV)")), "eV")
+    _put(ana, "work_function", settings.get("work_function_ev")
+         or number(inst.get("Work function (eV)")), "eV")
     col = _group(ana, "collectioncolumn", "NXcollectioncolumn")
+    _put(col, "scheme", settings.get("collection_scheme"))
     _put(col, "lens_mode", r.lens_mode)
     disp = _group(ana, "energydispersion", "NXenergydispersion")
+    _put(disp, "scheme", settings.get("dispersion_scheme"))
     _put(disp, "pass_energy", r.pass_energy, "eV")
     mode = str(r.extra.get("analyser_mode") or "")
-    _put(disp, "energy_scan_mode", next(
+    _put(disp, "energy_scan_mode", settings.get("energy_scan_mode") or next(
         (v for k, v in SCAN_MODES.items() if mode.lower().startswith(k)), None))
     _put(disp, "description", mode)
     dwell, scans = r.dwell_and_scans()
@@ -200,12 +217,26 @@ def _write_entry(entry, r, md, exp_md, inst, fit_rows):
     tf = r.transmission()
     if tf:
         ke = r.kinetic_energy
-        _nxdata(ana, "transmission_function", "relative_intensity",
-                ["kinetic_energy"],
+        # no ``@axes``: NXmpes lists its one allowed value as the nested
+        # ['kinetic_energy'], which pynxtools' validator can neither match
+        # with a 1-D list (entry invalid) nor read as a 2-D array (it
+        # crashes); without the attribute the entry validates, and the axis is
+        # still the dataset named ``kinetic_energy``.
+        _nxdata(ana, "transmission_function", "relative_intensity", None,
                 kinetic_energy=(np.asarray(ke, float), "eV"),
                 relative_intensity=(np.asarray(tf, float), None))
 
+    if settings.get("detector_type") or settings.get("amplifier_type"):
+        det = _group(ana, "electron_detector", "NXelectron_detector")
+        _put(det, "detector_type", settings.get("detector_type"))
+        _put(det, "amplifier_type", settings.get("amplifier_type"))
+    if settings.get("energy_resolution_ev"):
+        res = _group(ins, "energy_resolution", "NXresolution")
+        _put(res, "physical_quantity", "energy")
+        _put(res, "resolution", settings["energy_resolution_ev"], "eV")
+
     src = _group(ins, "source_probe", "NXsource")
+    _put(src, "type", settings.get("source_type"))
     _put(src, "associated_beam", f"{entry.name}/instrument/beam_probe")
     _put(src, "probe", "x-ray" if r.photon_energy else None)
     _put(src, "name", r.anode)
@@ -221,10 +252,9 @@ def _write_entry(entry, r, md, exp_md, inst, fit_rows):
     # --- sample -------------------------------------------------------------
     smp = _group(entry, "sample", "NXsample")
     _put(smp, "name", r.sample)
-    tilt = number(c.get("Sample tilt (°)"))
-    if tilt is not None:
-        tr = _group(smp, "transformations", "NXtransformations")
-        _put(tr, "sample_normal_polar_angle_of_tilt", tilt, "degree")
+    # The tilt is not written as NXxps's ``transformations``: that is a chain
+    # (rotation -> polar tilt -> azimuth -> coordinate system) and files record
+    # only the tilt, so a partial chain would be wrong. It stays in ``metadata``.
     if r.pos_x is not None and r.pos_y is not None:
         _put(smp, "stage_position", np.array([r.pos_x, r.pos_y], float), "mm")
     if r.etch_level is not None:
@@ -262,6 +292,8 @@ def _write_entry(entry, r, md, exp_md, inst, fit_rows):
     # --- everything else, verbatim ----------------------------------------------
     note = _group(entry, "metadata", "NXnote")
     doc = {"region": md or {}}
+    if settings:
+        doc["entered_by_user"] = settings    # not read from the instrument file
     if exp_md:
         doc["experiment"] = exp_md
     _put(note, "type", "application/json")
@@ -326,11 +358,15 @@ def _write_fit(entry, r, row, energy, counts, taken):
 
 # -- the file ---------------------------------------------------------------------
 def export_nexus(regions, path, metadata=None, experiment_metadata=None,
-                 instrument=None, include_fits=True, prefer_csv=False):
+                 instrument=None, include_fits=True, prefer_csv=False,
+                 settings=None):
     """Write the regions to ``path`` as one NeXus file, an ``NXentry`` per
     spectrum. ``metadata`` is one ``region_metadata`` dict per input region
     (as ``exporters.export_vamas`` takes), ``instrument`` the reader's
-    ``instrument`` dict (operator, instrument, work function). Only decodable
+    ``instrument`` dict (operator, instrument, work function). ``settings``
+    are the user's own instrument settings (``nexus_settings``: source type,
+    schemes, detector, resolution, work function, affiliation), written only
+    where set and winning over what the file recorded. Only decodable
     regions with counts are written; returns how many."""
     pairs = [(r, metadata[i] if metadata and i < len(metadata) else None)
              for i, r in enumerate(regions) if r.decodable and r.counts]
@@ -351,7 +387,7 @@ def export_nexus(regions, path, metadata=None, experiment_metadata=None,
                                              if x)), taken)
                 names.append(nm)
                 _write_entry(f.create_group(nm), r, md, experiment_metadata,
-                             instrument, rows)
+                             instrument, rows, settings)
             f.attrs["default"] = names[0]
             f.attrs["creator"] = appinfo.NAME
             f.attrs["creator_version"] = appinfo.VERSION

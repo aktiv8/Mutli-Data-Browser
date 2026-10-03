@@ -176,9 +176,8 @@ class TestExport(unittest.TestCase):
             self.assertEqual(text(e["user/name"]), "DJM")
             self.assertEqual(text(
                 e["instrument/device_information/model"]), "Axis Supra")
-            self.assertEqual(
-                e["sample/transformations/"
-                  "sample_normal_polar_angle_of_tilt"][()], 30.0)
+            # a tilt alone is not a valid NXxps transformation chain
+            self.assertNotIn("transformations", e["sample"])
 
     def test_nothing_unrecorded_is_invented(self):
         r = region(pass_energy=None, lens_mode="", anode="",
@@ -228,7 +227,8 @@ class TestExport(unittest.TestCase):
             t = f["Cu_foil_C_1s/instrument/electronanalyzer/"
                   "transmission_function"]
             self.assertEqual(t.attrs["signal"], "relative_intensity")
-            self.assertEqual(list(t.attrs["axes"]), ["kinetic_energy"])
+            self.assertNotIn("axes", t.attrs)    # see nexus_export: validator
+            self.assertIn("kinetic_energy", t)
             self.assertEqual(len(t["kinetic_energy"]), r.n_points)
 
     def test_all_the_metadata_is_kept_as_json(self):

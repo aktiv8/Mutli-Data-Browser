@@ -104,6 +104,14 @@ def sample_groups(docs, display=None):
     return out
 
 
+def _settings_of(parser):
+    """The user's NeXus instrument settings of a loaded file ({} when none)."""
+    ann = getattr(parser, "annotations", None)
+    if ann is None:
+        return {}
+    return ann.instrument_for(getattr(parser, "file_id", ""))
+
+
 def spectra_parts(docs, display=None, prefer_csv=False, nexus=False):
     """VAMAS and CSV parts (and, with ``nexus``, a NeXus one) per sample.
     Returns ``(parts, notes)``; ``notes`` lists samples that could not be
@@ -140,7 +148,7 @@ def spectra_parts(docs, display=None, prefer_csv=False, nexus=False):
                         nx = os.path.join(tmp, "a.nxs")
                         nexus_export.export_nexus(
                             regions, nx, metadata=metas, instrument=inst,
-                            prefer_csv=prefer_csv)
+                            prefer_csv=prefer_csv, settings=_settings_of(p))
                         with open(nx, "rb") as fh:
                             ndata = fh.read()
                     except Exception as exc:

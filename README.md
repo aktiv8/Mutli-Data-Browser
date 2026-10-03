@@ -34,7 +34,7 @@ energy* (not charge-corrected) whenever the photon energy is known.
 | `snapmap.py`, `snapmap_ui.py` | SnapMap pixels (a spectrum at every pixel), the map viewer and its dialog |
 | `snapshot.py` | camera-image geometry: stage position ↔ picture pixel |
 | `exporters.py` | CSV, VAMAS and metadata (CSV/PDF) writers |
-| `nexus_export.py` | NeXus NXxps (`.nxs`) writer (h5py) |
+| `nexus_export.py`, `nexus_settings.py`, `instrument_ui.py` | NeXus NXxps (`.nxs`) writer (h5py) and the per-file instrument settings it uses |
 | `workbook.py`, `workbook_ui.py` | the `.xpscontainer` experiment workbook and its dialogs |
 | `report.py`, `pdfstyle.py` | the experiment report PDF (contents, bookmarks, section footer) and its typeface and colours |
 | `pptx_export.py` | the PowerPoint export (python-pptx): contents, dividers, quantification, figures |
@@ -222,6 +222,9 @@ skip it.
    The NeXus file (`.nxs`, NXxps, needs the optional `h5py`) has one entry per
    spectrum with the instrument settings, the charge correction and any CasaXPS
    fit; fields the instrument file never recorded are left out, not guessed.
+   *Tools ▸ Instrument settings (NeXus)…* lets you state them once per file (source
+   type, analyser schemes, detector, work function, operator, time zone …) so the
+   `.nxs` also passes strict NXxps validation; what you enter wins over the file.
    *Regions and levels…* opens the export dialog (pre-set to your ticks) for
    picking regions or depth-profile levels. VAMAS output is CasaXPS-compatible:
    a kinetic-energy abscissa with **Intensity** and the spectrometer

@@ -122,6 +122,7 @@ import workbook_ui
 import iss_ui
 import plotstyle_ui
 import sputter_ui
+import instrument_ui
 import snapmap_ui
 from themes import (ThemeManager, THEME_NAMES, PRINT, mpl_rc, SwatchCache,
                     ramp)
@@ -771,6 +772,8 @@ class Workspace:
                        command=self.open_identify)
         tm.add_command(label="Sputter settings…",
                        command=self.open_sputter)
+        tm.add_command(label="Instrument settings (NeXus)…",
+                       command=self.open_instrument_settings)
         tm.add_command(label="ISS / REELS…", command=self.open_iss_reels)
         tm.add_command(label="SnapMap viewer…", command=self.open_snapmap)
         tm.add_command(label="Import KherveFitting peak model…",
@@ -2169,6 +2172,36 @@ class Workspace:
                 "whose spectra are levels of a depth profile.")
             return
         sputter_ui.SputterDialog(self.root, self)
+
+    # -- instrument settings (NeXus export) ------------------------------------------
+    def instrument_files(self):
+        """The loaded files whose settings can be edited:
+        ``[{label, parser, fid, recorded}]``; ``recorded`` is what the file
+        itself states of them (shown as a hint, never copied in)."""
+        out = []
+        for p in self.docs:
+            inst = getattr(p, "instrument", {}) or {}
+            out.append({
+                "label": os.path.basename(p.path or "") or "(unnamed)",
+                "parser": p, "fid": self.file_ids.get(id(p), ""),
+                "recorded": {k: inst[k] for k in ("Work function (eV)",
+                                                  "Institution", "Instrument")
+                             if inst.get(k)}})
+        return out
+
+    def instrument_get(self, item):
+        return self.ann.instrument_for(item["fid"])
+
+    def instrument_set(self, item, settings):
+        self.ann.set_instrument(item["fid"], settings)
+        self._ann_changed(relabel=False)
+
+    def open_instrument_settings(self):
+        if not self.docs:
+            messagebox.showinfo("Instrument settings",
+                                "Open a spectra file first.")
+            return
+        instrument_ui.InstrumentDialog(self.root, self)
 
     # -- element identification ------------------------------------------------
     def element_lines(self):
@@ -5322,7 +5355,9 @@ class Workspace:
             elif fmt == "nexus":
                 n = export_nexus(
                     regions, path, metadata=metas, instrument=inst,
-                    prefer_csv=bool(self.csv_curves_var.get()))
+                    prefer_csv=bool(self.csv_curves_var.get()),
+                    settings=self.ann.instrument_for(
+                        self.file_ids.get(id(parser), "")) if parser else None)
             else:
                 n = export_vamas(
                     regions, path,
